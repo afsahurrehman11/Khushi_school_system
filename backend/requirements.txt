@@ -1,6 +1,6 @@
 pydantic==1.10.12
-fastapi==0.95.2
-uvicorn==0.21.1
+fastapi==0.103.2
+uvicorn==0.23.2
 pymongo==4.15.4
 python-jose==3.3.0
 passlib==1.7.4

@@ -59,10 +59,10 @@ const FeeCategoryModal: React.FC<Props> = ({ isOpen, onClose }) => {
     setSaving(true);
     try {
       if (editing) {
-        await feeCategoriesApi.updateCategory(editing.id, { ...form, components: form.components.map(c => ({ ...c, amount: parseFloat(c.amount) })) });
+        await feeCategoriesApi.updateCategory(editing.id, { ...form, components: form.components.map(c => ({ ...c, amount: parseFloat(c.amount || '0') })) });
         InAppNotificationService.success('Category updated');
       } else {
-        await feeCategoriesApi.createCategory({ ...form, components: form.components.map(c => ({ ...c, amount: parseFloat(c.amount) })) });
+        await feeCategoriesApi.createCategory({ ...form, components: form.components.map(c => ({ ...c, amount: parseFloat(c.amount || '0') })) });
         InAppNotificationService.success('Category created');
       }
       await load();

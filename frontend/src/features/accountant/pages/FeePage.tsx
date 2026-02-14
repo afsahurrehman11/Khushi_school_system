@@ -12,6 +12,7 @@ interface ClassData {
     id: string;
     name: string;
     total_amount: number;
+    components?: { component_name: string; amount: number; }[];
   };
   student_count: number;
   fee_summary: {
@@ -93,7 +94,7 @@ const FeePage: React.FC = () => {
             studentCount = students.length;
 
             // Parallel fetch payment summaries for all students
-            const summaryPromises = students.map(student =>
+            const summaryPromises = students.map((student: any) =>
               api.get(`/api/fee-payments/student/${student.id}/summary`).catch(() => ({ status: 'unpaid' }))
             );
             const summaries = await Promise.allSettled(summaryPromises);

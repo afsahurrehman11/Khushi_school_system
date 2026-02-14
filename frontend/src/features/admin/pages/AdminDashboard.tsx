@@ -164,7 +164,7 @@ const AdminDashboard: React.FC = () => {
     };
     
     try {
-      const result = await api.post('/api/admin/users', payload);
+      await api.post('/api/admin/users', payload);
       
       setSuccess('User created successfully! ✓');
       setShowUserModal(false);

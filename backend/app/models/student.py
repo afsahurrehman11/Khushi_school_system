@@ -1,0 +1,51 @@
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import datetime
+
+# ================= Student Models =================
+
+class GuardianInfo(BaseModel):
+    parent_cnic: Optional[str] = None  # Now optional to allow flexibility
+    father_name: Optional[str] = None
+    mother_name: Optional[str] = None
+    guardian_contact: Optional[str] = None
+    guardian_email: Optional[str] = None
+    address: Optional[str] = None
+
+class ContactInfo(BaseModel):
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    emergency_contact: Optional[str] = None
+
+class StudentSchema(BaseModel):
+    student_id: str
+    full_name: str
+    gender: str
+    date_of_birth: str  # YYYY-MM-DD format
+    admission_date: str  # YYYY-MM-DD format
+    class_id: str
+    section: str
+    roll_number: str
+    subjects: List[str] = []  # Subject IDs
+    assigned_teacher_ids: List[str] = []  # Teacher user IDs
+    status: str = "active"  # active, inactive, graduated
+    guardian_info: Optional[GuardianInfo] = None
+    contact_info: Optional[ContactInfo] = None
+    academic_year: str
+
+class StudentInDB(StudentSchema):
+    id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+class StudentUpdate(BaseModel):
+    full_name: Optional[str] = None
+    gender: Optional[str] = None
+    class_id: Optional[str] = None
+    section: Optional[str] = None
+    roll_number: Optional[str] = None
+    subjects: Optional[List[str]] = None
+    assigned_teacher_ids: Optional[List[str]] = None
+    status: Optional[str] = None
+    guardian_info: Optional[GuardianInfo] = None
+    contact_info: Optional[ContactInfo] = None

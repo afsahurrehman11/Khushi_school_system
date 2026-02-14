@@ -1,0 +1,67 @@
+# =========================
+# PYTHON (Backend)
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.env
+.venv/
+venv/
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+htmlcov/
+
+# =========================
+# NODE (Frontend)
+# =========================
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+frontend/out/
+frontend/.env
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# =========================
+# ELECTRON BUILDER
+# =========================
+frontend/release/
+frontend/*.exe
+frontend/*.msi
+
+# =========================
+# IDE / EDITOR
+# =========================
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# =========================
+# OS FILES
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# LOG FILES
+# =========================
+*.log
+
+# =========================
+# GITHUB ACTION ARTIFACTS
+# =========================
+*.zip
+*.tar.gz

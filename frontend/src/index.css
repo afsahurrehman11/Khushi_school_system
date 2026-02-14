@@ -1,0 +1,47 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-secondary-200;
+  }
+  
+  body {
+    @apply bg-secondary-50 text-secondary-900 font-sans antialiased;
+  }
+}
+
+@layer components {
+  /* Custom scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-secondary-100 rounded;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-secondary-300 rounded hover:bg-secondary-400;
+  }
+
+  /* Modal fixes for Electron */
+  .modal-container {
+    position: fixed !important;
+    z-index: 9999 !important;
+  }
+  
+  .modal-backdrop {
+    position: fixed !important;
+    z-index: 9998 !important;
+  }
+}
+
+/* Ensure modals work in Electron */
+[class*="fixed"][class*="inset-0"] {
+  -webkit-app-region: no-drag;
+}
+

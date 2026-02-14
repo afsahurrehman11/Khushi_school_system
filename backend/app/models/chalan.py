@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 class ChalanLineItem(BaseModel):
@@ -30,7 +30,7 @@ class ChalanResponse(BaseModel):
     class_section: Optional[str] = None
     issue_date: Optional[str] = None
     due_date: Optional[str] = None
-    line_items: List[dict] = []
+    line_items: List[Dict[str, Any]] = []
     grand_total: float
     status: str
     created_at: Optional[datetime] = None

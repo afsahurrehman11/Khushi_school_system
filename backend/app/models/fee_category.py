@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 # ================= Fee Category Module =================
@@ -40,7 +40,7 @@ class FeeCategoryResponse(BaseModel):
     id: str
     name: str
     description: Optional[str]
-    components: List[dict]
+    components: List[Dict[str, Any]]
     total_amount: float
     is_archived: bool
     created_at: datetime

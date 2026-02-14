@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 
@@ -14,7 +14,7 @@ class ImportLogSchema(BaseModel):
     duplicate_count: int = 0
     status: str = "processing"  # processing | completed | completed_with_errors | failed
     error_report_id: Optional[str] = None  # GridFS or stored error data
-    errors: list = []  # list of {row, column, value, reason}
+    errors: List[Dict[str, Any]] = []  # list of {row, column, value, reason}
     duplicate_action: str = "skip"  # skip | update
 
 
@@ -33,5 +33,5 @@ class ImportLogResponse(BaseModel):
     failed_rows: int
     duplicate_count: int
     status: str
-    errors: list = []
+    errors: List[Dict[str, Any]] = []
     duplicate_action: str = "skip"

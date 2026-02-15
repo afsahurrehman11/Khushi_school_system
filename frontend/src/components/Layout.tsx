@@ -18,6 +18,10 @@ interface User {
 const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
   const location = useLocation();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    console.log('[LAYOUT] Current route:', location.pathname);
+  }, [location]);
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [showLogoutSummary, setShowLogoutSummary] = useState(false);

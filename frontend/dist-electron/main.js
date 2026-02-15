@@ -1,7 +1,7 @@
-import { app as e, BrowserWindow as c } from "electron";
+import { app as e, BrowserWindow as r } from "electron";
 import { fileURLToPath as p } from "node:url";
-import n from "node:path";
-import m from "node:fs";
+import o from "node:path";
+import s from "node:fs";
 import l from "node:os";
 e.disableHardwareAcceleration();
 e.commandLine.appendSwitch("disable-gpu");
@@ -13,20 +13,20 @@ e.commandLine.appendSwitch("disable-dx12");
 e.commandLine.appendSwitch("disable-accelerated-2d-canvas");
 e.commandLine.appendSwitch("disable-direct-composition");
 e.commandLine.appendSwitch("disable-gpu-memory-buffer-video-frames");
-const s = n.dirname(p(import.meta.url));
-process.env.APP_ROOT = n.join(s, "..");
+const t = o.dirname(p(import.meta.url));
+process.env.APP_ROOT = o.join(t, "..");
 try {
-  const i = n.join(l.tmpdir(), "khushi-erps-electron");
-  e.setPath("userData", i);
+  const n = o.join(l.tmpdir(), "khushi-erps-electron");
+  e.setPath("userData", n);
 } catch {
 }
-const t = process.env.VITE_DEV_SERVER_URL, u = n.join(process.env.APP_ROOT, "dist-electron"), r = n.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = t ? n.join(process.env.APP_ROOT, "public") : r;
-let o;
-const w = e.requestSingleInstanceLock();
-w || (e.quit(), process.exit(0));
+const c = e.isPackaged ? void 0 : process.env.VITE_DEV_SERVER_URL, L = o.join(process.env.APP_ROOT, "dist-electron"), m = o.join(process.env.APP_ROOT, "frontend", "dist");
+process.env.VITE_PUBLIC = c ? o.join(process.env.APP_ROOT, "public") : m;
+let i;
+const f = e.requestSingleInstanceLock();
+f || (e.quit(), process.exit(0));
 e.on("second-instance", () => {
-  o && (o.isMinimized() && o.restore(), o.focus());
+  i && (i.isMinimized() && i.restore(), i.focus());
 });
 const a = () => {
   try {
@@ -42,26 +42,32 @@ process.on("SIGINT", a);
 process.on("SIGTERM", a);
 process.on("exit", a);
 function d() {
-  o = new c({
-    icon: n.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
+  if (i = new r({
+    icon: o.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
     webPreferences: {
       // Prefer a CommonJS preload when available (preload.cjs) for maximum compatibility.
-      preload: m.existsSync(n.join(s, "preload.cjs")) ? n.join(s, "preload.cjs") : n.join(s, "preload.mjs"),
-      sandbox: !1
+      preload: s.existsSync(o.join(t, "preload.cjs")) ? o.join(t, "preload.cjs") : o.join(t, "preload.mjs"),
+      sandbox: !1,
+      webSecurity: !1
     }
-  }), o.webContents.on("did-finish-load", () => {
-    o?.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
-  }), t ? o.loadURL(t) : o.loadFile(n.join(r, "index.html"));
+  }), i.webContents.on("did-finish-load", () => {
+    i?.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+  }), console.log("app.isPackaged:", e.isPackaged), console.log("VITE_DEV_SERVER_URL:", c), !e.isPackaged && c)
+    i.loadURL(c);
+  else {
+    const n = o.join(process.resourcesPath, "app", "dist", "index.html");
+    console.log("Loading production HTML from:", n), console.log("File exists:", s.existsSync(n)), s.existsSync(n) && console.log("File content preview:", s.readFileSync(n, "utf8").substring(0, 200)), i.loadFile(n);
+  }
 }
 e.on("window-all-closed", () => {
-  process.platform !== "darwin" && (e.quit(), o = null);
+  process.platform !== "darwin" && (e.quit(), i = null);
 });
 e.on("activate", () => {
-  c.getAllWindows().length === 0 && d();
+  r.getAllWindows().length === 0 && d();
 });
 e.whenReady().then(d);
 export {
-  u as MAIN_DIST,
-  r as RENDERER_DIST,
-  t as VITE_DEV_SERVER_URL
+  L as MAIN_DIST,
+  m as RENDERER_DIST,
+  c as VITE_DEV_SERVER_URL
 };

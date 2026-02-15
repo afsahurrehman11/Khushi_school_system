@@ -2,14 +2,15 @@
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.khushi.cms",
-  "asar": true,
+  "asar": false,
   "productName": "Khushi CMS",
   "directories": {
     "output": "dist"
   },
   "files": [
-    "build",
-    "dist-electron"
+    "dist",
+    "dist-electron",
+    "public"
   ],
   "mac": {
     "target": [

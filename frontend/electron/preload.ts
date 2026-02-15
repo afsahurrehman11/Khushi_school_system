@@ -1,22 +1,22 @@
-import { ipcRenderer, contextBridge } from 'electron'
+const { ipcRenderer, contextBridge } = require('electron')
 
 // --------- Expose some API to the Renderer process ---------
 // Expose both `window.ipcRenderer` and a compatibility `window.electron`
 // (some renderer code may reference `window.electron.ipcRenderer`).
 const exposed = {
-  on(...args: Parameters<typeof ipcRenderer.on>) {
+  on(...args: any[]) {
     const [channel, listener] = args
-    return ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
+    return ipcRenderer.on(channel, (event: any, ...args: any[]) => listener(event, ...args))
   },
-  off(...args: Parameters<typeof ipcRenderer.off>) {
+  off(...args: any[]) {
     const [channel, ...omit] = args
     return ipcRenderer.off(channel, ...omit)
   },
-  send(...args: Parameters<typeof ipcRenderer.send>) {
+  send(...args: any[]) {
     const [channel, ...omit] = args
     return ipcRenderer.send(channel, ...omit)
   },
-  invoke(...args: Parameters<typeof ipcRenderer.invoke>) {
+  invoke(...args: any[]) {
     const [channel, ...omit] = args
     return ipcRenderer.invoke(channel, ...omit)
   },

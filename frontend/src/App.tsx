@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { LoginPage } from './features/auth';
@@ -38,6 +38,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ element, requiredRoles 
       const token = localStorage.getItem('token');
       
       if (!token || !userJson) {
+        console.log('No token or userJson found in localStorage');
         setIsAuthenticated(false);
         setIsValidating(false);
         return;
@@ -51,6 +52,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ element, requiredRoles 
         });
 
         if (response.ok) {
+          console.log('Auth API successful, user authenticated');
           setIsAuthenticated(true);
           
           // Check role requirements
@@ -67,12 +69,14 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ element, requiredRoles 
             setHasRequiredRole(true);
           }
         } else {
+          console.log('Auth API failed, clearing tokens');
           // Token is invalid, clear it
           localStorage.removeItem('token');
           localStorage.removeItem('user');
           setIsAuthenticated(false);
         }
       } catch (error) {
+        console.log('Auth validation network error:', error);
         // Network error or other issue, clear token to be safe
         localStorage.removeItem('token');
         localStorage.removeItem('user');
@@ -98,10 +102,12 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ element, requiredRoles 
   }
 
   if (!isAuthenticated) {
+    console.log('User not authenticated, redirecting to /login');
     return <Navigate to="/login" replace />;
   }
 
   if (requiredRoles && !hasRequiredRole) {
+    console.log('User does not have required role, redirecting to /unauthorized');
     return <Navigate to="/unauthorized" replace />;
   }
 
@@ -110,6 +116,21 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ element, requiredRoles 
 
 function App() {
   React.useEffect(() => {
+    // Backend health check
+    const checkBackend = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/health`, { method: 'GET' });
+        if (response.ok) {
+          console.log('[BACKEND] Health check passed - backend is running');
+        } else {
+          console.warn('[BACKEND] Health check failed - status:', response.status);
+        }
+      } catch (error) {
+        console.error('[BACKEND] Health check error - backend may not be running:', error);
+      }
+    };
+    checkBackend();
+
     const enableNotifications = import.meta.env.VITE_ENABLE_NOTIFICATIONS === 'true'
     if (!enableNotifications) return
     // const stop = startNotificationSSE();

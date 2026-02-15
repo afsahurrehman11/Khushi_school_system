@@ -18,10 +18,14 @@ export const apiCall = async (
     ...options.headers,
   };
 
-  return fetch(url, {
+  console.log(`[API] Making ${options.method || 'GET'} request to: ${url}`);
+  const response = await fetch(url, {
     ...options,
     headers,
   });
+  console.log(`[API] Response status: ${response.status} for ${url}`);
+
+  return response;
 };
 
 // Helper function for JSON API calls
@@ -29,9 +33,11 @@ export const apiCallJSON = async <T = any>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> => {
+  console.log(`[API JSON] Starting JSON request to: ${endpoint}`);
   const response = await apiCall(endpoint, options);
   
   if (response.status === 401) {
+    console.log('[API JSON] 401 Unauthorized - clearing token and redirecting to login');
     // Unauthorized - redirect to login
     localStorage.removeItem('token');
     window.location.href = '/login';
@@ -41,13 +47,17 @@ export const apiCallJSON = async <T = any>(
   if (!response.ok) {
     try {
       const error = await response.json();
+      console.error(`[API JSON] Request failed: ${error.detail || `Status ${response.status}`}`);
       throw new Error(error.detail || `Request failed with status ${response.status}`);
     } catch (parseErr) {
+      console.error(`[API JSON] Request failed: Status ${response.status}, parse error: ${parseErr}`);
       throw new Error(`Request failed with status ${response.status}`);
     }
   }
   
-  return response.json();
+  const data = await response.json();
+  console.log(`[API JSON] Success: Received data for ${endpoint}`);
+  return data;
 };
 
 // API methods

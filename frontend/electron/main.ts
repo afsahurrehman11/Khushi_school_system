@@ -45,7 +45,7 @@ try {
 }
 
 // 🚧 Use ['ENV_NAME'] avoid vite:define plugin - Vite@2.x
-export const VITE_DEV_SERVER_URL = !app.isPackaged ? process.env['VITE_DEV_SERVER_URL'] : undefined
+export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
 // Renderer distribution directory inside packaged app
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'frontend', 'dist')
@@ -87,7 +87,6 @@ function createWindow() {
         ? path.join(__dirname, 'preload.cjs')
         : path.join(__dirname, 'preload.mjs'),
       sandbox: false,
-      webSecurity: false,
     },
   })
 
@@ -96,21 +95,15 @@ function createWindow() {
     win?.webContents.send('main-process-message', (new Date).toLocaleString())
   })
 
-  console.log('app.isPackaged:', app.isPackaged)
-  console.log('VITE_DEV_SERVER_URL:', VITE_DEV_SERVER_URL)
-
-  if (!app.isPackaged && VITE_DEV_SERVER_URL) {
+  if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
   } else {
     // In production: load from frontend/dist inside the app resources
     // When packaged, electron-builder extracts files to: <app>/resources/app/
-    const indexPath = path.join(process.resourcesPath, 'app', 'dist', 'index.html')
+    const indexPath = path.join(__dirname, '..', 'frontend', 'dist', 'index.html')
     
     console.log('Loading production HTML from:', indexPath)
     console.log('File exists:', fs.existsSync(indexPath))
-    if (fs.existsSync(indexPath)) {
-      console.log('File content preview:', fs.readFileSync(indexPath, 'utf8').substring(0, 200))
-    }
     
     win.loadFile(indexPath)
   }

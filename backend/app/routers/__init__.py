@@ -9,6 +9,8 @@ from .accounting import router as accounting
 from .payments import router as payments
 from .reports import router as reports
 from .root import router as root
+from .root_admin import router as root_admin
+from .schools import router as schools
 from .student_import_export import router as student_import_export
 from .chalans import router as chalans
 from .fee_categories import router as fee_categories
@@ -17,5 +19,8 @@ from .notifications import router as notifications
 from .fee_payments import router as fee_payments
 from .accountant import router as accountant
 from .payment_methods import router as payment_methods
+from .cash_sessions import router as cash_sessions
+from .statistics import router as statistics
+from .attendance import router as attendance
 
-__all__ = ["auth", "users", "students", "fees", "classes", "teachers", "grades", "accounting", "payments", "reports", "root", "student_import_export", "chalans", "fee_categories", "class_fee_assignments", "notifications", "fee_payments", "accountant", "payment_methods"]
+__all__ = ["auth", "users", "students", "fees", "classes", "teachers", "grades", "accounting", "payments", "reports", "root", "root_admin", "schools", "student_import_export", "chalans", "fee_categories", "class_fee_assignments", "notifications", "fee_payments", "accountant", "payment_methods", "cash_sessions", "statistics", "attendance"]

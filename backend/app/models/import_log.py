@@ -4,6 +4,7 @@ from datetime import datetime
 
 
 class ImportLogSchema(BaseModel):
+    school_id: str  # *** NEW: School isolation ***
     file_name: str
     imported_by: str  # user email
     imported_by_name: str

@@ -1,8 +1,9 @@
 // SSE client to receive server-sent notifications and forward to InAppNotificationService
 import { InAppNotificationService } from './InAppNotificationService';
-import API_BASE_URL from '../../../config';
+import { config } from '../../../config';
+import logger from '../../../utils/logger';
 
-const API_BASE = API_BASE_URL;
+const API_BASE = config.API_BASE_URL;
 
 function handlePayload(raw: string) {
   try {
@@ -34,8 +35,7 @@ export function startNotificationSSE(): () => void {
 
       if (!resp.ok || !resp.body) {
         // fallback: try EventSource without auth (may fail on protected endpoints)
-        // eslint-disable-next-line no-console
-        console.warn('SSE stream fetch failed', resp.status);
+        logger.warn('SSE', `SSE stream fetch failed ${resp.status}`);
         return;
       }
 
@@ -62,8 +62,7 @@ export function startNotificationSSE(): () => void {
         }
       }
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn('SSE fetch error', e);
+      logger.warn('SSE', `SSE fetch error ${String(e)}`);
     }
   })();
 

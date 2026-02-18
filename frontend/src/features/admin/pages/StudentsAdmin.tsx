@@ -3,6 +3,7 @@ import Button from '../../../components/Button';
 import Modal from '../../../components/Modal';
 import AdminList from '../../../components/AdminList';
 import api from '../../../utils/api';
+import logger from '../../../utils/logger';
 import ImportModal from '../../students/components/ImportModal';
 import ExportModal from '../../students/components/ExportModal';
 import { Download, Upload } from 'lucide-react';
@@ -27,11 +28,14 @@ const StudentsAdmin: React.FC = () => {
   const [exportOpen, setExportOpen] = useState(false);
 
   const fetchStudents = async () => {
+    logger.info('STUD_ADMIN', '📋 Fetching students from backend...');
     setLoading(true);
     try {
       const data = await api.get('/api/students');
       setStudents(Array.isArray(data) ? data : []);
-    } catch (err) {
+      logger.info('STUD_ADMIN', `✅ Successfully fetched ${data.length} students`);
+    } catch (err: any) {
+      logger.error('STUD_ADMIN', `❌ Failed to fetch students: ${String(err)}`);
       setStudents([]);
     } finally {
       setLoading(false);
@@ -65,15 +69,20 @@ const StudentsAdmin: React.FC = () => {
       const payload = { name: form.name, roll: form.roll, class: form.className };
       
       if (isEditing && current?._id) {
-        await api.put(`/api/students/${current._id}`, payload);
+          logger.info('STUD_ADMIN', `🔄 Updating student: ${current._id} (${form.name})`);
+          await api.put(`/api/students/${current._id}`, payload);
+          logger.info('STUD_ADMIN', '✅ Student updated successfully');
       } else {
+        logger.info('STUD_ADMIN', `📝 Creating new student: ${form.name}`);
         await api.post('/api/students', payload);
+        logger.info('STUD_ADMIN', '✅ Student created successfully');
       }
       
       setSuccess(isEditing ? 'Student updated' : 'Student created');
       setShowModal(false);
       fetchStudents();
     } catch (err: any) {
+      logger.error('STUD_ADMIN', `❌ Failed to save student: ${String(err)}`);
       setError(err?.message || 'Failed to save');
     }
   };
@@ -82,10 +91,13 @@ const StudentsAdmin: React.FC = () => {
     if (!id) return;
     if (!confirm(`Delete student ${name ?? id}?`)) return;
     try {
+      logger.info('STUD_ADMIN', `🗑️ Deleting student: ${id} (${name || 'Unknown'})`);
       await api.delete(`/api/students/${id}`);
+      logger.info('STUD_ADMIN', '✅ Student deleted successfully');
       setSuccess('Student deleted');
       fetchStudents();
     } catch (err: any) {
+      logger.error('STUD_ADMIN', `❌ Failed to delete student: ${String(err)}`);
       setError(err?.message || 'Failed to delete');
     }
   };

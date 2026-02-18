@@ -18,6 +18,7 @@ class FeeComponentUpdate(BaseModel):
 
 class FeeCategory(BaseModel):
     """Fee category with dynamic components"""
+    school_id: str  # *** NEW: School isolation ***
     name: str
     description: Optional[str] = None
     components: List[FeeComponent] = []
@@ -62,6 +63,7 @@ class CategorySnapshotInDB(CategorySnapshot):
 
 class ClassFeeAssignment(BaseModel):
     """Assignment of fee category to a class"""
+    school_id: str  # *** NEW: School isolation ***
     class_id: str
     category_id: str
     apply_to_existing: Optional[bool] = False

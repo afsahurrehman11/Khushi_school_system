@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Loader2, UserPlus } from 'lucide-react';
 import Modal from '../../../components/Modal';
 import Button from '../../../components/Button';
+import ImageUpload from './ImageUpload';
 import { apiCallJSON, getAuthHeaders } from '../../../utils/api';
+import { config } from '../../../config';
+import logger from '../../../utils/logger';
 
 interface AddStudentModalProps {
   isOpen: boolean;
@@ -10,6 +13,7 @@ interface AddStudentModalProps {
   onStudentAdded?: () => void;
   student?: any; // optional initial student for edit
   onStudentUpdated?: () => void;
+  classesFromParent?: any[];
 }
 
 interface FormData {
@@ -44,11 +48,25 @@ const initialFormData: FormData = {
   address: '',
 };
 
-const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onStudentAdded, student, onStudentUpdated }) => {
+const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onStudentAdded, student, onStudentUpdated, classesFromParent }) => {
   const [formData, setFormData] = useState<FormData>({ ...initialFormData });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [newStudentId, setNewStudentId] = useState<string | null>(null);
+  const [showImageUpload, setShowImageUpload] = useState(false);
+  // Inline image-before-create state
+  const [inlineImageFile, setInlineImageFile] = useState<File | null>(null);
+  const [inlinePreviewUrl, setInlinePreviewUrl] = useState<string | null>(null);
+  const [inlineError, setInlineError] = useState<string | null>(null);
+  const [inlineUploading, setInlineUploading] = useState(false);
+  const [showInlineCamera, setShowInlineCamera] = useState(false);
+  const [inlineStream, setInlineStream] = useState<MediaStream | null>(null);
+  const [classesList, setClassesList] = useState<Array<any>>([]);
+  const [sectionsForClass, setSectionsForClass] = useState<string[]>([]);
+  const inlineVideoRef = useRef<HTMLVideoElement | null>(null);
+  const inlineCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const inlineFileRef = useRef<HTMLInputElement | null>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -119,7 +137,7 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
           onClose();
         }, 1200);
       } else {
-        await apiCallJSON('/api/students', {
+        const response = await apiCallJSON('/api/students', {
           method: 'POST',
           headers: {
             ...getAuthHeaders(),
@@ -128,13 +146,55 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
           body: JSON.stringify(payload),
         });
         setSuccess(true);
+        const createdId = response.id || response._id;
+        setNewStudentId(createdId);
+        setShowImageUpload(true);
+
+        // If user pre-selected or captured an image, upload it for the new student
+        if (inlineImageFile) {
+          setInlineUploading(true);
+          try {
+            const formDataImg = new FormData();
+            formDataImg.append('file', inlineImageFile);
+
+            const uploadUrl = `${config.API_BASE_URL}/api/students/${createdId}/image`;
+            logger.info('IMAGE', `[IMAGE] Uploading inline image to ${uploadUrl} studentId=${createdId}`);
+            const res = await fetch(uploadUrl, {
+              method: 'POST',
+              headers: getAuthHeaders(),
+              body: formDataImg,
+            });
+
+            logger.info('IMAGE', `[IMAGE] Upload response status: ${res.status}`);
+
+            if (!res.ok) {
+              const errJson = await res.json().catch(() => ({}));
+              logger.error('IMAGE', `[IMAGE] Upload error body: ${JSON.stringify(errJson)}`);
+              throw new Error(errJson.detail || 'Failed to upload image');
+            }
+
+            // clear inline preview on success
+            setInlineImageFile(null);
+            if (inlinePreviewUrl) {
+              URL.revokeObjectURL(inlinePreviewUrl);
+              setInlinePreviewUrl(null);
+            }
+          } catch (err: any) {
+            setInlineError(err.message || 'Image upload failed');
+          } finally {
+            setInlineUploading(false);
+          }
+        }
+
         setFormData({ ...initialFormData });
         onStudentAdded?.();
-        // Auto-close after success
+        // Only close after a delay if no image is being uploaded
         setTimeout(() => {
-          setSuccess(false);
-          onClose();
-        }, 1200);
+          if (!newStudentId) {
+            setSuccess(false);
+            onClose();
+          }
+        }, 800);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to create student');
@@ -148,6 +208,19 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
       setFormData({ ...initialFormData });
       setError(null);
       setSuccess(false);
+      // stop any running camera stream and cleanup preview
+      if (inlineVideoRef.current?.srcObject) {
+        (inlineVideoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+      }
+      if (inlineStream) {
+        inlineStream.getTracks().forEach(t => t.stop());
+      }
+      if (inlinePreviewUrl) {
+        URL.revokeObjectURL(inlinePreviewUrl);
+        setInlinePreviewUrl(null);
+      }
+      setShowInlineCamera(false);
+      setInlineStream(null);
       onClose();
     }
   };
@@ -175,10 +248,89 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
     }
   }, [student, isOpen]);
 
+  // Use classes passed from parent when available; otherwise fetch on open
+  useEffect(() => {
+    let mounted = true;
+    const fetchClasses = async () => {
+      try {
+        logger.info('CLASSES', '[Classes] fetching classes list');
+        const data = await apiCallJSON('/api/classes');
+        if (!mounted) return;
+        const list = (data || []).map((c: any) => ({ id: c.id || c._id || c._id?.toString?.() || '', class_name: c.class_name || c.name, section: c.section }));
+        setClassesList(list.filter((c: any) => c.id));
+      } catch (err: any) {
+        logger.error('CLASSES', `Failed to fetch classes: ${String(err)}`);
+      }
+    };
+
+    // If parent provided classes, use them immediately
+    if (classesFromParent && Array.isArray(classesFromParent)) {
+      setClassesList(classesFromParent || []);
+      return () => { mounted = false; };
+    }
+
+    if (isOpen) fetchClasses();
+    return () => { mounted = false; };
+  }, [isOpen, classesFromParent]);
+
+  // Derive section options based on selected class and classesList
+  useEffect(() => {
+    const clsId = formData.class_id;
+    if (!clsId) { setSectionsForClass([]); return; }
+    const cls = classesList.find(c => c.id === clsId);
+    if (!cls) { setSectionsForClass([]); return; }
+    const sameName = classesList.filter(c => c.class_name === cls.class_name).map(c => c.section).filter(Boolean);
+    const unique = Array.from(new Set(sameName));
+    setSectionsForClass(unique.length ? unique : [cls.section || 'A']);
+  }, [formData.class_id, classesList]);
+
+  useEffect(() => {
+    return () => {
+      if (inlinePreviewUrl) {
+        URL.revokeObjectURL(inlinePreviewUrl);
+      }
+      // stop inline camera if still running
+      if (inlineVideoRef.current?.srcObject) {
+        (inlineVideoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+      }
+      if (inlineStream) {
+        inlineStream.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, [inlinePreviewUrl]);
+
+  // Start inline camera and request permission, ensure video plays
+  const startInlineCamera = async () => {
+    setInlineError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      // keep stream in state and show the camera container; attach after video mounts
+      setInlineStream(stream);
+      setShowInlineCamera(true);
+    } catch (err) {
+      setInlineError('Unable to access camera. Please allow camera permission.');
+    }
+  };
+
+  // Attach stream to video element after it mounts
+  useEffect(() => {
+    if (showInlineCamera && inlineStream && inlineVideoRef.current) {
+      inlineVideoRef.current.srcObject = inlineStream;
+      const tryPlay = async () => {
+        try {
+          await inlineVideoRef.current?.play();
+        } catch (_e) {
+          // ignore play errors
+        }
+      };
+      tryPlay();
+    }
+  }, [showInlineCamera, inlineStream]);
+
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} title="Add New Student" size="lg">
+    <Modal isOpen={isOpen} onClose={handleClose} title={student ? "Edit Student" : "Add New Student"} size="lg">
       <form onSubmit={handleSubmit} className="space-y-5">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
@@ -188,6 +340,39 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
         {success && (
           <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
             ✅ Student added successfully!
+          </div>
+        )}
+
+        {/* Inline Image Upload (visible after student creation) */}
+        {newStudentId && showImageUpload && (
+          <div className="p-4 bg-secondary-50 border border-secondary-200 rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium">Upload Student Photo (Optional)</h3>
+              <div className="text-sm text-secondary-500">You can capture or upload a photo</div>
+            </div>
+            <ImageUpload
+              studentId={newStudentId}
+              onImageUploaded={() => {
+                setShowImageUpload(false);
+                setNewStudentId(null);
+                setSuccess(false);
+                onClose();
+              }}
+            />
+            <div className="flex gap-2 mt-3">
+              <Button
+                variant="ghost"
+                className="flex-1"
+                onClick={() => {
+                  setShowImageUpload(false);
+                  setNewStudentId(null);
+                  setSuccess(false);
+                  onClose();
+                }}
+              >
+                Skip
+              </Button>
+            </div>
           </div>
         )}
 
@@ -224,20 +409,33 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
         </div>
 
         {/* Row 2: Class, Section & Gender */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">
               Class <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
-              name="class_id"
-              value={formData.class_id}
-              onChange={handleChange}
-              placeholder="e.g. 10"
+            {/* Class select populated from backend classes list */}
+            <select
+              name="class_name_select"
+              value={formData.class_id || ''}
+              onChange={(e) => {
+                const selectedClassDocId = e.target.value; // this is the class document id
+                // when a class doc id is selected, set formData.class_id to that id
+                setFormData(prev => ({ ...prev, class_id: selectedClassDocId }));
+                // also update section if the class doc selected has a section
+                const cls = classesList.find(c => c.id === selectedClassDocId);
+                if (cls) {
+                  setFormData(prev => ({ ...prev, section: cls.section || 'A' }));
+                }
+              }}
               className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-all"
               required
-            />
+            >
+              <option value="">Select class</option>
+              {classesList.map(c => (
+                <option key={c.id} value={c.id}>{`${c.class_name} — ${c.section || 'A'}`}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-secondary-700 mb-1">
@@ -249,10 +447,16 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
               onChange={handleChange}
               className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-all"
             >
-              <option value="A">A</option>
-              <option value="B">B</option>
-              <option value="C">C</option>
-              <option value="D">D</option>
+              {sectionsForClass && sectionsForClass.length > 0 ? (
+                sectionsForClass.map((s) => <option key={s} value={s}>{s}</option>)
+              ) : (
+                <>
+                  <option value="A">A</option>
+                  <option value="B">B</option>
+                  <option value="C">C</option>
+                  <option value="D">D</option>
+                </>
+              )}
             </select>
           </div>
           <div>
@@ -298,6 +502,95 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
               onChange={handleChange}
               className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-all"
             />
+          </div>
+        </div>
+
+        {/* Inline Image Picker (before student creation) */}
+        <div className="mt-4">
+          <label className="block text-sm font-medium text-secondary-700 mb-1">Student Photo (optional)</label>
+          {inlineError && <div className="text-sm text-red-600 mb-2">{inlineError}</div>}
+
+          <div className="border-2 border-dashed border-secondary-300 rounded-lg p-4 flex items-start gap-4">
+            {/* Preview box - always visible */}
+            <div className="w-32 h-32 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 flex items-center justify-center" style={{ zIndex: 9999 }}>
+              {showInlineCamera ? (
+                <video ref={inlineVideoRef} muted playsInline className="w-full h-full object-cover" />
+              ) : inlinePreviewUrl ? (
+                <img src={inlinePreviewUrl} className="w-full h-full object-cover" alt="preview" />
+              ) : (
+                <div className="text-sm text-secondary-400">No photo</div>
+              )}
+            </div>
+
+            {/* Controls */}
+            <div className="flex-1">
+              <div className="mb-2">
+                {!showInlineCamera ? (
+                  <div className="flex gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => inlineFileRef.current?.click()}>Upload</Button>
+                    <Button variant="secondary" size="sm" onClick={startInlineCamera}>Capture</Button>
+                    {inlinePreviewUrl && (
+                      <Button variant="danger" size="sm" onClick={() => { setInlineImageFile(null); if (inlinePreviewUrl) { URL.revokeObjectURL(inlinePreviewUrl); setInlinePreviewUrl(null); } }}>
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Button variant="primary" className="flex-1" onClick={async () => {
+                      if (!inlineVideoRef.current || !inlineCanvasRef.current) return;
+                      const v = inlineVideoRef.current;
+                      const c = inlineCanvasRef.current;
+                      const ctx = c.getContext('2d');
+                      if (!ctx) return;
+                      c.width = v.videoWidth; c.height = v.videoHeight;
+                      ctx.drawImage(v, 0, 0);
+                      c.toBlob(async (blob) => {
+                        if (blob) {
+                          const file = new File([blob], 'capture.jpg', { type: 'image/jpeg' });
+                          setInlineImageFile(file);
+                          const url = URL.createObjectURL(file);
+                          setInlinePreviewUrl(url);
+                          if (v.srcObject) {
+                            (v.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+                          }
+                          setShowInlineCamera(false);
+                          setInlineStream(null);
+                        }
+                      }, 'image/jpeg', 0.9);
+                    }}>
+                      Capture
+                    </Button>
+                    <Button variant="secondary" className="flex-1" onClick={() => {
+                      if (inlineVideoRef.current?.srcObject) {
+                        (inlineVideoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+                      }
+                      setShowInlineCamera(false);
+                      if (inlineStream) { inlineStream.getTracks().forEach(t => t.stop()); }
+                      setInlineStream(null);
+                    }}>Cancel</Button>
+                  </div>
+                )}
+              </div>
+              <input ref={inlineFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                if (!f.type.startsWith('image/')) { setInlineError('Please select an image'); return; }
+                if (f.size > 10 * 1024 * 1024) { setInlineError('Image too large'); return; }
+                setInlineImageFile(f);
+                const url = URL.createObjectURL(f);
+                setInlinePreviewUrl(url);
+                setInlineError(null);
+                // ensure camera UI is hidden when using file upload
+                if (inlineVideoRef.current?.srcObject) {
+                  (inlineVideoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+                }
+                setShowInlineCamera(false);
+                if (inlineStream) { inlineStream.getTracks().forEach(t => t.stop()); }
+                setInlineStream(null);
+              }} />
+              <canvas ref={inlineCanvasRef} className="hidden" />
+            </div>
           </div>
         </div>
 

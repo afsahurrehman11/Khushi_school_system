@@ -4,6 +4,9 @@ from typing import Optional, List, Dict
 from bson.objectid import ObjectId
 from app.services.accountant_service import update_accountant_balance
 from app.services.payment_method_service import create_or_get_payment_method
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ================= Fee Payment Operations =================
 
@@ -26,7 +29,7 @@ def record_fee_payment(data: dict) -> Optional[dict]:
     result = db.fee_payments.insert_one(payment)
     payment["id"] = str(result.inserted_id)
     
-    # Update accountant balance
+    # Update accountant balance (legacy system)
     received_by = data.get("received_by")
     amount = data.get("amount_paid", 0)
     if received_by and amount > 0:
@@ -37,6 +40,27 @@ def record_fee_payment(data: dict) -> Optional[dict]:
             description=f"Fee payment from student {data.get('student_id')}",
             recorded_by=received_by
         )
+    
+    # Record transaction in active cash session
+    try:
+        from app.services.cash_session_service import get_or_create_session, record_transaction
+        school_id = data.get("school_id") or payment.get("school_id")
+        if received_by and school_id:
+            session = get_or_create_session(received_by, school_id)
+            record_transaction(
+                session_id=session["id"],
+                user_id=received_by,
+                school_id=school_id,
+                payment_id=payment["id"],
+                student_id=data.get("student_id"),
+                amount=amount,
+                payment_method=data.get("payment_method"),
+                transaction_reference=data.get("transaction_reference")
+            )
+            logger.info(f"[CASH SESSION] Recorded transaction in session {session['id']}")
+    except Exception as e:
+        logger.error(f"[CASH SESSION] Failed to record transaction: {str(e)}")
+        # Don't fail the payment if cash session recording fails
     
     # Persist non-cash payment method name for reuse (non-critical)
     pm = data.get("payment_method")

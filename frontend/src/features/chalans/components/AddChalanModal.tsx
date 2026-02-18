@@ -3,6 +3,7 @@ import Modal from '../../../components/Modal';
 import Button from '../../../components/Button';
 import { Loader2, Plus, X } from 'lucide-react';
 import { createChalan, updateChalan } from '../services/chalansApi';
+import logger from '../../../utils/logger';
 
 interface LineItem {
   label: string;
@@ -108,7 +109,7 @@ const AddChalanModal: React.FC<Props> = ({ isOpen, onClose, chalan, onSaved }) =
       onSaved?.();
       onClose();
     } catch (err: any) {
-      console.error('Failed to save chalan', err);
+      logger.error('CHALAN', `Failed to save chalan: ${String(err)}`);
       setError(err?.message || 'Failed to save chalan');
     } finally {
       setSaving(false);

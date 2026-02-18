@@ -1,0 +1,43 @@
+[
+  {
+    "student_id": "3",
+    "name": "Third",
+    "role": "teacher",
+    "date": "2026-02-14",
+    "time_in": "2026-02-14T13:48:31.724368",
+    "time_out": "2026-02-14T13:48:42.842635"
+  },
+  {
+    "student_id": "1",
+    "name": "First",
+    "role": "teacher",
+    "date": "2026-02-14",
+    "time_in": "2026-02-14T13:50:14.070872",
+    "time_out": "2026-02-14T13:53:17.363316"
+  },
+  {
+    "student_id": "3",
+    "name": "Third",
+    "role": "teacher",
+    "date": "2026-02-14",
+    "time_in": "2026-02-14T13:59:35.873981",
+    "time_out": "2026-02-14T14:05:18.427451"
+  },
+  {
+    "student_id": "1",
+    "name": "First",
+    "role": "teacher",
+    "date": "2026-02-14",
+    "time_in": "2026-02-14T23:20:46.934989",
+    "time_out": "2026-02-14T23:23:13.210617"
+  },
+  {
+    "student_id": "1",
+    "name": "First",
+    "role": "teacher",
+    "date": "2026-02-17",
+    "time_in": "2026-02-17T23:24:50.604004",
+    "time_out": "2026-02-17T23:48:57.059570",
+    "status": "late present"
+  }
+]

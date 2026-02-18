@@ -1,0 +1,6 @@
+emb_len=512 embeddings_shape=(0, 512)
+emb_len=512 embeddings_shape=(1, 512)
+emb_len=512 embeddings_shape=(2, 512)
+emb_len=512 embeddings_shape=(3, 512)
+emb_len=512 embeddings_shape=(4, 512)
+emb_len=512 embeddings_shape=(4, 512)

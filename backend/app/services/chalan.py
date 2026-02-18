@@ -2,15 +2,21 @@ from app.database import get_db
 from datetime import datetime
 from typing import Optional, List
 from bson.objectid import ObjectId
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ================= Category Snapshot Operations =================
 
-def create_category_snapshot(category_id: str) -> Optional[dict]:
+def create_category_snapshot(category_id: str, school_id: str = None) -> Optional[dict]:
     """Create a snapshot of fee category (for historical protection)"""
     db = get_db()
     
     try:
-        category = db.fee_categories.find_one({"_id": ObjectId(category_id)})
+        query = {"_id": ObjectId(category_id)}
+        if school_id:
+            query["school_id"] = school_id
+        category = db.fee_categories.find_one(query)
     except:
         return None
     
@@ -24,6 +30,7 @@ def create_category_snapshot(category_id: str) -> Optional[dict]:
         "category_name": category.get("name"),
         "components": category.get("components", []),
         "total_amount": total_amount,
+        "school_id": school_id,
         "snapshot_date": datetime.utcnow(),
         "created_at": datetime.utcnow(),
     }
@@ -32,11 +39,14 @@ def create_category_snapshot(category_id: str) -> Optional[dict]:
     snapshot["id"] = str(result.inserted_id)
     return snapshot
 
-def get_category_snapshot(snapshot_id: str) -> Optional[dict]:
+def get_category_snapshot(snapshot_id: str, school_id: str = None) -> Optional[dict]:
     """Get category snapshot by ID"""
     db = get_db()
     try:
-        snapshot = db.category_snapshots.find_one({"_id": ObjectId(snapshot_id)})
+        query = {"_id": ObjectId(snapshot_id)}
+        if school_id:
+            query["school_id"] = school_id
+        snapshot = db.category_snapshots.find_one(query)
         if snapshot:
             snapshot["id"] = str(snapshot["_id"])
         return snapshot
@@ -45,9 +55,13 @@ def get_category_snapshot(snapshot_id: str) -> Optional[dict]:
 
 # ================= Enhanced Challan Operations =================
 
-def create_chalan_from_category(data: dict) -> Optional[dict]:
+def create_chalan_from_category(data: dict, school_id: str = None) -> Optional[dict]:
     """Create challan from fee category (category-driven)"""
     db = get_db()
+    
+    if not school_id:
+        logger.error(f"❌ Cannot create challan without schoolId")
+        return None
     
     student_id = data.get("student_id")
     class_id = data.get("class_id")
@@ -57,31 +71,46 @@ def create_chalan_from_category(data: dict) -> Optional[dict]:
     
     # Get category and create snapshot
     try:
-        category = db.fee_categories.find_one({"_id": ObjectId(category_id)})
+        query = {"_id": ObjectId(category_id)}
+        if school_id:
+            query["school_id"] = school_id
+        category = db.fee_categories.find_one(query)
     except:
         return None
     
     if not category:
         return None
     
-    snapshot = create_category_snapshot(category_id)
+    snapshot = create_category_snapshot(category_id, school_id)
     if not snapshot:
         return None
     
     # Get student info
     try:
-        student = db.students.find_one({"_id": ObjectId(student_id)})
+        query = {"_id": ObjectId(student_id)}
+        if school_id:
+            query["school_id"] = school_id
+        student = db.students.find_one(query)
     except:
-        student = db.students.find_one({"student_id": student_id})
+        query = {"student_id": student_id}
+        if school_id:
+            query["school_id"] = school_id
+        student = db.students.find_one(query)
     
     if not student:
         return None
     
     # Get class info
     try:
-        cls = db.classes.find_one({"_id": ObjectId(class_id)})
+        query = {"_id": ObjectId(class_id)}
+        if school_id:
+            query["school_id"] = school_id
+        cls = db.classes.find_one(query)
     except:
-        cls = db.classes.find_one({"class_id": class_id})
+        query = {"class_id": class_id}
+        if school_id:
+            query["school_id"] = school_id
+        cls = db.classes.find_one(query)
     
     if not cls:
         cls = {}
@@ -90,6 +119,7 @@ def create_chalan_from_category(data: dict) -> Optional[dict]:
     chalan = {
         "student_id": student_id,
         "class_id": class_id,
+        "school_id": school_id,
         "category_snapshot_id": snapshot["id"],
         "student_name": student.get("full_name") or student.get("student_name"),
         "student_roll": student.get("roll_number"),
@@ -110,9 +140,10 @@ def create_chalan_from_category(data: dict) -> Optional[dict]:
     
     result = db.student_challans.insert_one(chalan)
     chalan["id"] = str(result.inserted_id)
+    logger.info(f"[SCHOOL:{school_id}] ✅ Challan created for student {student_id}")
     return chalan
 
-def create_bulk_challans_from_category(class_id: str, student_ids: List[str], category_id: str, due_date: str, issue_date: Optional[str] = None) -> List[dict]:
+def create_bulk_challans_from_category(class_id: str, student_ids: List[str], category_id: str, due_date: str, issue_date: Optional[str] = None, school_id: str = None) -> List[dict]:
     """Create challans for multiple students"""
     challans = []
     for student_id in student_ids:
@@ -122,16 +153,20 @@ def create_bulk_challans_from_category(class_id: str, student_ids: List[str], ca
             "category_id": category_id,
             "due_date": due_date,
             "issue_date": issue_date,
-        })
+        }, school_id=school_id)
         if chalan:
             challans.append(chalan)
     return challans
 
 # ================= Challan Query Operations =================
 
-def create_chalan(data: dict) -> Optional[dict]:
+def create_chalan(data: dict, school_id: str = None) -> Optional[dict]:
     """Create a new chalan (legacy method)"""
     db = get_db()
+    
+    if not school_id:
+        logger.error(f"❌ Cannot create challan without schoolId")
+        return None
     
     # Calculate grand total from line items
     line_items = data.get('line_items', [])
@@ -143,6 +178,7 @@ def create_chalan(data: dict) -> Optional[dict]:
         "student_name": data.get('student_name'),
         "father_name": data.get('father_name'),
         "class_section": data.get('class_section'),
+        "school_id": school_id,
         "issue_date": data.get('issue_date'),
         "due_date": data.get('due_date'),
         "line_items": line_items,
@@ -155,23 +191,33 @@ def create_chalan(data: dict) -> Optional[dict]:
     result = db.chalans.insert_one(chalan)
     chalan["_id"] = str(result.inserted_id)
     chalan["id"] = str(result.inserted_id)
+    logger.info(f"[SCHOOL:{school_id}] ✅ Challan {chalan['id']} created")
     return chalan
 
-def get_all_challans() -> List[dict]:
+def get_all_challans(school_id: str = None) -> List[dict]:
     """Get all chalans"""
     db = get_db()
-    challans = list(db.student_challans.find().sort("created_at", -1))
+    query = {}
+    if school_id:
+        query["school_id"] = school_id
+        logger.info(f"[SCHOOL:{school_id}] Fetching challans")
+    challans = list(db.student_challans.find(query).sort("created_at", -1))
     
     for chalan in challans:
         chalan["id"] = str(chalan["_id"])
     
+    if school_id:
+        logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(challans)} challans")
     return challans
 
-def get_chalan_by_id(chalan_id: str) -> Optional[dict]:
+def get_chalan_by_id(chalan_id: str, school_id: str = None) -> Optional[dict]:
     """Get chalan by ID"""
     db = get_db()
     try:
-        chalan = db.student_challans.find_one({"_id": ObjectId(chalan_id)})
+        query = {"_id": ObjectId(chalan_id)}
+        if school_id:
+            query["school_id"] = school_id
+        chalan = db.student_challans.find_one(query)
         if not chalan:
             return None
         
@@ -180,7 +226,7 @@ def get_chalan_by_id(chalan_id: str) -> Optional[dict]:
     except:
         return None
 
-def update_chalan(chalan_id: str, data: dict) -> Optional[dict]:
+def update_chalan(chalan_id: str, data: dict, school_id: str = None) -> Optional[dict]:
     """Update an existing chalan"""
     db = get_db()
     try:
@@ -198,17 +244,23 @@ def update_chalan(chalan_id: str, data: dict) -> Optional[dict]:
         update['notes'] = data['notes']
     
     if not update:
-        return get_chalan_by_id(chalan_id)
+        return get_chalan_by_id(chalan_id, school_id)
     
     update['updated_at'] = datetime.utcnow()
     
-    result = db.student_challans.update_one({'_id': oid}, {'$set': update})
+    query = {'_id': oid}
+    if school_id:
+        query['school_id'] = school_id
+    result = db.student_challans.update_one(query, {'$set': update})
     if result.matched_count == 0:
+        logger.warning(f"[SCHOOL:{school_id or 'Any'}] Challan {chalan_id} not found")
         return None
     
-    return get_chalan_by_id(chalan_id)
+    if school_id:
+        logger.info(f"[SCHOOL:{school_id}] ✅ Challan {chalan_id} updated")
+    return get_chalan_by_id(chalan_id, school_id)
 
-def delete_chalan(chalan_id: str) -> bool:
+def delete_chalan(chalan_id: str, school_id: str = None) -> bool:
     """Delete a chalan"""
     db = get_db()
     try:
@@ -216,43 +268,60 @@ def delete_chalan(chalan_id: str) -> bool:
     except:
         return False
     
-    result = db.student_challans.delete_one({'_id': oid})
+    query = {'_id': oid}
+    if school_id:
+        query['school_id'] = school_id
+    result = db.student_challans.delete_one(query)
+    if school_id and result.deleted_count > 0:
+        logger.info(f"[SCHOOL:{school_id}] ✅ Challan {chalan_id} deleted")
     return result.deleted_count > 0
 
-def get_chalans_by_student(student_id: str) -> List[dict]:
+def get_chalans_by_student(student_id: str, school_id: str = None) -> List[dict]:
     """Get all chalans for a specific student"""
     db = get_db()
-    challans = list(db.student_challans.find({"student_id": student_id}).sort("created_at", -1))
+    query = {"student_id": student_id}
+    if school_id:
+        query["school_id"] = school_id
+    challans = list(db.student_challans.find(query).sort("created_at", -1))
     
     for chalan in challans:
         chalan["id"] = str(chalan["_id"])
     
     return challans
 
-def get_chalans_by_class(class_id: str) -> List[dict]:
+def get_chalans_by_class(class_id: str, school_id: str = None) -> List[dict]:
     """Get all challans for a class"""
     db = get_db()
-    challans = list(db.student_challans.find({"class_id": class_id}).sort("created_at", -1))
+    query = {"class_id": class_id}
+    if school_id:
+        query["school_id"] = school_id
+    challans = list(db.student_challans.find(query).sort("created_at", -1))
     
     for chalan in challans:
         chalan["id"] = str(chalan["_id"])
     
     return challans
 
-def get_challans_by_status(status: str) -> List[dict]:
+def get_challans_by_status(status: str, school_id: str = None) -> List[dict]:
     """Get all challans with specific status"""
     db = get_db()
-    challans = list(db.student_challans.find({"status": status}).sort("created_at", -1))
+    query = {"status": status}
+    if school_id:
+        query["school_id"] = school_id
+    challans = list(db.student_challans.find(query).sort("created_at", -1))
     
     for chalan in challans:
         chalan["id"] = str(chalan["_id"])
     
     return challans
 
-def search_challans(filters: dict) -> List[dict]:
+def search_challans(filters: dict, school_id: str = None) -> List[dict]:
     """Search challans with complex filters"""
     db = get_db()
-    challans = list(db.student_challans.find(filters).sort("created_at", -1))
+    query = filters.copy() if filters else {}
+    if school_id:
+        query["school_id"] = school_id
+    challans = list(db.student_challans.find(query).sort("created_at", -1))
     
     for chalan in challans:
         chalan["id"] = str(chalan["_id"])

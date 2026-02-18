@@ -9,6 +9,7 @@ class ChalanLineItem(BaseModel):
 
 class ChalanSchema(BaseModel):
     """Schema for creating/updating chalan"""
+    school_id: str  # *** NEW: School isolation ***
     student_id: Optional[str] = None
     admission_no: Optional[str] = None
     student_name: Optional[str] = None
@@ -39,6 +40,7 @@ class ChalanResponse(BaseModel):
 
 class ChalanCreate(BaseModel):
     """Create challan from fee category"""
+    school_id: str  # *** NEW: School isolation ***
     student_id: str
     class_id: str
     category_id: str  # Fee category to use
@@ -47,6 +49,7 @@ class ChalanCreate(BaseModel):
 
 class ChalanBulkCreate(BaseModel):
     """Create challans for multiple students"""
+    school_id: str  # *** NEW: School isolation ***
     student_ids: List[str]
     class_id: str
     category_id: str

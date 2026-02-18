@@ -4,6 +4,7 @@ import Button from '../../../components/Button';
 import ChalanCard from '../components/ChalanCard';
 import AddChalanModal from '../components/AddChalanModal';
 import { getChalans, deleteChalan } from '../services/chalansApi';
+import logger from '../../../utils/logger';
 
 const ChalanList: React.FC = () => {
   const [chalans, setChalans] = useState<any[]>([]);
@@ -15,7 +16,7 @@ const ChalanList: React.FC = () => {
       const data = await getChalans();
       setChalans(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error('Failed to load chalans', err);
+      logger.error('CHALANS', `Failed to load chalans: ${String(err)}`);
       setChalans([]);
     }
   };
@@ -31,7 +32,7 @@ const ChalanList: React.FC = () => {
       await deleteChalan(id);
       await load();
     } catch (err: any) {
-      console.error('Failed to delete chalan', err);
+      logger.error('CHALANS', `Failed to delete chalan: ${String(err)}`);
       alert('Delete failed: ' + (err?.message || err));
     }
   };

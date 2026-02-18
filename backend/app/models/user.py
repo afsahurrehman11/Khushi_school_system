@@ -18,24 +18,28 @@ class RoleInDB(RoleSchema):
     created_at: datetime
     updated_at: datetime
 
-# ================= User Models =================
+# ================= User Models (Multi-School SaaS) =================
 
 class UserSchema(BaseModel):
     email: str
     name: str
     password: str
+    school_id: Optional[str] = None  # NULL for Root, set for Admin
+    role: str  # "Root", "Admin", "Teacher", "Accountant", etc.
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[str] = None
     role: Optional[str] = None
+    is_active: Optional[bool] = None
 
 class UserInDB(BaseModel):
     id: Optional[str] = None
     email: str
     name: str
     password: str  # Plaintext for dev only
-    role: str
+    role: str  # "Root", "Admin", "Teacher", "Accountant", etc.
+    school_id: Optional[str] = None  # NULL for Root, set for Admin/Teachers
     created_at: datetime
     updated_at: datetime
     is_active: bool = True
@@ -45,8 +49,18 @@ class UserResponse(BaseModel):
     email: str
     name: str
     role: str
+    school_id: Optional[str] = None
     created_at: datetime
     is_active: bool
+
+class RootUserResponse(UserResponse):
+    """Response for Root user - can see all schools"""
+    pass
+
+class AdminUserResponse(UserResponse):
+    """Response for Admin user - linked to one school"""
+    school_id: str  # Always required for Admin
+    school_name: Optional[str] = None  # Denormalized for convenience
 
 # ================= Authentication Models =================
 

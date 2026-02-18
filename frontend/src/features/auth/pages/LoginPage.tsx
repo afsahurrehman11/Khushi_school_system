@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { LogIn } from 'lucide-react';
 import Button from '../../../components/Button';
 import { apiCall } from '../../../utils/api';
+import logger from '../../../utils/logger';
 
 interface LoginFormData {
   email: string;
@@ -27,42 +28,42 @@ const LoginPage: React.FC = () => {
     setLoading(true);
     setError('');
 
-    console.log('Starting login attempt with email:', formData.email);
+    logger.info('AUTH', `Starting login attempt with email: ${formData.email}`);
 
     try {
       const body = new URLSearchParams();
       body.append('username', formData.email);
       body.append('password', formData.password);
 
-      console.log('Sending login request to /api/token');
+      logger.info('AUTH', 'Sending login request to /api/token');
       const response = await apiCall('/api/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString(),
       });
 
-      console.log('Login API response status:', response.status);
+      logger.info('AUTH', `Login API response status: ${response.status}`);
 
       if (!response.ok) {
         throw new Error('Invalid email or password');
       }
 
       const data = await response.json();
-      console.log('Login API response data:', data);
+      logger.info('AUTH', `Login API response data: ${JSON.stringify(data)}`);
       
       // Store token and user info
       localStorage.setItem('token', data.access_token);
       localStorage.setItem('user', JSON.stringify(data.user));
-      console.log('Stored token and user in localStorage');
+      logger.info('AUTH', 'Stored token and user in localStorage');
       
       // Redirect based on role
       const role = data.user.role.toLowerCase();
-      console.log(`Login successful for role: ${role}, navigating to /dashboard/${role}`);
+      logger.info('AUTH', `Login successful for role: ${role}, navigating to /dashboard/${role}`);
       
       navigate(`/dashboard/${role}`);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Login failed';
-      console.error('Login failed:', errorMsg);
+      logger.error('AUTH', `Login failed: ${errorMsg}`);
       setError(errorMsg);
     } finally {
       setLoading(false);

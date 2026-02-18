@@ -2,11 +2,19 @@ from app.database import get_db
 from datetime import datetime
 from typing import Optional, List
 from bson.objectid import ObjectId
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-def record_payment(payment_data: dict) -> Optional[dict]:
+def record_payment(payment_data: dict, school_id: str = None) -> Optional[dict]:
     db = get_db()
 
+    if not school_id:
+        logger.error(f"❌ Cannot record payment without schoolId")
+        return None
+
+    payment_data["school_id"] = school_id
     payment_data["created_at"] = datetime.utcnow()
     payment_data["paid_at"] = payment_data.get("paid_at", datetime.utcnow())
 
@@ -17,10 +25,16 @@ def record_payment(payment_data: dict) -> Optional[dict]:
     fee_id = payment_data.get("fee_id")
     if fee_id:
         try:
-            fee = db.fees.find_one({"_id": ObjectId(fee_id)})
+            fee_query = {"_id": ObjectId(fee_id)}
+            if school_id:
+                fee_query["school_id"] = school_id
+            fee = db.fees.find_one(fee_query)
             if fee:
                 paid_sum = 0.0
-                for p in db.payments.find({"fee_id": fee_id}):
+                payment_query = {"fee_id": fee_id}
+                if school_id:
+                    payment_query["school_id"] = school_id
+                for p in db.payments.find(payment_query):
                     paid_sum += float(p.get("amount", 0))
                 amount = float(fee.get("amount", 0))
                 new_status = "partial"
@@ -30,22 +44,31 @@ def record_payment(payment_data: dict) -> Optional[dict]:
         except Exception:
             pass
 
+    logger.info(f"[SCHOOL:{school_id}] ✅ Payment recorded: {payment_data.get('_id')}")
     return payment_data
 
 
-def get_payments(filters: dict = None) -> List[dict]:
+def get_payments(filters: dict = None, school_id: str = None) -> List[dict]:
     db = get_db()
     query = filters or {}
+    if school_id:
+        query["school_id"] = school_id
+        logger.info(f"[SCHOOL:{school_id}] Fetching payments")
     payments = list(db.payments.find(query))
     for p in payments:
         p["id"] = str(p["_id"])
+    if school_id:
+        logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(payments)} payments")
     return payments
 
 
-def get_payment_by_id(payment_id: str) -> Optional[dict]:
+def get_payment_by_id(payment_id: str, school_id: str = None) -> Optional[dict]:
     db = get_db()
     try:
-        p = db.payments.find_one({"_id": ObjectId(payment_id)})
+        query = {"_id": ObjectId(payment_id)}
+        if school_id:
+            query["school_id"] = school_id
+        p = db.payments.find_one(query)
         if p:
             p["id"] = str(p["_id"])
         return p

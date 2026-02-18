@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import logger from '../utils/logger';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Users, Settings, Bell, Menu, GraduationCap, LogOut, DollarSign, TrendingUp, Filter, FileSpreadsheet } from 'lucide-react';
-import AccountantLogoutSummary from '../features/accountant/components/AccountantLogoutSummary';
+import CashVerificationModal from '../features/accountant/components/CashVerificationModal';
+import { cashSessionService, CashSession } from '../features/accountant/services/cashSessionService';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -20,19 +22,21 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    console.log('[LAYOUT] Current route:', location.pathname);
+    logger.info('LAYOUT', `Current route: ${location.pathname}`);
   }, [location]);
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
   const [user, setUser] = useState<User | null>(null);
-  const [showLogoutSummary, setShowLogoutSummary] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [currentSession, setCurrentSession] = useState<CashSession | null>(null);
+  const [loadingSession, setLoadingSession] = useState(false);
 
   useEffect(() => {
     const userJson = localStorage.getItem('user');
-    
+
     if (userJson) {
       try {
         const parsed = JSON.parse(userJson);
-        
+
         // Normalize role shape: backend may return role as a string or an object
         if (parsed.role && typeof parsed.role === 'string') {
           parsed.role = { name: parsed.role, permissions: [] };
@@ -57,24 +61,45 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     const userRole = user?.role && typeof user.role === 'object' ? user.role.name : user?.role;
-    if (userRole === 'Accountant') {
-      setShowLogoutSummary(true);
+    if (userRole === 'Accountant' || userRole === 'Admin') {
+      // Load current session for cash verification
+      setLoadingSession(true);
+      try {
+        const session = await cashSessionService.getCurrentSession();
+        if (session && session.status === 'active') {
+          setCurrentSession(session);
+          setShowLogoutModal(true);
+        } else {
+          // No active session, proceed with logout
+          onLogout();
+          navigate('/login');
+        }
+      } catch (error) {
+        logger.error('LAYOUT', `Failed to load session: ${String(error)}`);
+        // Proceed with logout anyway
+        onLogout();
+        navigate('/login');
+      } finally {
+        setLoadingSession(false);
+      }
     } else {
       onLogout();
       navigate('/login');
     }
   };
 
-  const handleVerifyLogout = () => {
-    setShowLogoutSummary(false);
+  const handleVerifiedLogout = () => {
+    setShowLogoutModal(false);
+    setCurrentSession(null);
     onLogout();
     navigate('/login');
   };
 
   const handleCancelLogout = () => {
-    setShowLogoutSummary(false);
+    setShowLogoutModal(false);
+    setCurrentSession(null);
   };
 
   const isActive = (path: string) => location.pathname === path || location.pathname.startsWith(path + '/');
@@ -95,7 +120,7 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
               <span className="text-white font-bold text-xl">K</span>
             </div>
             <div>
-              <h1 className="font-bold text-lg text-secondary-900">Kushi ERP</h1>
+              <h1 className="font-bold text-lg text-secondary-900">KHUSHI SMS</h1>
               <p className="text-xs text-secondary-500">School Management</p>
             </div>
           </div>
@@ -114,12 +139,12 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
             }
             // permission guard: if item.permission is defined, ensure user has it
             else if (item.permission) {
-                const hasPerm = !!(
-                  (typeof user?.role === 'object' && user.role.permissions?.includes(item.permission)) ||
-                  // support legacy role string (e.g., 'Admin') by granting admin access
-                  (typeof user?.role === 'object' && user.role.name?.toLowerCase() === 'admin') ||
-                  (typeof user?.role === 'string' && user.role.toLowerCase() === 'admin')
-                );
+              const hasPerm = !!(
+                (typeof user?.role === 'object' && user.role.permissions?.includes(item.permission)) ||
+                // support legacy role string (e.g., 'Admin') by granting admin access
+                (typeof user?.role === 'object' && user.role.name?.toLowerCase() === 'admin') ||
+                (typeof user?.role === 'string' && user.role.toLowerCase() === 'admin')
+              );
               if (!hasPerm) return null;
             }
             const active = isActive(item.href);
@@ -128,11 +153,10 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
                 <motion.div
                   whileHover={{ x: 4 }}
                   whileTap={{ scale: 0.98 }}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                    active
-                      ? 'bg-primary-50 text-primary-700 font-medium'
-                      : 'text-secondary-600 hover:bg-secondary-50'
-                  }`}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${active
+                    ? 'bg-primary-50 text-primary-700 font-medium'
+                    : 'text-secondary-600 hover:bg-secondary-50'
+                    }`}
                 >
                   <Icon className="w-5 h-5" />
                   <span>{item.name}</span>
@@ -145,22 +169,23 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
         {/* User Info */}
         <div className="p-4 border-t border-secondary-200 space-y-3">
           <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-secondary-50">
-              <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
-                <span className="text-primary-700 font-semibold">
-                  {user?.email?.charAt(0)?.toUpperCase()}
-                </span>
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-secondary-900">{(user?.role && (user.role as any).name) || (typeof user?.role === 'string' ? user.role : 'User')}</p>
-                <p className="text-xs text-secondary-500">{user?.email}</p>
-              </div>
+            <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
+              <span className="text-primary-700 font-semibold">
+                {user?.email?.charAt(0)?.toUpperCase()}
+              </span>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-secondary-900">{(user?.role && (user.role as any).name) || (typeof user?.role === 'string' ? user.role : 'User')}</p>
+              <p className="text-xs text-secondary-500">{user?.email}</p>
+            </div>
           </div>
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-danger-600 hover:bg-danger-50 transition-colors"
+            disabled={loadingSession}
+            className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-danger-600 hover:bg-danger-50 transition-colors disabled:opacity-50"
           >
             <LogOut className="w-4 h-4" />
-            <span className="text-sm font-medium">Logout</span>
+            <span className="text-sm font-medium">{loadingSession ? 'Loading...' : 'Logout'}</span>
           </button>
         </div>
       </motion.aside>
@@ -201,10 +226,13 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
         </main>
       </div>
 
-      {showLogoutSummary && (
-        <AccountantLogoutSummary
-          onVerify={handleVerifyLogout}
-          onCancel={handleCancelLogout}
+      {/* Cash Verification Modal */}
+      {showLogoutModal && currentSession && (
+        <CashVerificationModal
+          isOpen={showLogoutModal}
+          onClose={handleCancelLogout}
+          onVerified={handleVerifiedLogout}
+          session={currentSession}
         />
       )}
     </div>

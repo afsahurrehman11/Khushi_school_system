@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { createSubject, updateSubject } from '../services/subjectsApi';
 import { getClasses, createClass } from '../../classes/services/classesApi';
 import api from '../../../utils/api';
+import logger from '../../../utils/logger';
 
 interface Assignment { class_name?: string; section?: string; teacher_id?: string; time?: string }
 interface Props { isOpen: boolean; onClose: () => void; subject?: any; onSaved?: () => void; }
@@ -76,7 +77,7 @@ const AddSubjectModal: React.FC<Props> = ({ isOpen, onClose, subject, onSaved })
 
       onSaved?.(); onClose();
     } catch (err:any) {
-      console.error('Failed saving subject', err);
+      logger.error('SUBJECTS', `Failed saving subject: ${String(err)}`);
       setError(err?.message || JSON.stringify(err) || 'Failed');
     } finally { setSaving(false); }
   };

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Button from '../../../components/Button';
 import api from '../../../utils/api';
+import logger from '../../../utils/logger';
 
 interface Payment {
   id: string;
@@ -25,7 +26,7 @@ const PaymentsPage: React.FC = () => {
       const data = await api.get('/api/payments');
       setPayments(data);
     } catch (e) {
-      console.error(e);
+      logger.error('PAYMENTS', `Failed to fetch payments: ${String(e)}`);
     } finally { setLoading(false); }
   };
 
@@ -36,7 +37,7 @@ const PaymentsPage: React.FC = () => {
       await api.post('/api/payments', payload);
       setForm({ fee_id: '', student_id: '', amount: '', payment_mode: 'Cash', remarks: '' });
       fetchPayments();
-    } catch (err) { console.error(err); }
+    } catch (err) { logger.error('PAYMENTS', `Submit error: ${String(err)}`); }
   };
 
   return (

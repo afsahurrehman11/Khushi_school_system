@@ -11,6 +11,7 @@ import ViewToggle from '../../../components/ViewToggle';
 import TeacherCard from '../../../components/TeacherCard';
 import GroupByToggle from '../../../components/GroupByToggle';
 import { apiCallJSON, getAuthHeaders } from '../../../utils/api';
+import logger from '../../../utils/logger';
 import AddTeacherModal from '../components/AddTeacherModal';
 
 const TeacherList: React.FC = () => {
@@ -83,7 +84,7 @@ const TeacherList: React.FC = () => {
       const data = await apiCallJSON('/api/teachers', { method: 'GET', headers: { ...getAuthHeaders() } });
       setTeachers(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error('Failed to load teachers', err);
+      logger.error('TEACHERS', `Failed to load teachers: ${String(err)}`);
       setTeachers([]);
     }
   };
@@ -100,7 +101,7 @@ const TeacherList: React.FC = () => {
       loadTeachers();
       setSelectedTeacher(null);
     } catch (err) {
-      console.error('Failed to delete teacher', err);
+      logger.error('TEACHERS', `Failed to delete teacher: ${String(err)}`);
     }
   };
 

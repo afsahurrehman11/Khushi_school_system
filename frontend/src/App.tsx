@@ -1,26 +1,22 @@
 import React from 'react';
+import logger from './utils/logger';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
-import { LoginPage } from './features/auth';
 import { StudentList } from './features/students';
 import { TeacherList } from './features/teachers';
 import { SubjectList } from './features/subjects';
-import { ClassList } from './features/classes';
+import { ClassList, ClassDetails, AttendanceList, MarkAttendance } from './features/classes';
 import { ChalanList } from './features/chalans';
-import API_BASE_URL from './config';
-import { AdminDashboard, StudentsAdmin, TeachersAdmin, ClassesAdmin, SubjectsAdmin, StudentImportExport } from './features/admin';
+import { config } from './config';
 import { AccountantDashboard, FeePage, ReportsPage } from './features/accountant';
+import { AdminDashboard, StudentImportExport } from './features/admin';
 import ImportNotificationToast from './features/students/components/ImportNotificationToast';
 import NotificationToast from './components/NotificationToast';
 // import startNotificationSSE from './features/accountant/services/NotificationSSE';
-import { getAuthHeaders } from './utils/api';
-
-interface User {
-  id: string;
-  email: string;
-  role: string;
-}
+import LoginPageNew from './pages/Login';
+import RootAdminDashboard from './pages/RootAdminDashboard';
+import { authService } from './services/auth';
 
 interface ProtectedRouteProps {
   element: React.ReactNode;
@@ -34,53 +30,39 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ element, requiredRoles 
 
   React.useEffect(() => {
     const validateAuth = async () => {
-      const userJson = localStorage.getItem('user');
-      const token = localStorage.getItem('token');
+      const token = authService.getToken();
+      const user = authService.getUser();
       
-      if (!token || !userJson) {
-        console.log('No token or userJson found in localStorage');
+      if (!token || !user) {
+        logger.info('AUTH', 'No token or user found');
         setIsAuthenticated(false);
         setIsValidating(false);
         return;
       }
 
-      try {
-        // Validate token by making a quick API call
-        const response = await fetch(`${API_BASE_URL}/api/me`, {
-          method: 'GET',
-          headers: getAuthHeaders(),
-        });
-
-        if (response.ok) {
-          console.log('Auth API successful, user authenticated');
-          setIsAuthenticated(true);
-          
-          // Check role requirements
-          if (requiredRoles) {
-            const user: User = JSON.parse(userJson);
-            const roleName = typeof (user as any).role === 'string' ? (user as any).role : (user as any).role?.name;
-            
-            if (roleName && requiredRoles.includes(roleName)) {
-              setHasRequiredRole(true);
-            } else {
-              setHasRequiredRole(false);
-            }
-          } else {
-            setHasRequiredRole(true);
-          }
-        } else {
-          console.log('Auth API failed, clearing tokens');
-          // Token is invalid, clear it
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          setIsAuthenticated(false);
-        }
-      } catch (error) {
-        console.log('Auth validation network error:', error);
-        // Network error or other issue, clear token to be safe
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+      // Check if token is expired
+      if (authService.isTokenExpired()) {
+        logger.info('AUTH', 'Token expired, clearing');
+        authService.logout();
         setIsAuthenticated(false);
+        setIsValidating(false);
+        return;
+      }
+
+      logger.info('AUTH', `Token validated for ${user.email}`);
+      setIsAuthenticated(true);
+      
+      // Check role requirements
+      if (requiredRoles) {
+        const userRole = user.role;
+        if (userRole && requiredRoles.includes(userRole)) {
+          setHasRequiredRole(true);
+        } else {
+          logger.warn('AUTH', `User role "${userRole}" not in required roles: ${JSON.stringify(requiredRoles)}`);
+          setHasRequiredRole(false);
+        }
+      } else {
+        setHasRequiredRole(true);
       }
       
       setIsValidating(false);
@@ -102,12 +84,12 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ element, requiredRoles 
   }
 
   if (!isAuthenticated) {
-    console.log('User not authenticated, redirecting to /login');
+    logger.info('AUTH', 'User not authenticated, redirecting to /login');
     return <Navigate to="/login" replace />;
   }
 
   if (requiredRoles && !hasRequiredRole) {
-    console.log('User does not have required role, redirecting to /unauthorized');
+    logger.info('AUTH', 'User does not have required role, redirecting to /unauthorized');
     return <Navigate to="/unauthorized" replace />;
   }
 
@@ -118,15 +100,31 @@ function App() {
   React.useEffect(() => {
     // Backend health check
     const checkBackend = async () => {
+      const ports = [8000, 8001, 8002, 8003, 8004];
+      for (const port of ports) {
+        try {
+          const response = await fetch(`http://localhost:${port}/health`, { method: 'GET' });
+          if (response.ok) {
+            logger.info('BACKEND', `Health check passed - backend is running on port ${port}`);
+            // Update the API_BASE_URL to the correct port
+            config.API_BASE_URL = `http://localhost:${port}`;
+            return;
+          }
+        } catch (error) {
+          // Continue to next port
+        }
+      }
+      // If no local port works, try production
       try {
-        const response = await fetch(`${API_BASE_URL}/health`, { method: 'GET' });
+        const response = await fetch('https://khushi-school-system.onrender.com/health', { method: 'GET' });
         if (response.ok) {
-          console.log('[BACKEND] Health check passed - backend is running');
+          logger.info('BACKEND', 'Health check passed - backend is running on Render');
+          config.API_BASE_URL = 'https://khushi-school-system.onrender.com';
         } else {
-          console.warn('[BACKEND] Health check failed - status:', response.status);
+          logger.warn('BACKEND', 'Health check failed - no backend available');
         }
       } catch (error) {
-        console.error('[BACKEND] Health check error - backend may not be running:', error);
+        logger.error('BACKEND', `Health check error - no backend available: ${String(error)}`);
       }
     };
     checkBackend();
@@ -137,9 +135,9 @@ function App() {
     // return () => stop();
   }, []);
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    window.location.href = '/login';
+    logger.info('AUTH', 'Logging out...');
+    authService.logout();
+    window.location.href = '#/login';
   };
 
   return (
@@ -147,7 +145,19 @@ function App() {
       <Router>
         <ImportNotificationToast />
         <Routes>
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/login" element={<LoginPageNew />} />
+        <Route path="/root-admin" element={
+          <ProtectedRoute 
+            element={<RootAdminDashboard />} 
+            requiredRoles={['Root']} 
+          />
+        } />
+        <Route path="/admin" element={
+          <ProtectedRoute 
+            element={<Navigate to="/students" replace />} 
+            requiredRoles={['Admin']} 
+          />
+        } />
         <Route path="/unauthorized" element={
           <div className="min-h-screen flex items-center justify-center bg-gray-100">
             <div className="text-center">
@@ -173,30 +183,6 @@ function App() {
             <Layout onLogout={handleLogout}>
               <Routes>
                 <Route
-                  path="/dashboard/admin"
-                  element={<ProtectedRoute element={<AdminDashboard />} requiredRoles={['Admin']} />}
-                />
-                <Route
-                  path="/dashboard/admin/students"
-                  element={<ProtectedRoute element={<StudentsAdmin />} requiredRoles={['Admin']} />}
-                />
-                <Route
-                  path="/dashboard/admin/teachers"
-                  element={<ProtectedRoute element={<TeachersAdmin />} requiredRoles={['Admin']} />}
-                />
-                <Route
-                  path="/dashboard/admin/classes"
-                  element={<ProtectedRoute element={<ClassesAdmin />} requiredRoles={['Admin']} />}
-                />
-                <Route
-                  path="/dashboard/admin/subjects"
-                  element={<ProtectedRoute element={<SubjectsAdmin />} requiredRoles={['Admin']} />}
-                />
-                <Route
-                  path="/dashboard/admin/students/import-export"
-                  element={<ProtectedRoute element={<StudentImportExport />} requiredRoles={['Admin', 'Accountant', 'Teacher']} />}
-                />
-                <Route
                   path="/dashboard/accountant"
                   element={<ProtectedRoute element={<AccountantDashboard />} requiredRoles={['Accountant', 'Admin']} />}
                 />
@@ -221,6 +207,10 @@ function App() {
                   element={<ProtectedRoute element={<TeacherList />} requiredRoles={['Teacher', 'Admin']} />}
                 />
                 <Route
+                  path="/dashboard/admin"
+                  element={<ProtectedRoute element={<AdminDashboard />} requiredRoles={['Admin', 'Root']} />}
+                />
+                <Route
                   path="/students"
                   element={<ProtectedRoute element={<StudentList />} requiredRoles={['Admin', 'Teacher', 'Accountant']} />}
                 />
@@ -231,6 +221,18 @@ function App() {
                 <Route
                   path="/classes"
                   element={<ProtectedRoute element={<ClassList />} requiredRoles={['Admin', 'Teacher']} />}
+                />
+                <Route
+                  path="/classes/:classId"
+                  element={<ProtectedRoute element={<ClassDetails />} requiredRoles={['Admin', 'Teacher']} />}
+                />
+                <Route
+                  path="/classes/:classId/attendance"
+                  element={<ProtectedRoute element={<AttendanceList />} requiredRoles={['Admin', 'Teacher']} />}
+                />
+                <Route
+                  path="/classes/:classId/attendance/:date"
+                  element={<ProtectedRoute element={<MarkAttendance />} requiredRoles={['Admin', 'Teacher']} />}
                 />
                 <Route
                   path="/chalans"

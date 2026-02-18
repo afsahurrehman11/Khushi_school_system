@@ -11,6 +11,9 @@ import ClassCard from '../../../components/ClassCard';
 import ViewToggle from '../../../components/ViewToggle';
 import StudentCard from '../../../components/StudentCard';
 import AddStudentModal from '../components/AddStudentModal';
+import MissingPhotosSection from '../components/MissingPhotosSection';
+import EmbeddingControlPanel from '../components/EmbeddingControlPanel';
+import BulkImportWithImagesModal from '../components/BulkImportWithImagesModal';
 import { apiCallJSON, getAuthHeaders } from '../../../utils/api';
 import { Student } from '../studentsData';
 
@@ -26,6 +29,9 @@ const StudentList: React.FC = () => {
   const [addStudentOpen, setAddStudentOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editStudent, setEditStudent] = useState<Student | null>(null);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  // Classes for forms
+  const [classesForForm, setClassesForForm] = useState<any[]>([]);
 
   // Runtime student data
   const [students, setStudents] = useState<Student[]>([]);
@@ -208,10 +214,19 @@ const StudentList: React.FC = () => {
               <p className="text-secondary-600">Select a class to view and manage students</p>
             </div>
             <div className="flex items-center gap-3">
-              <Button variant="secondary" size="sm" onClick={() => navigate('/students/import-export')}>
-                <Upload className="w-4 h-4 mr-1" />Import / Export
+              <Button variant="secondary" size="sm" onClick={() => setBulkImportOpen(true)}>
+                <Upload className="w-4 h-4 mr-1" />Bulk Import
               </Button>
-              <Button variant="primary" onClick={() => setAddStudentOpen(true)}>
+              <Button variant="primary" onClick={async () => {
+                // Fetch classes first, then open modal so dropdowns are ready
+                try {
+                  const cls = await apiCallJSON('/api/classes');
+                  setClassesForForm((cls || []).map((c: any) => ({ id: c.id || c._id || c._id?.toString?.() || '', class_name: c.class_name || c.name, section: c.section })));
+                } catch (_e) {
+                  setClassesForForm([]);
+                }
+                setAddStudentOpen(true);
+              }}>
                 <UserPlus className="w-4 h-4 mr-2" />Add Student
               </Button>
             </div>
@@ -236,6 +251,9 @@ const StudentList: React.FC = () => {
             </motion.div>
           )}
 
+          <MissingPhotosSection />
+          <EmbeddingControlPanel />
+
           <motion.div variants={gridContainer} initial="hidden" animate="show" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {classStats.map((classInfo) => (
               <motion.div key={classInfo.fullName} variants={gridItem} whileHover={{ zIndex: 1 }}>
@@ -245,7 +263,7 @@ const StudentList: React.FC = () => {
           </motion.div>
         </div>
 
-        <AddStudentModal isOpen={addStudentOpen} onClose={() => setAddStudentOpen(false)} />
+        <AddStudentModal isOpen={addStudentOpen} onClose={() => setAddStudentOpen(false)} classesFromParent={classesForForm} />
       </div>
     );
   }
@@ -368,6 +386,16 @@ const StudentList: React.FC = () => {
       </AnimatePresence>
 
       <AddStudentModal isOpen={addStudentOpen} onClose={() => setAddStudentOpen(false)} onStudentAdded={() => loadStudents()} />
+
+      {/* Bulk import modal */}
+      <BulkImportWithImagesModal 
+        isOpen={bulkImportOpen}
+        onClose={() => setBulkImportOpen(false)}
+        onImportComplete={() => {
+          loadStudents();
+          setBulkImportOpen(false);
+        }}
+      />
 
       {/* Edit student modal */}
       <AddStudentModal isOpen={editOpen} onClose={() => { setEditOpen(false); setEditStudent(null); }} student={editStudent} onStudentUpdated={() => { loadStudents(); setEditOpen(false); setEditStudent(null); }} />

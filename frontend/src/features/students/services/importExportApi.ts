@@ -1,7 +1,7 @@
 // ===================== Student Import / Export API Service =====================
 
 import { apiCall, getAuthHeaders } from '../../../utils/api';
-import API_BASE_URL from '../../../config';
+import { config } from '../../../config';
 import type {
   ImportPreviewResponse,
   ImportConfirmResponse,
@@ -36,11 +36,13 @@ export async function downloadSampleTemplate(): Promise<void> {
  */
 export async function uploadForPreview(
   file: File,
-  duplicateAction: string = 'skip'
+  duplicateAction: string = 'skip',
+  zipFile?: File | null
 ): Promise<ImportPreviewResponse> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('duplicate_action', duplicateAction);
+  if (zipFile) formData.append('images_zip', zipFile);
 
   const response = await apiCall(`${BASE}/upload`, {
     method: 'POST',
@@ -165,7 +167,7 @@ export function createNotificationStream(
   // the standard Authorization header. For SSE we'll use a polling fallback instead.
   // We'll use a custom fetch-based SSE reader.
 
-  const url = `${API_BASE_URL}${BASE}/notifications/stream`;
+  const url = `${config.API_BASE_URL}${BASE}/notifications/stream`;
 
   // Use native EventSource with a workaround: we'll add a polyfill-like approach
   // For simplicity in Electron, we use fetch-based SSE:

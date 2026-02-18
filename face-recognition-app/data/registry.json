@@ -1,0 +1,30 @@
+[
+  {
+    "student_id": "1",
+    "name": "First",
+    "role": "teacher",
+    "image": "1.jpg"
+  },
+  {
+    "student_id": "2",
+    "name": "Second",
+    "image": "2.jpg"
+  },
+  {
+    "student_id": "3",
+    "name": "Third",
+    "image": "3.jpg",
+    "role": "teacher",
+    "hourly_rate": 15.0
+  },
+  {
+    "student_id": "4",
+    "name": "Fourth",
+    "image": "4.jpg"
+  },
+  {
+    "student_id": "5",
+    "name": "Fifth",
+    "image": "5.jpg"
+  }
+]

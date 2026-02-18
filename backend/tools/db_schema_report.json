@@ -1,0 +1,910 @@
+[
+  {
+    "collection": "students",
+    "sample_count": 29,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "student_id": [
+        "string"
+      ],
+      "full_name": [
+        "string"
+      ],
+      "gender": [
+        "string"
+      ],
+      "date_of_birth": [
+        "string"
+      ],
+      "admission_date": [
+        "string"
+      ],
+      "class_id": [
+        "string"
+      ],
+      "section": [
+        "string"
+      ],
+      "roll_number": [
+        "string"
+      ],
+      "subjects": [
+        "array",
+        "array[string]"
+      ],
+      "assigned_teacher_ids": [
+        "array",
+        "array[string]"
+      ],
+      "status": [
+        "string"
+      ],
+      "guardian_info": [
+        "object"
+      ],
+      "contact_info": [
+        "object"
+      ],
+      "academic_year": [
+        "string"
+      ],
+      "created_at": [
+        "datetime"
+      ],
+      "updated_at": [
+        "datetime"
+      ],
+      "admission_year": [
+        "int"
+      ]
+    },
+    "example_doc": {
+      "_id": "69837bebee32355d2498834d",
+      "student_id": "2021-1",
+      "full_name": "Amina Hamza",
+      "gender": "Not specified",
+      "date_of_birth": "2016-04-25",
+      "admission_date": "2021-03-13",
+      "class_id": "69837beaee32355d24988347",
+      "section": "A",
+      "roll_number": "1",
+      "subjects": [
+        "69837be8ee32355d2498833f",
+        "69837be8ee32355d24988340",
+        "69837be8ee32355d24988341",
+        "69837be9ee32355d24988342"
+      ],
+      "assigned_teacher_ids": [
+        "6983767026eb3329d3330865"
+      ],
+      "status": "active",
+      "guardian_info": {
+        "parent_cnic": "12345-123456-1",
+        "father_name": "Mr. Abbas",
+        "guardian_contact": "+92-300-6653782",
+        "address": "House 713, Street 46, Lahore"
+      },
+      "contact_info": {
+        "phone": "+92-300-5507244",
+        "email": "struden@gmail.com"
+      },
+      "academic_year": "2026-2027",
+      "created_at": "2026-02-04 17:03:39.373000",
+      "updated_at": "2026-02-15 20:15:14.778000",
+      "admission_year": 2021
+    }
+  },
+  {
+    "collection": "teachers",
+    "sample_count": 2,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "user_email": [
+        "string"
+      ],
+      "name": [
+        "string"
+      ],
+      "assigned_classes": [
+        "array",
+        "array[string]"
+      ],
+      "assigned_subjects": [
+        "array",
+        "array[string]"
+      ],
+      "created_at": [
+        "datetime"
+      ],
+      "updated_at": [
+        "datetime"
+      ],
+      "email": [
+        "null",
+        "string"
+      ],
+      "phone": [
+        "null",
+        "string"
+      ],
+      "qualification": [
+        "null",
+        "string"
+      ],
+      "cnic": [
+        "string"
+      ],
+      "branch_code": [
+        "string"
+      ]
+    },
+    "example_doc": {
+      "_id": "6983b75ccf3261d3d834202c",
+      "user_email": "m.sheikh@school.edu",
+      "name": "Mina Sheikh",
+      "assigned_classes": [
+        "69837beaee32355d24988348",
+        "69837beaee32355d24988349"
+      ],
+      "assigned_subjects": [
+        "69837be8ee32355d24988341"
+      ],
+      "created_at": "2026-02-04 21:17:16.851000",
+      "updated_at": "2026-02-10 09:55:50.037000",
+      "email": null,
+      "phone": null,
+      "qualification": "phd",
+      "cnic": "6544567"
+    }
+  },
+  {
+    "collection": "fees",
+    "sample_count": 75,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "student_id": [
+        "string"
+      ],
+      "class_id": [
+        "string"
+      ],
+      "fee_type": [
+        "string"
+      ],
+      "amount": [
+        "int"
+      ],
+      "due_date": [
+        "string"
+      ],
+      "status": [
+        "string"
+      ],
+      "generated_by": [
+        "string"
+      ],
+      "created_at": [
+        "datetime"
+      ],
+      "paid_at": [
+        "datetime",
+        "null"
+      ],
+      "payment_method": [
+        "null",
+        "string"
+      ],
+      "remarks": [
+        "null"
+      ]
+    },
+    "example_doc": {
+      "_id": "69837bf0ee32355d24988366",
+      "student_id": "STU20260001",
+      "class_id": "69837beaee32355d24988347",
+      "fee_type": "Tuition Fee",
+      "amount": 15000,
+      "due_date": "2026-02-13",
+      "status": "pending",
+      "generated_by": "6983767026eb3329d3330866",
+      "created_at": "2026-02-04 17:03:44.508000",
+      "paid_at": null,
+      "payment_method": null,
+      "remarks": null
+    }
+  },
+  {
+    "collection": "payment_methods",
+    "sample_count": 1,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "name": [
+        "string"
+      ],
+      "normalized": [
+        "string"
+      ],
+      "created_at": [
+        "datetime"
+      ]
+    },
+    "example_doc": {
+      "_id": "69917c1e82587ea873a8b2c2",
+      "name": "JC",
+      "normalized": "jc",
+      "created_at": "2026-02-15 07:56:14.959000"
+    }
+  },
+  {
+    "collection": "fee_categories",
+    "sample_count": 2,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "name": [
+        "string"
+      ],
+      "description": [
+        "string"
+      ],
+      "components": [
+        "array[object]"
+      ],
+      "is_archived": [
+        "bool"
+      ],
+      "created_by": [
+        "string"
+      ],
+      "created_at": [
+        "datetime"
+      ],
+      "updated_at": [
+        "datetime"
+      ]
+    },
+    "example_doc": {
+      "_id": "698db2fb298cd2af2b7c3b15",
+      "name": "cat 1",
+      "description": "garede 1-5",
+      "components": [
+        {
+          "component_name": "gernal",
+          "amount": 100.0
+        },
+        {
+          "component_name": "baby sitter",
+          "amount": 343.0
+        }
+      ],
+      "is_archived": false,
+      "created_by": "6989b48b7c4675ec5b5595aa",
+      "created_at": "2026-02-12 11:01:15.987000",
+      "updated_at": "2026-02-16 18:30:21.085000"
+    }
+  },
+  {
+    "collection": "class_fee_assignments",
+    "sample_count": 3,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "class_id": [
+        "string"
+      ],
+      "category_id": [
+        "string"
+      ],
+      "assigned_by": [
+        "string"
+      ],
+      "assigned_at": [
+        "datetime"
+      ],
+      "is_active": [
+        "bool"
+      ],
+      "deactivated_at": [
+        "datetime",
+        "null"
+      ],
+      "created_at": [
+        "datetime"
+      ],
+      "updated_at": [
+        "datetime"
+      ]
+    },
+    "example_doc": {
+      "_id": "698db30e298cd2af2b7c3b16",
+      "class_id": "69837beaee32355d24988347",
+      "category_id": "698db2fb298cd2af2b7c3b15",
+      "assigned_by": "6989b48b7c4675ec5b5595aa",
+      "assigned_at": "2026-02-12 11:01:34.462000",
+      "is_active": false,
+      "deactivated_at": "2026-02-12 11:15:38.201000",
+      "created_at": "2026-02-12 11:01:34.462000",
+      "updated_at": "2026-02-12 11:01:34.462000"
+    }
+  },
+  {
+    "collection": "roles",
+    "sample_count": 6,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "name": [
+        "string"
+      ],
+      "description": [
+        "string"
+      ],
+      "permissions": [
+        "array[string]"
+      ],
+      "created_at": [
+        "datetime"
+      ],
+      "updated_at": [
+        "datetime"
+      ]
+    },
+    "example_doc": {
+      "_id": "6989b4897c4675ec5b5595a4",
+      "name": "Root",
+      "description": "System Root Administrator - Full system access",
+      "permissions": [
+        "system.manage_access",
+        "system.view_overview",
+        "users.manage_all",
+        "users.view_all",
+        "roles.manage_all",
+        "roles.view_all"
+      ],
+      "created_at": "2026-02-09 10:18:49.255000",
+      "updated_at": "2026-02-09 10:18:49.256000"
+    }
+  },
+  {
+    "collection": "users",
+    "sample_count": 4,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "email": [
+        "string"
+      ],
+      "name": [
+        "string"
+      ],
+      "password": [
+        "string"
+      ],
+      "role": [
+        "string"
+      ],
+      "created_at": [
+        "datetime"
+      ],
+      "updated_at": [
+        "datetime"
+      ],
+      "is_active": [
+        "bool"
+      ]
+    },
+    "example_doc": {
+      "_id": "6989b48a7c4675ec5b5595a9",
+      "email": "root@edu",
+      "name": "System Root Administrator",
+      "password": "123",
+      "role": "Root",
+      "created_at": "2026-02-09 10:18:50.824000",
+      "updated_at": "2026-02-09 10:18:50.825000",
+      "is_active": true
+    }
+  },
+  {
+    "collection": "import_logs",
+    "sample_count": 7,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "file_name": [
+        "string"
+      ],
+      "imported_by": [
+        "string"
+      ],
+      "imported_by_name": [
+        "string"
+      ],
+      "total_rows": [
+        "int"
+      ],
+      "successful_rows": [
+        "int"
+      ],
+      "failed_rows": [
+        "int"
+      ],
+      "duplicate_count": [
+        "int"
+      ],
+      "status": [
+        "string"
+      ],
+      "errors": [
+        "array",
+        "array[object]"
+      ],
+      "duplicate_action": [
+        "string"
+      ],
+      "_clean_rows": [
+        "array"
+      ],
+      "_updatable_rows": [
+        "array",
+        "array[object]"
+      ],
+      "timestamp": [
+        "datetime"
+      ]
+    },
+    "example_doc": {
+      "_id": "6989ccded50025bf8ce16152",
+      "file_name": "students_import.xlsx",
+      "imported_by": "admin@school.edu",
+      "imported_by_name": "School Administrator",
+      "total_rows": 1,
+      "successful_rows": 1,
+      "failed_rows": 0,
+      "duplicate_count": 0,
+      "status": "completed",
+      "errors": [],
+      "duplicate_action": "skip",
+      "_clean_rows": [],
+      "_updatable_rows": [],
+      "timestamp": "2026-02-09 12:02:38.794000"
+    }
+  },
+  {
+    "collection": "school_config",
+    "sample_count": 1,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "working_days": [
+        "array[string]"
+      ],
+      "school_start_time": [
+        "string"
+      ],
+      "school_end_time": [
+        "string"
+      ],
+      "default_lecture_duration": [
+        "int"
+      ],
+      "break_after_lectures": [
+        "int"
+      ],
+      "break_duration": [
+        "int"
+      ],
+      "time_interval_granularity": [
+        "int"
+      ],
+      "created_at": [
+        "datetime"
+      ],
+      "updated_at": [
+        "datetime"
+      ]
+    },
+    "example_doc": {
+      "_id": "698c58a56e626c9addfe6f17",
+      "working_days": [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday"
+      ],
+      "school_start_time": "08:00",
+      "school_end_time": "14:00",
+      "default_lecture_duration": 45,
+      "break_after_lectures": 2,
+      "break_duration": 15,
+      "time_interval_granularity": 15,
+      "created_at": "2026-02-11 10:23:33.709000",
+      "updated_at": "2026-02-11 10:23:33.709000"
+    }
+  },
+  {
+    "collection": "subjects",
+    "sample_count": 8,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "subject_name": [
+        "string"
+      ],
+      "subject_code": [
+        "null",
+        "string"
+      ],
+      "created_at": [
+        "datetime"
+      ],
+      "updated_at": [
+        "datetime"
+      ],
+      "assigned_class": [
+        "null"
+      ],
+      "assigned_classes": [
+        "array[object]"
+      ]
+    },
+    "example_doc": {
+      "_id": "69837be8ee32355d2498833f",
+      "subject_name": "Mathematics",
+      "subject_code": "MATH101",
+      "created_at": "2026-02-04 17:03:36.437000",
+      "updated_at": "2026-02-11 17:56:40.993000",
+      "assigned_class": null,
+      "assigned_classes": [
+        {
+          "class_name": "Grade 5",
+          "section": "B",
+          "teacher_id": "6983b75ccf3261d3d834202c",
+          "time": "11am-12pm",
+          "teacher_name": "Mina Sheikh"
+        },
+        {
+          "class_name": "Grade 8",
+          "section": "A",
+          "teacher_id": "698af80dfc6ad19ddbf7a033",
+          "time": "9am-10am",
+          "teacher_name": "Hamza"
+        }
+      ]
+    }
+  },
+  {
+    "collection": "category_snapshots",
+    "sample_count": 1,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "category_id": [
+        "string"
+      ],
+      "category_name": [
+        "string"
+      ],
+      "components": [
+        "array[object]"
+      ],
+      "total_amount": [
+        "float"
+      ],
+      "snapshot_date": [
+        "datetime"
+      ],
+      "created_at": [
+        "datetime"
+      ]
+    },
+    "example_doc": {
+      "_id": "698f3533b96f1ce3ed9d4314",
+      "category_id": "698db2fb298cd2af2b7c3b15",
+      "category_name": "cat 1",
+      "components": [
+        {
+          "component_name": "gernal",
+          "amount": 100.0
+        },
+        {
+          "component_name": "baby sitter",
+          "amount": 343.0
+        }
+      ],
+      "total_amount": 443.0,
+      "snapshot_date": "2026-02-13 14:29:07.078000",
+      "created_at": "2026-02-13 14:29:07.078000"
+    }
+  },
+  {
+    "collection": "fee_payments",
+    "sample_count": 3,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "student_id": [
+        "string"
+      ],
+      "class_id": [
+        "string"
+      ],
+      "amount_paid": [
+        "float"
+      ],
+      "payment_method": [
+        "string"
+      ],
+      "transaction_reference": [
+        "null"
+      ],
+      "remarks": [
+        "null"
+      ],
+      "received_by": [
+        "string"
+      ],
+      "paid_at": [
+        "datetime"
+      ],
+      "created_at": [
+        "datetime"
+      ]
+    },
+    "example_doc": {
+      "_id": "698f5a8f07bf7ea87af6e94f",
+      "student_id": "6983b760cf3261d3d834202e",
+      "class_id": "69837beaee32355d24988347",
+      "amount_paid": 12333333.0,
+      "payment_method": "bank_transfer",
+      "transaction_reference": null,
+      "remarks": null,
+      "received_by": "6989b48b7c4675ec5b5595aa",
+      "paid_at": "2026-02-13 17:08:31.710000",
+      "created_at": "2026-02-13 17:08:31.710000"
+    }
+  },
+  {
+    "collection": "classes",
+    "sample_count": 10,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "class_name": [
+        "string"
+      ],
+      "section": [
+        "null",
+        "string"
+      ],
+      "assigned_subjects": [
+        "array",
+        "array[string]"
+      ],
+      "assigned_teachers": [
+        "array",
+        "array[string]"
+      ],
+      "created_at": [
+        "datetime"
+      ],
+      "updated_at": [
+        "datetime"
+      ],
+      "branch_code": [
+        "string"
+      ]
+    },
+    "example_doc": {
+      "_id": "69837beaee32355d24988347",
+      "class_name": "Grade 1",
+      "section": "A",
+      "assigned_subjects": [
+        "69837be8ee32355d2498833f",
+        "69837be8ee32355d24988340",
+        "69837be8ee32355d24988341",
+        "69837be9ee32355d24988342",
+        "69837be9ee32355d24988343"
+      ],
+      "assigned_teachers": [
+        "t.alam@school.edu"
+      ],
+      "created_at": "2026-02-04 17:03:38.004000",
+      "updated_at": "2026-02-04 17:03:38.004000",
+      "branch_code": "MAIN"
+    }
+  },
+  {
+    "collection": "students_backup_20260216_011512",
+    "sample_count": 27,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "student_id": [
+        "string"
+      ],
+      "full_name": [
+        "string"
+      ],
+      "gender": [
+        "string"
+      ],
+      "date_of_birth": [
+        "string"
+      ],
+      "admission_date": [
+        "string"
+      ],
+      "class_id": [
+        "string"
+      ],
+      "section": [
+        "string"
+      ],
+      "roll_number": [
+        "string"
+      ],
+      "subjects": [
+        "array",
+        "array[string]"
+      ],
+      "assigned_teacher_ids": [
+        "array",
+        "array[string]"
+      ],
+      "status": [
+        "string"
+      ],
+      "guardian_info": [
+        "object"
+      ],
+      "contact_info": [
+        "object"
+      ],
+      "academic_year": [
+        "string"
+      ],
+      "created_at": [
+        "datetime"
+      ],
+      "updated_at": [
+        "datetime"
+      ]
+    },
+    "example_doc": {
+      "_id": "69837bebee32355d2498834d",
+      "student_id": "STU20260001",
+      "full_name": "Amina Hamza",
+      "gender": "Not specified",
+      "date_of_birth": "2016-04-25",
+      "admission_date": "2021-03-13",
+      "class_id": "69837beaee32355d24988347",
+      "section": "A",
+      "roll_number": "1",
+      "subjects": [
+        "69837be8ee32355d2498833f",
+        "69837be8ee32355d24988340",
+        "69837be8ee32355d24988341",
+        "69837be9ee32355d24988342"
+      ],
+      "assigned_teacher_ids": [
+        "6983767026eb3329d3330865"
+      ],
+      "status": "active",
+      "guardian_info": {
+        "parent_cnic": "12345-123456-1",
+        "father_name": "Mr. Abbas",
+        "guardian_contact": "+92-300-6653782",
+        "address": "House 713, Street 46, Lahore"
+      },
+      "contact_info": {
+        "phone": "+92-300-5507244",
+        "email": "struden@gmail.com"
+      },
+      "academic_year": "2026-2027",
+      "created_at": "2026-02-04 17:03:39.373000",
+      "updated_at": "2026-02-10 14:11:54.831000"
+    }
+  },
+  {
+    "collection": "chalans",
+    "sample_count": 0,
+    "fields": {},
+    "example_doc": null
+  },
+  {
+    "collection": "branches",
+    "sample_count": 1,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "branch_code": [
+        "string"
+      ],
+      "name": [
+        "string"
+      ],
+      "created_at": [
+        "datetime"
+      ],
+      "updated_at": [
+        "datetime"
+      ]
+    },
+    "example_doc": {
+      "_id": "6983cb5e5ac605bda4d29cc1",
+      "branch_code": "MAIN",
+      "name": "Main Branch",
+      "created_at": "2026-02-04 22:42:38.711000",
+      "updated_at": "2026-02-04 22:42:38.711000"
+    }
+  },
+  {
+    "collection": "grades",
+    "sample_count": 3,
+    "fields": {
+      "_id": [
+        "objectId"
+      ],
+      "student_id": [
+        "string"
+      ],
+      "subject_id": [
+        "string"
+      ],
+      "subject_code": [
+        "string"
+      ],
+      "teacher_email": [
+        "string"
+      ],
+      "total_marks": [
+        "int"
+      ],
+      "obtained_marks": [
+        "int"
+      ],
+      "percentage": [
+        "float"
+      ],
+      "created_at": [
+        "datetime"
+      ],
+      "updated_at": [
+        "datetime"
+      ]
+    },
+    "example_doc": {
+      "_id": "6983b763cf3261d3d8342030",
+      "student_id": "0000-REG1001",
+      "subject_id": "69837be8ee32355d2498833f",
+      "subject_code": "MATH101",
+      "teacher_email": "t.alam@school.edu",
+      "total_marks": 100,
+      "obtained_marks": 88,
+      "percentage": 88.0,
+      "created_at": "2026-02-04 21:17:23.175000",
+      "updated_at": "2026-02-04 21:17:23.176000"
+    }
+  }
+]

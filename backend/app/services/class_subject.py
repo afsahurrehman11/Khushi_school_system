@@ -2,14 +2,23 @@ from app.database import get_db
 from datetime import datetime
 from typing import Optional
 from bson.objectid import ObjectId
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ================= Subject Operations =================
 
-def create_subject(subject_name: str, subject_code: str = None, assigned_classes: list = None) -> Optional[dict]:
+def create_subject(subject_name: str, subject_code: str = None, assigned_classes: list = None, school_id: str = None) -> Optional[dict]:
     """Create a new subject. Accepts multiple assigned_classes entries."""
     db = get_db()
 
-    if subject_code and db.subjects.find_one({"subject_code": subject_code}):
+    if not school_id:
+        logger.error(f"❌ Cannot create subject without schoolId")
+        return None
+
+    query = {"subject_code": subject_code, "school_id": school_id}
+    if subject_code and db.subjects.find_one(query):
+        logger.warning(f"[SCHOOL:{school_id}] Subject code '{subject_code}' already exists")
         return None
 
     # Normalize assigned_classes entries
@@ -51,31 +60,39 @@ def create_subject(subject_name: str, subject_code: str = None, assigned_classes
         "subject_name": subject_name,
         "subject_code": subject_code,
         "assigned_classes": norm,
+        "school_id": school_id,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     }
 
     result = db.subjects.insert_one(subject)
     subject["_id"] = str(result.inserted_id)
+    logger.info(f"[SCHOOL:{school_id}] ✅ Subject created: {subject_name}")
     # return enriched subject
-    return get_subject_by_id(str(result.inserted_id))
+    return get_subject_by_id(str(result.inserted_id), school_id)
 
-def get_all_subjects() -> list:
+def get_all_subjects(school_id: str = None) -> list:
     """Get all subjects"""
     db = get_db()
-    subjects = list(db.subjects.find())
+    query = {}
+    if school_id:
+        query["school_id"] = school_id
+        logger.info(f"[SCHOOL:{school_id}] Fetching subjects")
+    subjects = list(db.subjects.find(query))
 
     # build maps for classes and teachers
-    class_map = { str(c.get('_id')): (c.get('class_name') or c.get('name')) for c in db.classes.find() }
+    class_query = {"school_id": school_id} if school_id else {}
+    class_map = { str(c.get('_id')): (c.get('class_name') or c.get('name')) for c in db.classes.find(class_query) }
     # also map by class_name+section to preserve legacy matching
     name_section_map = {}
-    for c in db.classes.find():
+    for c in db.classes.find(class_query):
         key = f"{c.get('class_name')}::{c.get('section')}"
         name_section_map[key] = (c.get('class_name') or c.get('name'))
 
     # build teacher map using multiple possible id keys to make resolution robust
     teacher_map = {}
-    for t in db.teachers.find():
+    teacher_query = {"school_id": school_id} if school_id else {}
+    for t in db.teachers.find(teacher_query):
         display = (t.get('name') or t.get('fullName') or t.get('teacherId') or t.get('cnic'))
         if display:
             if t.get('_id') is not None:
@@ -128,13 +145,18 @@ def get_all_subjects() -> list:
 
         subject['assigned_classes'] = enriched
 
+    if school_id:
+        logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(subjects)} subjects")
     return subjects
 
-def get_subject_by_id(subject_id: str) -> Optional[dict]:
+def get_subject_by_id(subject_id: str, school_id: str = None) -> Optional[dict]:
     """Get subject by ID"""
     db = get_db()
     try:
-        subject = db.subjects.find_one({"_id": ObjectId(subject_id)})
+        query = {"_id": ObjectId(subject_id)}
+        if school_id:
+            query["school_id"] = school_id
+        subject = db.subjects.find_one(query)
         if not subject:
             return None
 
@@ -143,7 +165,8 @@ def get_subject_by_id(subject_id: str) -> Optional[dict]:
         # enrich similar to get_all_subjects
         # build robust teacher map again
         teacher_map = {}
-        for t in db.teachers.find():
+        teacher_query = {"school_id": school_id} if school_id else {}
+        for t in db.teachers.find(teacher_query):
             display = (t.get('name') or t.get('fullName') or t.get('teacherId') or t.get('cnic'))
             if display:
                 if t.get('_id') is not None:
@@ -155,7 +178,8 @@ def get_subject_by_id(subject_id: str) -> Optional[dict]:
                 if t.get('cnic'):
                     teacher_map[str(t.get('cnic'))] = display
         name_section_map = {}
-        for c in db.classes.find():
+        class_query = {"school_id": school_id} if school_id else {}
+        for c in db.classes.find(class_query):
             key = f"{c.get('class_name')}::{c.get('section')}"
             name_section_map[key] = (c.get('class_name') or c.get('name'))
 
@@ -187,7 +211,7 @@ def get_subject_by_id(subject_id: str) -> Optional[dict]:
     except:
         return None
 
-def update_subject(subject_id: str, subject_name: str = None, subject_code: str = None, assigned_classes: list = None) -> Optional[dict]:
+def update_subject(subject_id: str, subject_name: str = None, subject_code: str = None, assigned_classes: list = None, school_id: str = None) -> Optional[dict]:
     """Update an existing subject and return the updated/enriched document."""
     db = get_db()
     try:
@@ -200,6 +224,10 @@ def update_subject(subject_id: str, subject_name: str = None, subject_code: str 
         update['subject_name'] = subject_name
     if subject_code is not None:
         update['subject_code'] = subject_code
+    
+    query = {"_id": oid}
+    if school_id:
+        query["school_id"] = school_id
     if assigned_classes is not None:
         # normalize similar to create_subject
         norm = []
@@ -232,31 +260,45 @@ def update_subject(subject_id: str, subject_name: str = None, subject_code: str 
         update['assigned_classes'] = norm
 
     if not update:
-        return get_subject_by_id(subject_id)
+        return get_subject_by_id(subject_id, school_id)
 
     update['updated_at'] = datetime.utcnow()
-    res = db.subjects.update_one({'_id': oid}, {'$set': update})
+    res = db.subjects.update_one(query, {'$set': update})
     if res.matched_count == 0:
+        logger.warning(f"[SCHOOL:{school_id or 'Any'}] Subject {subject_id} not found")
         return None
-    return get_subject_by_id(subject_id)
+    if school_id:
+        logger.info(f"[SCHOOL:{school_id}] ✅ Subject {subject_id} updated")
+    return get_subject_by_id(subject_id, school_id)
 
 
-def delete_subject(subject_id: str) -> bool:
+def delete_subject(subject_id: str, school_id: str = None) -> bool:
     db = get_db()
     try:
         oid = ObjectId(subject_id)
     except:
         return False
-    res = db.subjects.delete_one({'_id': oid})
+    query = {"_id": oid}
+    if school_id:
+        query["school_id"] = school_id
+    res = db.subjects.delete_one(query)
+    if school_id and res.deleted_count > 0:
+        logger.info(f"[SCHOOL:{school_id}] ✅ Subject {subject_id} deleted")
     return res.deleted_count > 0
 
 # ================= Class Operations =================
 
-def create_class(class_name: str, section: str, assigned_subjects: list = None, assigned_teachers: list = None) -> Optional[dict]:
+def create_class(class_name: str, section: str, assigned_subjects: list = None, assigned_teachers: list = None, school_id: str = None) -> Optional[dict]:
     """Create a new class"""
     db = get_db()
 
-    if db.classes.find_one({"class_name": class_name, "section": section}):
+    if not school_id:
+        logger.error(f"❌ Cannot create class without schoolId")
+        return None
+
+    query = {"class_name": class_name, "section": section, "school_id": school_id}
+    if db.classes.find_one(query):
+        logger.warning(f"[SCHOOL:{school_id}] Class {class_name}/{section} already exists")
         return None
 
     # normalize assigned_subjects: accept list of ids or list of dicts
@@ -281,18 +323,24 @@ def create_class(class_name: str, section: str, assigned_subjects: list = None, 
         "section": section,
         "assigned_subjects": norm_assigned,
         "assigned_teachers": assigned_teachers or [],
+        "school_id": school_id,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     }
 
     result = db.classes.insert_one(cls)
     cls["_id"] = str(result.inserted_id)
-    return cls
+    logger.info(f"[SCHOOL:{school_id}] ✅ Class created: {class_name}/{section}")
+    return get_class_by_id(str(result.inserted_id), school_id)
 
-def get_all_classes() -> list:
+def get_all_classes(school_id: str = None) -> list:
     """Get all classes"""
     db = get_db()
-    classes = list(db.classes.find())
+    query = {}
+    if school_id:
+        query["school_id"] = school_id
+        logger.info(f"[SCHOOL:{school_id}] Fetching classes")
+    classes = list(db.classes.find(query))
 
     # build lookup maps for subjects and teachers
     subject_map = { str(s.get('_id')): (s.get('subject_name') or s.get('name') or s.get('subject_code')) for s in db.subjects.find() }
@@ -331,11 +379,14 @@ def get_all_classes() -> list:
 
     return classes
 
-def get_class_by_id(class_id: str) -> Optional[dict]:
+def get_class_by_id(class_id: str, school_id: str = None) -> Optional[dict]:
     """Get class by ID"""
     db = get_db()
     try:
-        cls = db.classes.find_one({"_id": ObjectId(class_id)})
+        query = {"_id": ObjectId(class_id)}
+        if school_id:
+            query["school_id"] = school_id
+        cls = db.classes.find_one(query)
         if not cls:
             return None
 

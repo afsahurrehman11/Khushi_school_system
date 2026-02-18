@@ -8,6 +8,9 @@ from app.services.fee_payment_service import (
 )
 from app.dependencies.auth import check_permission
 from bson import ObjectId
+import logging
+
+logger = logging.getLogger(__name__)
 
 def convert_objectids(obj):
     """Recursively convert ObjectId to string in dict/list"""
@@ -28,24 +31,37 @@ async def create_fee_payment(
     current_user: dict = Depends(check_permission("fees.manage"))
 ):
     """Record a new fee payment"""
-    # Validate payment amount doesn't exceed remaining due
-    from app.services.fee_payment_service import get_fee_payment_summary_for_student
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Recording fee payment")
     
-    summary = get_fee_payment_summary_for_student(payment_data.student_id)
-    if payment_data.amount_paid > summary["remaining_amount"]:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Payment amount (${payment_data.amount_paid}) cannot exceed remaining due (${summary['remaining_amount']})"
-        )
-    
-    data = payment_data.dict()
-    data["received_by"] = current_user["id"]
-    
-    payment = record_fee_payment(data)
-    if not payment:
-        raise HTTPException(status_code=400, detail="Failed to record payment")
-    
-    return convert_objectids(payment)
+    try:
+        from app.services.fee_payment_service import get_fee_payment_summary_for_student
+        
+        summary = get_fee_payment_summary_for_student(payment_data.student_id, school_id=school_id)
+        if payment_data.amount_paid > summary["remaining_amount"]:
+            logger.error(f"[SCHOOL:{school_id}] ❌ Payment exceeds remaining due")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Payment amount (${payment_data.amount_paid}) cannot exceed remaining due (${summary['remaining_amount']})"
+            )
+        
+        data = payment_data.dict()
+        data["received_by"] = current_user["id"]
+        data["school_id"] = school_id  # Include school_id for cash session tracking
+        
+        payment = record_fee_payment(data)
+        if not payment:
+            logger.error(f"[SCHOOL:{school_id}] ❌ Failed to record payment")
+            raise HTTPException(status_code=400, detail="Failed to record payment")
+        
+        logger.info(f"[SCHOOL:{school_id}] ✅ Fee payment recorded")
+        return convert_objectids(payment)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[SCHOOL:{school_id}] ❌ Error recording payment: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to record payment")
 
 @router.get("", response_model=List[dict])
 async def list_fee_payments(
@@ -55,16 +71,25 @@ async def list_fee_payments(
     current_user: dict = Depends(check_permission("fees.view"))
 ):
     """Get all fee payments with optional filters"""
-    filters = {}
-    if student_id:
-        filters["student_id"] = student_id
-    if class_id:
-        filters["class_id"] = class_id
-    if payment_method:
-        filters["payment_method"] = payment_method
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Listing fee payments")
     
-    payments = get_all_fee_payments(filters)
-    return [convert_objectids(payment) for payment in payments]
+    try:
+        filters = {"school_id": school_id} if school_id else {}
+        if student_id:
+            filters["student_id"] = student_id
+        if class_id:
+            filters["class_id"] = class_id
+        if payment_method:
+            filters["payment_method"] = payment_method
+        
+        payments = get_all_fee_payments(filters)
+        logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(payments)} fee payments")
+        return [convert_objectids(payment) for payment in payments]
+    except Exception as e:
+        logger.error(f"[SCHOOL:{school_id}] ❌ Failed to list payments: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to list payments")
 
 @router.get("/{payment_id}", response_model=dict)
 async def get_fee_payment(
@@ -72,11 +97,23 @@ async def get_fee_payment(
     current_user: dict = Depends(check_permission("fees.view"))
 ):
     """Get fee payment by ID"""
-    payment = get_fee_payment_by_id(payment_id)
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching payment {payment_id}")
     
-    return convert_objectids(payment)
+    try:
+        payment = get_fee_payment_by_id(payment_id, school_id=school_id)
+        if not payment:
+            logger.error(f"[SCHOOL:{school_id}] ❌ Payment {payment_id} not found")
+            raise HTTPException(status_code=404, detail="Payment not found")
+        
+        logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved payment {payment_id}")
+        return convert_objectids(payment)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[SCHOOL:{school_id}] ❌ Error fetching payment: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch payment")
 
 @router.get("/student/{student_id}", response_model=List[dict])
 async def get_student_fee_payments(
@@ -84,8 +121,17 @@ async def get_student_fee_payments(
     current_user: dict = Depends(check_permission("fees.view"))
 ):
     """Get all fee payments for a student"""
-    payments = get_fee_payments_for_student(student_id)
-    return [convert_objectids(payment) for payment in payments]
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching payments for student {student_id}")
+    
+    try:
+        payments = get_fee_payments_for_student(student_id, school_id=school_id)
+        logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(payments)} payments for student")
+        return [convert_objectids(payment) for payment in payments]
+    except Exception as e:
+        logger.error(f"[SCHOOL:{school_id}] ❌ Error fetching student payments: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch student payments")
 
 @router.get("/class/{class_id}", response_model=List[dict])
 async def get_class_fee_payments(
@@ -93,8 +139,17 @@ async def get_class_fee_payments(
     current_user: dict = Depends(check_permission("fees.view"))
 ):
     """Get all fee payments for a class"""
-    payments = get_fee_payments_for_class(class_id)
-    return [convert_objectids(payment) for payment in payments]
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching payments for class {class_id}")
+    
+    try:
+        payments = get_fee_payments_for_class(class_id, school_id=school_id)
+        logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(payments)} payments for class")
+        return [convert_objectids(payment) for payment in payments]
+    except Exception as e:
+        logger.error(f"[SCHOOL:{school_id}] ❌ Error fetching class payments: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch class payments")
 
 @router.get("/student/{student_id}/summary", response_model=dict)
 async def get_student_fee_summary(
@@ -102,8 +157,17 @@ async def get_student_fee_summary(
     current_user: dict = Depends(check_permission("fees.view"))
 ):
     """Get fee payment summary for a student"""
-    summary = get_fee_payment_summary_for_student(student_id)
-    return summary
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching payment summary for student")
+    
+    try:
+        summary = get_fee_payment_summary_for_student(student_id, school_id=school_id)
+        logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved payment summary")
+        return summary
+    except Exception as e:
+        logger.error(f"[SCHOOL:{school_id}] ❌ Error fetching summary: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch payment summary")
 
 @router.put("/{payment_id}", response_model=dict)
 async def update_fee_payment_record(
@@ -112,11 +176,23 @@ async def update_fee_payment_record(
     current_user: dict = Depends(check_permission("fees.manage"))
 ):
     """Update a fee payment"""
-    updated = update_fee_payment(payment_id, update_data.dict(exclude_unset=True))
-    if not updated:
-        raise HTTPException(status_code=404, detail="Payment not found or update failed")
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Updating payment {payment_id}")
     
-    return convert_objectids(updated)
+    try:
+        updated = update_fee_payment(payment_id, update_data.dict(exclude_unset=True), school_id=school_id)
+        if not updated:
+            logger.error(f"[SCHOOL:{school_id}] ❌ Payment {payment_id} not found")
+            raise HTTPException(status_code=404, detail="Payment not found or update failed")
+        
+        logger.info(f"[SCHOOL:{school_id}] ✅ Updated payment {payment_id}")
+        return convert_objectids(updated)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[SCHOOL:{school_id}] ❌ Error updating payment: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update payment")
 
 @router.delete("/{payment_id}")
 async def delete_fee_payment_record(
@@ -124,8 +200,20 @@ async def delete_fee_payment_record(
     current_user: dict = Depends(check_permission("fees.manage"))
 ):
     """Delete a fee payment"""
-    success = delete_fee_payment(payment_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Payment not found")
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Deleting payment {payment_id}")
     
-    return {"deleted": True}
+    try:
+        success = delete_fee_payment(payment_id, school_id=school_id)
+        if not success:
+            logger.error(f"[SCHOOL:{school_id}] ❌ Payment {payment_id} not found")
+            raise HTTPException(status_code=404, detail="Payment not found")
+        
+        logger.info(f"[SCHOOL:{school_id}] ✅ Deleted payment {payment_id}")
+        return {"deleted": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[SCHOOL:{school_id}] ❌ Error deleting payment: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete payment")

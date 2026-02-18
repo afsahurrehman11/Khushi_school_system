@@ -2,12 +2,19 @@ from app.database import get_db
 from datetime import datetime
 from typing import Optional, List
 from bson.objectid import ObjectId
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ================= Payment Operations =================
 
-def record_payment(data: dict) -> Optional[dict]:
+def record_payment(data: dict, school_id: str = None) -> Optional[dict]:
     """Record a payment for a challan"""
     db = get_db()
+    
+    if not school_id:
+        logger.error(f"❌ Cannot record payment without schoolId")
+        return None
     
     payment = {
         "challan_id": data.get("challan_id"),
@@ -16,6 +23,7 @@ def record_payment(data: dict) -> Optional[dict]:
         "payment_method": data.get("payment_method"),  # cash, online, check, etc.
         "transaction_reference": data.get("transaction_reference"),
         "received_by": data.get("received_by"),  # User ID
+        "school_id": school_id,
         "paid_at": datetime.utcnow(),
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
@@ -25,50 +33,63 @@ def record_payment(data: dict) -> Optional[dict]:
     payment["id"] = str(result.inserted_id)
     
     # Update challan status
-    _update_challan_status(data.get("challan_id"))
+    _update_challan_status(data.get("challan_id"), school_id)
     
+    logger.info(f"[SCHOOL:{school_id}] ✅ Payment recorded: {payment.get('id')}")
     return payment
 
-def get_payment_by_id(payment_id: str) -> Optional[dict]:
+def get_payment_by_id(payment_id: str, school_id: str = None) -> Optional[dict]:
     """Get payment by ID"""
     db = get_db()
     try:
-        payment = db.payments.find_one({"_id": ObjectId(payment_id)})
+        query = {"_id": ObjectId(payment_id)}
+        if school_id:
+            query["school_id"] = school_id
+        payment = db.payments.find_one(query)
         if payment:
             payment["id"] = str(payment["_id"])
         return payment
     except:
         return None
 
-def get_payments_for_challan(challan_id: str) -> List[dict]:
+def get_payments_for_challan(challan_id: str, school_id: str = None) -> List[dict]:
     """Get all payments for a specific challan"""
     db = get_db()
     
-    payments = list(db.payments.find({"challan_id": challan_id}).sort("paid_at", -1))
+    query = {"challan_id": challan_id}
+    if school_id:
+        query["school_id"] = school_id
+    payments = list(db.payments.find(query).sort("paid_at", -1))
     for payment in payments:
         payment["id"] = str(payment["_id"])
     return payments
 
-def get_payments_for_student(student_id: str) -> List[dict]:
+def get_payments_for_student(student_id: str, school_id: str = None) -> List[dict]:
     """Get all payments for a student"""
     db = get_db()
     
-    payments = list(db.payments.find({"student_id": student_id}).sort("paid_at", -1))
+    query = {"student_id": student_id}
+    if school_id:
+        query["school_id"] = school_id
+    payments = list(db.payments.find(query).sort("paid_at", -1))
     for payment in payments:
         payment["id"] = str(payment["_id"])
     return payments
 
-def get_all_payments(filters: dict = None) -> List[dict]:
+def get_all_payments(filters: dict = None, school_id: str = None) -> List[dict]:
     """Get all payments with optional filters"""
     db = get_db()
     query = filters or {}
+    if school_id:
+        query["school_id"] = school_id
+        logger.info(f"[SCHOOL:{school_id}] Fetching payments")
     
     payments = list(db.payments.find(query).sort("paid_at", -1))
     for payment in payments:
         payment["id"] = str(payment["_id"])
     return payments
 
-def update_payment(payment_id: str, data: dict) -> Optional[dict]:
+def update_payment(payment_id: str, data: dict, school_id: str = None) -> Optional[dict]:
     """Update payment details"""
     db = get_db()
     try:
@@ -86,8 +107,12 @@ def update_payment(payment_id: str, data: dict) -> Optional[dict]:
     
     update["updated_at"] = datetime.utcnow()
     
+    query = {"_id": oid}
+    if school_id:
+        query["school_id"] = school_id
+    
     result = db.payments.find_one_and_update(
-        {"_id": oid},
+        query,
         {"$set": update},
         return_document=True
     )
@@ -95,39 +120,52 @@ def update_payment(payment_id: str, data: dict) -> Optional[dict]:
     if result:
         result["id"] = str(result["_id"])
         # Update challan status after payment update
-        _update_challan_status(result.get("challan_id"))
+        _update_challan_status(result.get("challan_id"), school_id)
+        if school_id:
+            logger.info(f"[SCHOOL:{school_id}] ✅ Payment {payment_id} updated")
     
     return result
 
-def delete_payment(payment_id: str) -> bool:
+def delete_payment(payment_id: str, school_id: str = None) -> bool:
     """Delete a payment"""
     db = get_db()
     try:
-        payment = db.payments.find_one({"_id": ObjectId(payment_id)})
+        query = {"_id": ObjectId(payment_id)}
+        if school_id:
+            query["school_id"] = school_id
+        payment = db.payments.find_one(query)
         if not payment:
             return False
         
-        result = db.payments.delete_one({"_id": ObjectId(payment_id)})
+        result = db.payments.delete_one(query)
         
         # Update challan status after payment deletion
         if payment:
-            _update_challan_status(payment.get("challan_id"))
+            _update_challan_status(payment.get("challan_id"), school_id)
         
+        if school_id and result.deleted_count > 0:
+            logger.info(f"[SCHOOL:{school_id}] ✅ Payment {payment_id} deleted")
         return result.deleted_count > 0
     except:
         return False
 
-def _update_challan_status(challan_id: str) -> Optional[dict]:
+def _update_challan_status(challan_id: str, school_id: str = None) -> Optional[dict]:
     """Recalculate and update challan status based on payments (SYSTEM CALCULATED)"""
     db = get_db()
     
     try:
-        challan = db.student_challans.find_one({"_id": ObjectId(challan_id)})
+        query = {"_id": ObjectId(challan_id)}
+        if school_id:
+            query["school_id"] = school_id
+        challan = db.student_challans.find_one(query)
         if not challan:
             return None
         
         # Get all payments for this challan
-        payments = list(db.payments.find({"challan_id": challan_id}))
+        payment_query = {"challan_id": challan_id}
+        if school_id:
+            payment_query["school_id"] = school_id
+        payments = list(db.payments.find(payment_query))
         total_paid = sum(p.get("amount_paid", 0) for p in payments)
         
         total_amount = challan.get("total_amount", 0)
@@ -155,7 +193,7 @@ def _update_challan_status(challan_id: str) -> Optional[dict]:
         }
         
         result = db.student_challans.find_one_and_update(
-            {"_id": ObjectId(challan_id)},
+            query,
             {"$set": update},
             return_document=True
         )
@@ -166,12 +204,15 @@ def _update_challan_status(challan_id: str) -> Optional[dict]:
     except:
         return None
 
-def get_payment_summary_for_student(student_id: str) -> dict:
+def get_payment_summary_for_student(student_id: str, school_id: str = None) -> dict:
     """Get payment summary for a student"""
     db = get_db()
     
     # Get all challans for student
-    challans = list(db.student_challans.find({"student_id": student_id}))
+    query = {"student_id": student_id}
+    if school_id:
+        query["school_id"] = school_id
+    challans = list(db.student_challans.find(query))
     
     total_fee = 0
     total_paid = 0

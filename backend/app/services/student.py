@@ -4,6 +4,11 @@ from typing import Optional
 from bson.objectid import ObjectId
 from io import BytesIO
 from typing import List, Tuple
+from app.utils.student_id_utils import generate_student_id, validate_student_id_uniqueness
+import logging
+import zipfile
+
+logger = logging.getLogger(__name__)
 
 try:
     import openpyxl  # type: ignore[import]
@@ -14,23 +19,63 @@ except Exception:
 # ================= Student Operations =================
 
 def create_student(student_data: dict) -> Optional[dict]:
-    """Create a new student"""
-    db = get_db()
+    """Create a new student with schoolId isolation"""
+    try:
+        school_id = student_data.get("school_id")
+        if not school_id:
+            logger.error(f"❌ Cannot create student without schoolId")
+            return None
+            
+        logger.info(f"[SCHOOL:{school_id}] 🎓 Creating student: {student_data.get('full_name', 'Unknown')}")
+        db = get_db()
 
-    if db.students.find_one({"student_id": student_data.get("student_id")}):
+        # Set admission_year if not provided
+        if "admission_year" not in student_data:
+            student_data["admission_year"] = datetime.utcnow().year
+            logger.debug(f"[SCHOOL:{school_id}] 📅 Set admission_year to {student_data['admission_year']}")
+
+        # Generate student_id if not provided (manual creation)
+        if "student_id" not in student_data:
+            student_data["student_id"] = generate_student_id(student_data["admission_year"], db.students, school_id)
+            logger.info(f"[SCHOOL:{school_id}] 🆔 Generated student_id: {student_data['student_id']}")
+
+        # Validate uniqueness within school
+        if not validate_student_id_uniqueness(student_data["student_id"], db.students, school_id):
+            logger.error(f"[SCHOOL:{school_id}] ❌ Student ID already exists: {student_data['student_id']}")
+            return None
+
+        # Ensure email uniqueness constraint won't fail for missing emails.
+        # The database has a unique index on (school_id, email). MongoDB treats null/None
+        # as the same value, so multiple documents without email will conflict. To avoid
+        # this, set a unique placeholder email derived from the generated student_id
+        # when email is not provided.
+        email_val = student_data.get('email')
+        if not email_val:
+            placeholder = f"{student_data['student_id']}@no-email.{school_id}.local"
+            student_data['email'] = placeholder
+            logger.debug(f"[SCHOOL:{school_id}] ℹ️ No email provided; set placeholder email: {placeholder}")
+
+        student_data["created_at"] = datetime.utcnow()
+        student_data["updated_at"] = datetime.utcnow()
+
+        result = db.students.insert_one(student_data)
+        student_data["id"] = str(result.inserted_id)
+        logger.info(f"[SCHOOL:{school_id}] ✅ Student created successfully: {student_data['student_id']} - {student_data['full_name']}")
+        return student_data
+    except Exception as e:
+        logger.error(f"❌ Failed to create student: {str(e)}")
         return None
 
-    student_data["created_at"] = datetime.utcnow()
-    student_data["updated_at"] = datetime.utcnow()
-
-    result = db.students.insert_one(student_data)
-    student_data["_id"] = str(result.inserted_id)
-    return student_data
-
-def get_all_students(filters: dict = None) -> list:
-    """Get all students with optional filters"""
+def get_all_students(filters: dict = None, school_id: str = None) -> list:
+    """Get all students with optional filters and schoolId isolation"""
     db = get_db()
     query = filters or {}
+    
+    # Enforce schoolId filtering
+    if school_id:
+        query["school_id"] = school_id
+        logger.info(f"[SCHOOL:{school_id}] 📋 Fetching students")
+    
     students = list(db.students.find(query))
     for student in students:
         # ensure id string
@@ -40,6 +85,7 @@ def get_all_students(filters: dict = None) -> list:
         student.setdefault('gender', 'Not specified')
         student.setdefault('date_of_birth', datetime.utcnow().strftime('%Y-%m-%d'))
         student.setdefault('admission_date', datetime.utcnow().strftime('%Y-%m-%d'))
+        student.setdefault('admission_year', datetime.utcnow().year)
         student.setdefault('roll_number', '')
         student.setdefault('academic_year', f"{datetime.utcnow().year}-{datetime.utcnow().year+1}")
         student.setdefault('subjects', student.get('subjects', []))
@@ -49,48 +95,71 @@ def get_all_students(filters: dict = None) -> list:
             student['created_at'] = datetime.utcnow()
         if 'updated_at' not in student:
             student['updated_at'] = datetime.utcnow()
+    
+    logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(students)} students") if school_id else None
     return students
 
-def get_student_by_id(student_id: str) -> Optional[dict]:
-    """Get student by ID"""
+def get_student_by_id(student_id: str, school_id: str = None) -> Optional[dict]:
+    """Get student by ID with optional schoolId isolation"""
     db = get_db()
     try:
-        student = db.students.find_one({"_id": ObjectId(student_id)})
+        query = {"_id": ObjectId(student_id)}
+        if school_id:
+            query["school_id"] = school_id
+        
+        student = db.students.find_one(query)
         if student:
             student["id"] = str(student["_id"])
+            logger.info(f"[SCHOOL:{school_id or 'N/A'}] 🔍 Retrieved student: {student_id}") if school_id else None
         return student
     except:
         return None
 
-def get_student_by_student_id(student_id: str) -> Optional[dict]:
-    """Get student by student_id field"""
+def get_student_by_student_id(student_id: str, school_id: str = None) -> Optional[dict]:
+    """Get student by student_id field with optional schoolId isolation"""
     db = get_db()
-    student = db.students.find_one({"student_id": student_id})
+    query = {"student_id": student_id}
+    if school_id:
+        query["school_id"] = school_id
+    
+    student = db.students.find_one(query)
     if student:
         student["id"] = str(student["_id"])
+        logger.info(f"[SCHOOL:{school_id or 'N/A'}] 🔍 Retrieved student by student_id: {student_id}") if school_id else None
     return student
 
-def update_student(student_id: str, **kwargs) -> Optional[dict]:
-    """Update student"""
+def update_student(student_id: str, school_id: str = None, **kwargs) -> Optional[dict]:
+    """Update student with schoolId isolation"""
     db = get_db()
     try:
+        query = {"_id": ObjectId(student_id)}
+        if school_id:
+            query["school_id"] = school_id
+        
         kwargs["updated_at"] = datetime.utcnow()
         result = db.students.find_one_and_update(
-            {"_id": ObjectId(student_id)},
+            query,
             {"$set": kwargs},
             return_document=True
         )
         if result:
             result["id"] = str(result["_id"])
+            logger.info(f"[SCHOOL:{school_id or 'N/A'}] ✅ Student updated: {student_id}") if school_id else None
         return result
     except:
         return None
 
-def delete_student(student_id: str) -> bool:
-    """Delete student"""
+def delete_student(student_id: str, school_id: str = None) -> bool:
+    """Delete student with schoolId isolation"""
     db = get_db()
     try:
-        result = db.students.delete_one({"_id": ObjectId(student_id)})
+        query = {"_id": ObjectId(student_id)}
+        if school_id:
+            query["school_id"] = school_id
+        
+        result = db.students.delete_one(query)
+        if result.deleted_count > 0:
+            logger.info(f"[SCHOOL:{school_id or 'N/A'}] ✅ Student deleted: {student_id}") if school_id else None
         return result.deleted_count > 0
     except:
         return False
@@ -247,3 +316,123 @@ def export_students_to_workbook_bytes(filters: dict = None) -> bytes:
     wb.save(bio)
     bio.seek(0)
     return bio.read()
+
+
+def import_students_with_images(xlsx_bytes: bytes, zip_bytes: Optional[bytes], class_id: str) -> dict:
+    """
+    Import students from Excel with optional ZIP file containing images
+    
+    Args:
+        xlsx_bytes: Excel file bytes
+        zip_bytes: Optional ZIP file containing student images
+        class_id: Class ID for students
+        
+    Returns:
+        Dict with import summary
+    """
+    try:
+        logger.info("📊 Starting bulk import with images")
+        
+        # Parse Excel
+        created_students = []
+        failed_students = []
+        
+        created, errors = import_students_from_workbook_bytes(xlsx_bytes, class_id)
+        created_students.extend(created)
+        failed_students.extend(errors)
+        
+        images_uploaded = 0
+        image_failures = 0
+        
+        # Process images if ZIP provided
+        if zip_bytes:
+            logger.info("📦 Processing images from ZIP file")
+            
+            try:
+                # Extract and process images
+                with zipfile.ZipFile(BytesIO(zip_bytes), 'r') as zip_ref:
+                    for file_info in zip_ref.filelist:
+                        try:
+                            filename = file_info.filename
+                            
+                            # Skip directories and hidden files
+                            if filename.endswith('/') or filename.startswith('.'):
+                                continue
+                            
+                            # Extract filename without extension
+                            base_name = filename.split('/')[-1].split('.')[0]
+                            
+                            # Try to match with created students by registration_id or student_id
+                            matching_student = None
+                            for student in created_students:
+                                student_id_val = student.get('student_id', '')
+                                # Match by student_id or base filename
+                                if base_name in student_id_val or student_id_val in base_name:
+                                    matching_student = student
+                                    break
+                            
+                            if matching_student:
+                                # Read image
+                                image_content = zip_ref.read(filename)
+                                
+                                # Lazy import to avoid circular dependency
+                                from app.services.cloudinary_service import CloudinaryService
+                                
+                                student_id = str(matching_student.get('_id', ''))
+                                upload_result = CloudinaryService.upload_image(
+                                    image_content,
+                                    filename,
+                                    student_id
+                                )
+                                
+                                if upload_result:
+                                    # Update student with image
+                                    db = get_db()
+                                    db.students.update_one(
+                                        {"_id": ObjectId(student_id)},
+                                        {
+                                            "$set": {
+                                                "profile_image_url": upload_result["secure_url"],
+                                                "profile_image_public_id": upload_result["public_id"],
+                                                "image_uploaded_at": datetime.utcnow(),
+                                                "embedding_status": "pending",
+                                                "updated_at": datetime.utcnow()
+                                            }
+                                        }
+                                    )
+                                    images_uploaded += 1
+                                    logger.info(f"✅ Image uploaded for {matching_student.get('student_id')}")
+                                else:
+                                    image_failures += 1
+                                    logger.warning(f"⚠️ Failed to upload image for {matching_student.get('student_id')}")
+                        except Exception as e:
+                            image_failures += 1
+                            logger.error(f"Error processing image {filename}: {str(e)}")
+            
+            except zipfile.BadZipFile:
+                logger.error("Invalid ZIP file provided")
+                failed_students.append({
+                    'row': 'ZIP',
+                    'error': 'Invalid or corrupted ZIP file'
+                })
+        
+        logger.info(f"✅ Bulk import completed")
+        
+        return {
+            "success": True,
+            "summary": {
+                "total_students_created": len(created_students),
+                "failed_students": len(failed_students),
+                "images_uploaded": images_uploaded,
+                "image_failures": image_failures
+            },
+            "created": created_students,
+            "errors": failed_students
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ Bulk import failed: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Button from '../../../components/Button';
 import { api } from '../../../utils/api';
+import logger from '../../../utils/logger';
 
 interface AccountantDailySummary {
   id: string;
@@ -32,7 +33,7 @@ const AccountantLogoutSummary: React.FC<AccountantLogoutSummaryProps> = ({ onVer
       const response = await api.get(`/api/accountants/daily-summary/${today}`);
       setSummary(response);
     } catch (error) {
-      console.error('Failed to load daily summary:', error);
+      logger.error('ACCOUNTANT', `Failed to load daily summary: ${String(error)}`);
     } finally {
       setLoading(false);
     }
@@ -46,7 +47,7 @@ const AccountantLogoutSummary: React.FC<AccountantLogoutSummaryProps> = ({ onVer
       await api.post(`/api/accountants/daily-summary/${summary.id}/verify`, {});
       onVerify();
     } catch (error) {
-      console.error('Failed to verify summary:', error);
+      logger.error('ACCOUNTANT', `Failed to verify summary: ${String(error)}`);
     } finally {
       setVerifying(false);
     }

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Download, Loader2, FileSpreadsheet } from 'lucide-react';
 import Modal from '../../../components/Modal';
 import Button from '../../../components/Button';
+import logger from '../../../utils/logger';
 import { exportStudents } from '../services/importExportApi';
 
 interface ExportModalProps {
@@ -17,6 +18,7 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => {
   const [error, setError] = useState<string | null>(null);
 
   const handleExport = async () => {
+    logger.info('EXPORT', `📤 Starting export with filters: class=${classFilter}, section=${sectionFilter}`);
     setExporting(true);
     setError(null);
     try {
@@ -24,8 +26,10 @@ const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => {
         classFilter || undefined,
         sectionFilter || undefined
       );
+      logger.info('EXPORT', '✅ Export completed successfully');
       onClose();
     } catch (err: any) {
+      logger.error('EXPORT', `❌ Export failed: ${String(err)}`);
       setError(err.message || 'Export failed');
     } finally {
       setExporting(false);

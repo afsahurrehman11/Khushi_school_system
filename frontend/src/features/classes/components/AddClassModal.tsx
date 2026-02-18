@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { createClass, updateClass } from '../services/classesApi';
 import { getSubjects } from '../../subjects/services/subjectsApi';
 import api from '../../../utils/api';
+import logger from '../../../utils/logger';
 
 interface Assignment { subject_id?: string; teacher_id?: string; time?: string }
 interface Props { isOpen: boolean; onClose: () => void; cls?: any; onSaved?: () => void; }
@@ -67,7 +68,7 @@ const AddClassModal: React.FC<Props> = ({ isOpen, onClose, cls, onSaved }) => {
       }
       onSaved?.(); onClose();
     } catch (err) {
-      console.error(err);
+      logger.error('CLASSMODAL', `Error saving class: ${String(err)}`);
     } finally { setSaving(false); }
   };
 

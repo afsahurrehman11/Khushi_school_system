@@ -5,6 +5,7 @@ import SubjectCard from '../components/SubjectCard';
 import AddSubjectModal from '../components/AddSubjectModal';
 import { getSubjects, deleteSubject } from '../services/subjectsApi';
 import api from '../../../utils/api';
+import logger from '../../../utils/logger';
 
 const SubjectList: React.FC = () => {
   const [subjects, setSubjects] = useState<any[]>([]);
@@ -63,7 +64,7 @@ const SubjectList: React.FC = () => {
               assigned_classes={s.assigned_classes}
               teacherMap={teacherMap}
               onEdit={() => { setEditSubject(s); setAddOpen(true); }}
-              onDelete={async () => { try { await deleteSubject(s.id || s._id || s.subject_code || s.code); await load(); } catch (err:any) { console.error('Failed to delete subject', err); alert('Delete failed: '+ (err?.message || err)); } }}
+              onDelete={async () => { try { await deleteSubject(s.id || s._id || s.subject_code || s.code); await load(); } catch (err:any) { logger.error('SUBJECTS', `Failed to delete subject: ${String(err)}`); alert('Delete failed: '+ (err?.message || err)); } }}
             />
           ))}
         </div>

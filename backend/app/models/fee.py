@@ -6,6 +6,7 @@ from datetime import datetime
 
 class PaymentCreate(BaseModel):
     """Create a payment record"""
+    school_id: str  # *** NEW: School isolation ***
     challan_id: str
     student_id: str
     amount_paid: float
@@ -41,6 +42,7 @@ class PaymentResponse(BaseModel):
 # ================= Old Fee Models (Deprecated - kept for compatibility) =================
 
 class FeeStructureSchema(BaseModel):
+    school_id: str  # *** NEW: School isolation ***
     class_id: str
     academic_year: str
     fee_type: str  # monthly, one-time
@@ -54,6 +56,7 @@ class FeeStructureInDB(FeeStructureSchema):
     id: Optional[str] = None
 
 class FeeSchema(BaseModel):
+    school_id: str  # *** NEW: School isolation ***
     student_id: str
     class_id: str
     fee_structure_id: str
@@ -71,6 +74,7 @@ class FeeInDB(FeeSchema):
     remarks: Optional[str] = None
 
 class FeeCreate(BaseModel):
+    school_id: str  # *** NEW: School isolation ***
     student_id: str
     class_id: str
     fee_type: str  # tuition, library, sports, exam, etc.
@@ -102,6 +106,7 @@ class FeeGenerate(BaseModel):
 
 class FeePaymentCreate(BaseModel):
     """Create a fee payment record"""
+    school_id: str  # *** NEW: School isolation ***
     student_id: str
     class_id: str
     amount_paid: float

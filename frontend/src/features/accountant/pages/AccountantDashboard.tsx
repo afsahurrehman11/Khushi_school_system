@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import { DollarSign, Users, TrendingUp, Filter, Check, Calendar } from 'lucide-react';
 import Button from '../../../components/Button';
 import api from '../../../utils/api';
+import logger from '../../../utils/logger';
+import CashDashboardWidget from '../components/CashDashboardWidget';
 
 interface Student {
   id: string;
@@ -70,11 +72,12 @@ const AccountantDashboard: React.FC = () => {
       const data = await api.get('/api/classes');
       setClasses(data);
     } catch (err) {
-      console.error('Failed to fetch classes:', err);
+      logger.error('ACCOUNTANT', `Failed to fetch classes: ${String(err)}`);
     }
   };
 
   const fetchStudents = async () => {
+    logger.info('ACCOUNTANT', `📋 Accountant fetching students with filter: class_id=${filterClass}`);
     setLoading(true);
     setError('');
     try {
@@ -82,8 +85,10 @@ const AccountantDashboard: React.FC = () => {
       if (filterClass !== 'all') params.append('class_id', filterClass);
       
       const data = await api.get(`/api/students?${params}`);
+      logger.info('ACCOUNTANT', `✅ Accountant fetched ${data.length} students`);
       setStudents(data);
     } catch (err) {
+      logger.error('ACCOUNTANT', `❌ Accountant failed to fetch students: ${String(err)}`);
       setError('Failed to fetch students');
     } finally {
       setLoading(false);
@@ -98,7 +103,8 @@ const AccountantDashboard: React.FC = () => {
       if (filterStatus !== 'all') params.append('status', filterStatus);
       
       const data = await api.get(`/api/fees?${params}`);
-      setFees(data);
+      // API returns {count, page, page_size, fees}, we need the fees array
+      setFees(Array.isArray(data) ? data : (data.fees || []));
     } catch (err) {
       setError('Failed to fetch fees');
     } finally {
@@ -180,6 +186,11 @@ const AccountantDashboard: React.FC = () => {
               </div>
             </div>
           </motion.div>
+        </div>
+
+        {/* Cash Dashboard Widget */}
+        <div className="mb-8">
+          <CashDashboardWidget />
         </div>
 
         {/* Error & Success Messages */}

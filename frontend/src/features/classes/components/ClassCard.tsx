@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Button from '../../../components/Button';
 import { Edit2, Trash2, DollarSign } from 'lucide-react';
 import Modal from '../../../components/Modal';
 import { classAssignmentsApi, feeCategoriesApi } from '../../accountant/services/feeApi';
+import logger from '../../../utils/logger';
 
 interface Assignment { subject?: string; teacher?: string; time?: string }
 interface Props { 
@@ -21,12 +23,19 @@ interface Props {
 const ClassCard: React.FC<Props> = ({ 
   id, name, code, capacity, onEdit, onDelete, assignments = [],
 }) => {
+  const navigate = useNavigate();
   const title = name || code || id || 'Untitled Class';
   const [showFeeModal, setShowFeeModal] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [applyToExisting, setApplyToExisting] = useState(false);
+
+  const handleCardClick = () => {
+    if (id) {
+      navigate(`/classes/${id}`);
+    }
+  };
 
   useEffect(() => {
     if (showFeeModal) {
@@ -40,7 +49,7 @@ const ClassCard: React.FC<Props> = ({
       const data = await feeCategoriesApi.getAllCategories();
       setCategories(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error('Error loading categories:', err);
+      logger.error('CLASSSC', `Error loading categories: ${String(err)}`);
     }
   };
 
@@ -52,7 +61,7 @@ const ClassCard: React.FC<Props> = ({
         setSelectedCategory(data.category_id);
       }
     } catch (err) {
-      console.error('Error loading current category:', err);
+      logger.error('CLASSSC', `Error loading current category: ${String(err)}`);
     }
   };
 
@@ -68,7 +77,7 @@ const ClassCard: React.FC<Props> = ({
       alert('Fee category assigned successfully');
       setShowFeeModal(false);
     } catch (err) {
-      console.error('Error assigning category:', err);
+      logger.error('CLASSSC', `Error assigning category: ${String(err)}`);
       alert('Failed to assign fee category');
     } finally {
       setLoading(false);
@@ -82,7 +91,8 @@ const ClassCard: React.FC<Props> = ({
         animate={{ opacity: 1, y: 0 }}
         whileHover={{ scale: 1.02, y: -6 }}
         transition={{ duration: 0.25 }}
-        className="group bg-white rounded-lg p-4 shadow-lg border border-transparent hover:border-secondary-200"
+        onClick={handleCardClick}
+        className="group bg-white rounded-lg p-4 shadow-lg border border-transparent hover:border-secondary-200 cursor-pointer"
       >
         <div className="flex items-start justify-between">
           <div className="flex-1">

@@ -6,6 +6,7 @@ from datetime import datetime
 # ================= Grade Models =================
 
 class GradeSchema(BaseModel):
+    school_id: str  # *** NEW: School isolation ***
     student_id: str
     subject_id: str
     class_id: Optional[str] = None

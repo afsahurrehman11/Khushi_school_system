@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import Modal from '../../../components/Modal';
 import Button from '../../../components/Button';
+import logger from '../../../utils/logger';
 import type { ImportPreviewResponse } from '../types/importExport';
 import {
   uploadForPreview,
@@ -37,6 +38,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
   const [step, setStep] = useState<Step>('upload');
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [zipFile, setZipFile] = useState<File | null>(null);
   const [duplicateAction, setDuplicateAction] = useState<'skip' | 'update'>('skip');
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +52,15 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
   } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const zipInputRef = useRef<HTMLInputElement>(null);
+
+  const validateZip = (f: File): string | null => {
+    const ext = f.name.substring(f.name.lastIndexOf('.')).toLowerCase();
+    if (ext !== '.zip') return 'Invalid file type. Only .zip files are accepted.';
+    const MAX_ZIP = 50 * 1024 * 1024; // 50MB
+    if (f.size > MAX_ZIP) return 'ZIP file exceeds maximum size of 50MB.';
+    return null;
+  };
 
   const resetState = useCallback(() => {
     setStep('upload');
@@ -123,17 +134,34 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
     setFile(selectedFile);
   };
 
+  const handleZipSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setError(null);
+    const selected = e.target.files?.[0];
+    if (!selected) return;
+
+    const validationError = validateZip(selected);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setZipFile(selected);
+    logger.info('IMPORT', `🟡 [IMPORT] ZIP selected: ${selected.name}`);
+  };
+
   // ---- Upload & Preview ----
   const handleUpload = async () => {
     if (!file) return;
+    logger.info('IMPORT', `📊 Uploading file for preview: ${file.name} (${file.size} bytes)`);
     setUploading(true);
     setError(null);
 
     try {
-      const res = await uploadForPreview(file, duplicateAction);
+      const res = await uploadForPreview(file, duplicateAction, zipFile);
+      logger.info('IMPORT', `✅ Preview generated: ${res.rows?.length || 0} rows`);
       setPreview(res);
       setStep('preview');
     } catch (err: any) {
+      logger.error('IMPORT', `❌ Upload failed: ${String(err)}`);
       setError(err.message || 'Upload failed');
     } finally {
       setUploading(false);
@@ -143,6 +171,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
   // ---- Confirm Import ----
   const handleConfirm = async () => {
     if (!preview) return;
+    logger.info('IMPORT', `🚀 Starting import confirmation for import ID: ${preview.import_id}`);
     setConfirming(true);
     setStep('processing');
 
@@ -159,6 +188,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
           try {
             const status = await getImportStatus(preview.import_id);
             if (status.status !== 'processing' && status.status !== 'pending') {
+              logger.info('IMPORT', `✅ Import completed: ${status.successful_rows} successful, ${status.failed_rows} failed`);
               setResult({
                 status: status.status,
                 successful_rows: status.successful_rows,
@@ -174,6 +204,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
           }
         }
         // Timeout
+        logger.error('IMPORT', '⏰ Import timed out after 2 minutes');
         setResult({
           status: 'timeout',
           successful_rows: 0,
@@ -184,6 +215,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
       };
       await poll();
     } catch (err: any) {
+      logger.error('IMPORT', `❌ Import failed: ${String(err)}`);
       setError(err.message || 'Import failed');
       setStep('preview');
     } finally {
@@ -298,6 +330,37 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
             />
             <span className="text-sm text-secondary-700">Update existing records</span>
           </label>
+        </div>
+      </div>
+
+      {/* ZIP upload */}
+      <div className="bg-secondary-50 rounded-xl p-4">
+        <p className="text-sm font-medium text-secondary-700 mb-3 flex items-center gap-2">
+          <Upload className="w-4 h-4" />
+          Optional ZIP with images (max 50MB)
+        </p>
+        <div className="flex items-center gap-3">
+          <input
+            ref={zipInputRef}
+            type="file"
+            accept=".zip"
+            onChange={handleZipSelect}
+            className="hidden"
+          />
+          <Button variant="secondary" onClick={() => zipInputRef.current?.click()}>
+            Select ZIP
+          </Button>
+          {zipFile && (
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-secondary-700">{zipFile.name}</p>
+              <button
+                onClick={() => setZipFile(null)}
+                className="text-sm text-danger-600 hover:text-danger-700"
+              >
+                Remove
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

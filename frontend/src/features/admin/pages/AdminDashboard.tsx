@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import logger from '../../../utils/logger';
+
+logger.fileLoaded('features/admin/pages/AdminDashboard.tsx');
 import { motion } from 'framer-motion';
 import { Users, Settings, Trash2, Plus } from 'lucide-react';
 import Button from '../../../components/Button';
@@ -171,7 +174,7 @@ const AdminDashboard: React.FC = () => {
       setUserFormData({ email: '', password: '', role: 'Teacher', name: '' });
       fetchUsers();
     } catch (err) {
-      console.error('[ERROR] Exception creating user:', err);
+      logger.error('ADMIN', `[ERROR] Exception creating user: ${String(err)}`);
       setError(err instanceof Error ? err.message : 'Failed to create user');
     } finally {
       setLoading(false);

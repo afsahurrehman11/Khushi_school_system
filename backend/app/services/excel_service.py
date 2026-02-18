@@ -17,6 +17,7 @@ from typing import List, Dict, Any, Tuple, Optional
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from app.utils.student_id_utils import generate_imported_student_id, validate_student_id_uniqueness
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -37,12 +38,13 @@ TEMPLATE_COLUMNS = [
     "Parent_Contact",
     "Address",
     "Admission_Date",
+    "Image_Name",
 ]
 
 REQUIRED_COLUMNS = {"Student_ID", "Full_Name", "Roll_Number", "Class", "Parent_CNIC"}
 
 EXAMPLE_ROW = [
-    "STU2025001",
+    "1",  # Will be converted to 0000-1
     "Ali Ahmed",
     "101",
     "Grade-5",
@@ -54,6 +56,7 @@ EXAMPLE_ROW = [
     "03001234567",
     "123 Main St, Lahore",
     "2025-04-01",
+    "ali_ahmed.jpg",
 ]
 
 GENDER_MAP: Dict[str, str] = {
@@ -127,8 +130,10 @@ def generate_sample_template() -> bytes:
     ws.cell(row=5, column=1, value="• Dark blue columns are REQUIRED.").font = Font(color="1F4E79")
     ws.cell(row=6, column=1, value="• Light blue columns are optional.").font = Font(color="4472C4")
     ws.cell(row=7, column=1, value="• Date format: YYYY-MM-DD").font = Font(color="808080")
-    ws.cell(row=8, column=1, value="• Gender: Male / Female / Other").font = Font(color="808080")
-    ws.cell(row=9, column=1, value="• Remove this example row before importing.").font = Font(color="808080")
+    ws.cell(row=8, column=1, value="• Student_ID: Enter numeric ID (will be prefixed with 0000- automatically)").font = Font(color="808080")
+    ws.cell(row=9, column=1, value="• Gender: Male / Female / Other").font = Font(color="808080")
+    ws.cell(row=10, column=1, value="• Image_Name: Filename of student image in ZIP file (e.g., john.jpg)").font = Font(color="808080")
+    ws.cell(row=11, column=1, value="• Remove this example row before importing.").font = Font(color="808080")
 
     bio = BytesIO()
     wb.save(bio)
@@ -245,6 +250,7 @@ def parse_and_validate_rows(xlsx_bytes: bytes) -> Dict[str, Any]:
         parent_contact = _cell(row_data, "parent_contact")
         address = _cell(row_data, "address")
         admission_date_raw = _cell(row_data, "admission_date")
+        image_name = _cell(row_data, "image_name")
 
         # Required field checks
         if not student_id:
@@ -317,6 +323,7 @@ def parse_and_validate_rows(xlsx_bytes: bytes) -> Dict[str, Any]:
             "parent_contact": parent_contact,
             "address": address,
             "admission_date": admission_date or datetime.utcnow().strftime("%Y-%m-%d"),
+            "image_name": image_name,
         })
 
     wb.close()
@@ -333,26 +340,25 @@ def parse_and_validate_rows(xlsx_bytes: bytes) -> Dict[str, Any]:
 def check_db_duplicates(valid_rows: List[Dict], db) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """
     Check valid rows against database for duplicates.
-    Returns (clean_rows, db_duplicate_rows, db_existing_records_for_update).
+    For import, generate student_id as 0000-<excel_id> and check uniqueness.
     """
     clean: List[Dict] = []
     db_dups: List[Dict] = []
     existing_for_update: List[Dict] = []
 
     for row in valid_rows:
-        sid = row["student_id"]
-        rn = row["roll_number"]
+        excel_id = row["student_id"]
+        generated_student_id = generate_imported_student_id(excel_id)
 
-        existing_by_id = db.students.find_one({"student_id": sid})
-        existing_by_roll = db.students.find_one({"roll_number": rn, "class_id": row["class_id"]})
+        # Check if generated student_id exists
+        existing_by_id = db.students.find_one({"student_id": generated_student_id})
 
         if existing_by_id:
-            db_dups.append({"row": row["row_num"], "column": "Student_ID", "value": sid, "reason": "Duplicate value — already exists in database"})
-            existing_for_update.append({**row, "_existing_id": str(existing_by_id["_id"])})
-        elif existing_by_roll:
-            db_dups.append({"row": row["row_num"], "column": "Roll_Number", "value": rn, "reason": "Duplicate value — already exists in database"})
-            existing_for_update.append({**row, "_existing_id": str(existing_by_roll["_id"])})
+            db_dups.append({"row": row["row_num"], "column": "Student_ID", "value": excel_id, "reason": f"Generated ID {generated_student_id} already exists in database"})
+            existing_for_update.append({**row, "_existing_id": str(existing_by_id["_id"]), "student_id": generated_student_id})
         else:
+            row["student_id"] = generated_student_id
+            row["admission_year"] = 0  # For imported students
             clean.append(row)
 
     return clean, db_dups, existing_for_update

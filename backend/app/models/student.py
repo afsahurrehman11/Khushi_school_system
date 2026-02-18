@@ -18,11 +18,13 @@ class ContactInfo(BaseModel):
     emergency_contact: Optional[str] = None
 
 class StudentSchema(BaseModel):
+    school_id: str  # *** NEW: School isolation ***
     student_id: str
     full_name: str
     gender: str
     date_of_birth: str  # YYYY-MM-DD format
     admission_date: str  # YYYY-MM-DD format
+    admission_year: int  # Year of admission
     class_id: str
     section: str
     roll_number: str
@@ -32,6 +34,15 @@ class StudentSchema(BaseModel):
     guardian_info: Optional[GuardianInfo] = None
     contact_info: Optional[ContactInfo] = None
     academic_year: str
+    # Image fields
+    profile_image_url: Optional[str] = None
+    profile_image_public_id: Optional[str] = None
+    image_uploaded_at: Optional[datetime] = None
+    # Face embedding fields
+    face_embedding: Optional[List[float]] = None
+    embedding_model: Optional[str] = None
+    embedding_generated_at: Optional[datetime] = None
+    embedding_status: Optional[str] = None  # "pending", "generated", "failed"
 
 class StudentInDB(StudentSchema):
     id: Optional[str] = None
@@ -41,6 +52,7 @@ class StudentInDB(StudentSchema):
 class StudentUpdate(BaseModel):
     full_name: Optional[str] = None
     gender: Optional[str] = None
+    admission_year: Optional[int] = None
     class_id: Optional[str] = None
     section: Optional[str] = None
     roll_number: Optional[str] = None
@@ -49,3 +61,6 @@ class StudentUpdate(BaseModel):
     status: Optional[str] = None
     guardian_info: Optional[GuardianInfo] = None
     contact_info: Optional[ContactInfo] = None
+    profile_image_url: Optional[str] = None
+    profile_image_public_id: Optional[str] = None
+    image_uploaded_at: Optional[datetime] = None

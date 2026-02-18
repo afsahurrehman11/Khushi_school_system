@@ -2,6 +2,7 @@ from .user import *
 from .student import *
 from .fee import *
 from .class_subject import *
+from .attendance import *
 
 __all__ = [
     # User models
@@ -17,10 +18,14 @@ __all__ = [
     "PaymentInDB", "FeeCreate", "FeeUpdate", "FeeGenerate",
     
     # Class/Subject models
-    "SubjectSchema", "SubjectInDB", "ClassSchema", "ClassInDB"
-    ,
+    "SubjectSchema", "SubjectInDB", "ClassSchema", "ClassInDB",
+    
     # Teacher models
     "TeacherSchema", "TeacherInDB", "TeacherCreate", "TeacherUpdate",
+    
     # Grade models
-    "GradeSchema", "GradeInDB", "GradeUpdate"
+    "GradeSchema", "GradeInDB", "GradeUpdate",
+    
+    # Attendance models
+    "AttendanceSchema", "AttendanceInDB", "AttendanceUpdate", "AttendanceResponse", "AttendanceSummary"
 ]

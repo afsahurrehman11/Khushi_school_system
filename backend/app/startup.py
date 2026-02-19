@@ -111,6 +111,9 @@ def ensure_default_roles():
         "grades.read",
         "academics.view_classes",
         "academics.manage_attendance",
+        "whatsapp.view",
+        "whatsapp.send",
+        "whatsapp.manage",
     ]
 
     existing = db.roles.find_one({"name": "Admin"})

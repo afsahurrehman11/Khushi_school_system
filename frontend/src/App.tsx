@@ -11,6 +11,7 @@ import { ChalanList } from './features/chalans';
 import { config } from './config';
 import { AccountantDashboard, FeePage, ReportsPage } from './features/accountant';
 import { AdminDashboard, StudentImportExport } from './features/admin';
+import { WhatsAppDashboard } from './features/whatsapp';
 import ImportNotificationToast from './features/students/components/ImportNotificationToast';
 import NotificationToast from './components/NotificationToast';
 // import startNotificationSSE from './features/accountant/services/NotificationSSE';
@@ -245,6 +246,10 @@ function App() {
                 <Route
                   path="/teachers"
                   element={<ProtectedRoute element={<TeacherList />} requiredRoles={['Admin']} />}
+                />
+                <Route
+                  path="/whatsapp-bot"
+                  element={<ProtectedRoute element={<WhatsAppDashboard />} requiredRoles={['Admin']} />}
                 />
                 <Route path="/settings" element={
                   <ProtectedRoute element={

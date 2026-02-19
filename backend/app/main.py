@@ -29,7 +29,7 @@ import sys
 from app.config import settings
 from app.database import get_db
 from app.startup import ensure_collections_exist
-from app.routers import auth, users, students, fees, classes, teachers, grades, accounting, payments, reports, root, student_import_export, chalans, fee_categories, class_fee_assignments, notifications, fee_payments, accountant, payment_methods, schools, root_admin, cash_sessions, statistics, attendance
+from app.routers import auth, users, students, fees, classes, teachers, grades, accounting, payments, reports, root, student_import_export, chalans, fee_categories, class_fee_assignments, notifications, fee_payments, accountant, payment_methods, schools, root_admin, cash_sessions, statistics, attendance, whatsapp
 
 # Configure logging (level configurable via LOG_LEVEL env var / settings.log_level)
 log_level_str = getattr(settings, "log_level", "INFO")
@@ -141,6 +141,7 @@ app.include_router(payment_methods, tags=["Payment Methods"])
 app.include_router(cash_sessions, tags=["Cash Sessions"])
 app.include_router(statistics, tags=["Statistics"])
 app.include_router(attendance, prefix="/api", tags=["Attendance"])
+app.include_router(whatsapp, tags=["WhatsApp"])
 
 @app.on_event("startup")
 async def startup_event():

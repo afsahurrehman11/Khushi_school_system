@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     
     # School Configuration
     school_name: str = os.environ.get("SCHOOL_NAME", "school")
+    
+    # WhatsApp Cloud API Configuration
+    # Get these from Meta Business Suite > WhatsApp > API Setup
+    whatsapp_api_key: str = os.environ.get("WHATSAPP_API_KEY", "")
+    whatsapp_phone_number_id: str = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
+    whatsapp_business_account_id: str = os.environ.get("WHATSAPP_BUSINESS_ACCOUNT_ID", "")
 
     class Config:
         env_file = ".env"

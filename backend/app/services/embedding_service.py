@@ -16,8 +16,11 @@ except ImportError:
     HAS_CV2 = False
 
 try:
-    from deepface import DeepFace
-    HAS_DEEPFACE = True
+    # Don't import DeepFace at module import time — it pulls heavy TensorFlow
+    # dependencies (and retinaface which requires `tf-keras`). Lazy-load
+    # DeepFace when actually needed to allow the app to start without TF.
+    HAS_DEEPFACE = False
+    _DEEPFACE = None
 except ImportError:
     HAS_DEEPFACE = False
 
@@ -79,8 +82,9 @@ class EmbeddingGenerator:
             elif image_array.shape[2] == 4:  # RGBA
                 image_array = image_array[:, :, :3]
             
-            # Try DeepFace if available (most reliable)
-            if HAS_DEEPFACE:
+            # Try DeepFace if available (most reliable). Lazy-import DeepFace
+            # only when needed to avoid importing TF at startup.
+            if EmbeddingGenerator._ensure_deepface():
                 return EmbeddingGenerator._detect_with_deepface(image_array)
             
             # Fall back to face_recognition
@@ -101,7 +105,8 @@ class EmbeddingGenerator:
     def _detect_with_deepface(image_array: np.ndarray) -> Optional[Image.Image]:
         """Detect face using DeepFace"""
         try:
-            results = DeepFace.extract_faces(image_array, enforce_detection=True)
+            # use the lazy-loaded DeepFace module
+            results = _DEEPFACE.extract_faces(image_array, enforce_detection=True)
             if results and len(results) > 0:
                 # Get the face region from the first detected face
                 face_obj = results[0]
@@ -118,6 +123,24 @@ class EmbeddingGenerator:
         except Exception as e:
             logger.warning(f"DeepFace detection failed: {str(e)}")
             return None
+
+    @staticmethod
+    def _ensure_deepface() -> bool:
+        """Ensure DeepFace is imported and available at runtime.
+
+        Returns True if DeepFace is available and loaded into `_DEEPFACE`.
+        """
+        global _DEEPFACE, HAS_DEEPFACE
+        if _DEEPFACE is not None:
+            return True
+        try:
+            from deepface import DeepFace as _DF
+            _DEEPFACE = _DF
+            HAS_DEEPFACE = True
+            return True
+        except Exception:
+            HAS_DEEPFACE = False
+            return False
     
     @staticmethod
     def _detect_with_face_recognition(image_array: np.ndarray) -> Optional[Image.Image]:
@@ -165,7 +188,7 @@ class EmbeddingGenerator:
             Normalized embedding vector as list or None if failed
         """
         try:
-            if not HAS_DEEPFACE:
+            if not EmbeddingGenerator._ensure_deepface():
                 logger.error("DeepFace not available for embedding generation")
                 return None
             
@@ -177,7 +200,7 @@ class EmbeddingGenerator:
                 face_array = np.stack([face_array] * 3, axis=-1)
             
             # Generate embedding using DeepFace
-            embedding_objs = DeepFace.represent(
+            embedding_objs = _DEEPFACE.represent(
                 face_array,
                 model_name="VGGFace2",
                 enforce_detection=False

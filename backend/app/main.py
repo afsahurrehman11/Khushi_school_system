@@ -33,6 +33,8 @@ import logging
 import os
 import json
 import sys
+import asyncio
+import httpx
 from app.config import settings
 from app.database import get_db
 from app.startup import ensure_collections_exist
@@ -107,6 +109,34 @@ for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     lg.handlers = [handler]
     lg.setLevel(log_level)
 logger = logging.getLogger(__name__)
+
+
+# --- Self-ping (keep-alive) background task ---------------------------------
+async def _self_ping_loop(url: str, interval_minutes: int, stop_event: asyncio.Event) -> None:
+    """Periodically ping the given `url` every `interval_minutes` minutes.
+
+    Runs until `stop_event` is set. Logs success (status code) or failure.
+    """
+    interval_seconds = max(1, int(interval_minutes)) * 60
+    client = httpx.AsyncClient(timeout=10.0)
+    try:
+        while not stop_event.is_set():
+            try:
+                resp = await client.get(url)
+                logger.info("SELF-PING", extra={"msg": f"Ping {url} -> {resp.status_code}"})
+            except Exception as e:
+                logger.warning(f"SELF-PING failed for {url}: {e}")
+
+            # Wait for the interval or until stop_event is set
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+            except asyncio.TimeoutError:
+                # timeout expired -> continue loop
+                continue
+    finally:
+        await client.aclose()
+
+# ----------------------------------------------------------------------------
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -216,10 +246,36 @@ async def startup_event():
     logger.info("✅ All routers registered successfully")
     logger.info(f"📡 API running on configured origins: {settings.allowed_origins}")
 
+    # Start self-ping background task if enabled and URL provided
+    try:
+        if getattr(settings, "enable_self_ping", False) and settings.self_ping_url:
+            stop_event = asyncio.Event()
+            task = asyncio.create_task(_self_ping_loop(settings.self_ping_url, settings.self_ping_interval_minutes, stop_event))
+            app.state.self_ping_task = task
+            app.state.self_ping_stop_event = stop_event
+            logger.info(f"🔁 Self-ping background task started (every {settings.self_ping_interval_minutes} minutes) -> {settings.self_ping_url}")
+        else:
+            logger.info("🔕 Self-ping disabled (no SELF_PING_URL or explicitly disabled)")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to start self-ping background task: {e}")
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Application shutdown event"""
     logger.info("🛑 Shutting down Khushi ERP System API")
+    # Stop self-ping task if running
+    try:
+        task = getattr(app.state, "self_ping_task", None)
+        stop_event = getattr(app.state, "self_ping_stop_event", None)
+        if task and stop_event:
+            stop_event.set()
+            try:
+                await asyncio.wait_for(task, timeout=10.0)
+            except asyncio.TimeoutError:
+                task.cancel()
+            logger.info("🔁 Self-ping background task stopped")
+    except Exception as e:
+        logger.warning(f"⚠️ Error stopping self-ping task: {e}")
 
 @app.get("/")
 async def root():

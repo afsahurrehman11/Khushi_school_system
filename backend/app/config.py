@@ -74,10 +74,24 @@ class Settings(BaseSettings):
     whatsapp_phone_number_id: str = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
     whatsapp_business_account_id: str = os.environ.get("WHATSAPP_BUSINESS_ACCOUNT_ID", "")
 
+    # Self-ping (keep-alive) configuration
+    # Provide `SELF_PING_URL` as the deployed application URL (including scheme),
+    # e.g. https://my-app.onrender.com
+    self_ping_url: Optional[str] = os.environ.get("SELF_PING_URL", None)
+    # Interval in minutes between pings (default 57)
+    self_ping_interval_minutes: int = int(os.environ.get("SELF_PING_INTERVAL_MINUTES", 57))
+    # Whether to enable the self-ping background task. If not set, it's enabled
+    # when `SELF_PING_URL` is provided.
+    enable_self_ping: bool = os.environ.get("ENABLE_SELF_PING", "").lower() in ("1", "true", "yes")
+
     class Config:
         env_file = ".env"
 
 settings = Settings()
+
+# If enable_self_ping wasn't explicitly set via env, enable it when a URL is present
+if not settings.enable_self_ping and settings.self_ping_url:
+    settings.enable_self_ping = True
 
 # Ensure `settings.database_name` is set. Prefer explicit setting, then URI
 # path, then hard-coded default to preserve existing behavior.

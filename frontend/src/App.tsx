@@ -12,6 +12,7 @@ import { config } from './config';
 import { AccountantDashboard, FeePage, ReportsPage } from './features/accountant';
 import { AdminDashboard, StudentImportExport } from './features/admin';
 import { WhatsAppDashboard } from './features/whatsapp';
+import { FaceDashboard, FaceStudents, FaceEmployees, FaceRecognition, FaceSettings } from './features/face';
 import ImportNotificationToast from './features/students/components/ImportNotificationToast';
 import NotificationToast from './components/NotificationToast';
 // import startNotificationSSE from './features/accountant/services/NotificationSSE';
@@ -250,6 +251,27 @@ function App() {
                 <Route
                   path="/whatsapp-bot"
                   element={<ProtectedRoute element={<WhatsAppDashboard />} requiredRoles={['Admin']} />}
+                />
+                {/* Face Recognition Routes */}
+                <Route
+                  path="/face-app"
+                  element={<ProtectedRoute element={<FaceDashboard />} requiredRoles={['Admin', 'Teacher']} />}
+                />
+                <Route
+                  path="/face-app/students"
+                  element={<ProtectedRoute element={<FaceStudents />} requiredRoles={['Admin', 'Teacher']} />}
+                />
+                <Route
+                  path="/face-app/employees"
+                  element={<ProtectedRoute element={<FaceEmployees />} requiredRoles={['Admin']} />}
+                />
+                <Route
+                  path="/face-app/recognition"
+                  element={<ProtectedRoute element={<FaceRecognition />} requiredRoles={['Admin', 'Teacher']} />}
+                />
+                <Route
+                  path="/face-app/settings"
+                  element={<ProtectedRoute element={<FaceSettings />} requiredRoles={['Admin']} />}
                 />
                 <Route path="/settings" element={
                   <ProtectedRoute element={

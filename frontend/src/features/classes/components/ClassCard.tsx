@@ -12,7 +12,6 @@ interface Props {
   id?: string; 
   name?: string; 
   code?: string; 
-  capacity?: number; 
   onEdit?: () => void; 
   onDelete?: () => void; 
   assignments?: Assignment[];
@@ -21,7 +20,7 @@ interface Props {
 }
 
 const ClassCard: React.FC<Props> = ({ 
-  id, name, code, capacity, onEdit, onDelete, assignments = [],
+  id, name, code, onEdit, onDelete, assignments = [],
 }) => {
   const navigate = useNavigate();
   const title = name || code || id || 'Untitled Class';
@@ -97,7 +96,7 @@ const ClassCard: React.FC<Props> = ({
         <div className="flex items-start justify-between">
           <div className="flex-1">
             <h4 className="font-semibold text-primary-800">{title}</h4>
-            <p className="text-sm text-secondary-500">{code ? `${code} • ` : ''}Capacity: {capacity || '—'}</p>
+            <p className="text-sm text-secondary-500">{code ? `${code} • ` : ''}</p>
 
             {assignments && assignments.length > 0 && (
               <div className="mt-3 space-y-2">

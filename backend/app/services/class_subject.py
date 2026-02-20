@@ -296,7 +296,26 @@ def create_class(class_name: str, section: str, assigned_subjects: list = None, 
         logger.error(f"❌ Cannot create class without schoolId")
         return None
 
-    query = {"class_name": class_name, "section": section, "school_id": school_id}
+    # normalize class and section for duplicate checks (trim, collapse spaces, lowercase)
+    def _norm(s: str):
+        return (s or '').replace('\u00A0', ' ').replace('\t', ' ').strip()
+    def _normalize_key(s: str):
+        return ' '.join((_norm(s) or '').split()).strip().lower()
+
+    class_norm = _normalize_key(class_name or '')
+    section_norm = _normalize_key(section or '')
+
+    # check duplicates using normalized fields when available
+    query = {"school_id": school_id}
+    if class_norm:
+        query["class_name_norm"] = class_norm
+    else:
+        query["class_name"] = class_name
+    if section_norm:
+        query["section_norm"] = section_norm
+    else:
+        query["section"] = section
+
     if db.classes.find_one(query):
         logger.warning(f"[SCHOOL:{school_id}] Class {class_name}/{section} already exists")
         return None
@@ -320,7 +339,9 @@ def create_class(class_name: str, section: str, assigned_subjects: list = None, 
 
     cls = {
         "class_name": class_name,
+        "class_name_norm": class_norm,
         "section": section,
+        "section_norm": section_norm,
         "assigned_subjects": norm_assigned,
         "assigned_teachers": assigned_teachers or [],
         "school_id": school_id,

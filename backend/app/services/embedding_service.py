@@ -4,6 +4,7 @@ import logging
 from typing import Optional, Tuple
 from PIL import Image
 import io
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -222,4 +223,34 @@ class EmbeddingGenerator:
             
         except Exception as e:
             logger.error(f"Embedding generation pipeline error: {str(e)}")
+            return None, "failed"
+    
+    @staticmethod
+    def generate_embedding_from_url(image_url: str, student_id: str = "unknown") -> Tuple[Optional[list], Optional[str]]:
+        """
+        Generate face embedding from image URL (e.g., Cloudinary)
+        
+        Args:
+            image_url: URL to the image
+            student_id: Student ID for logging purposes
+            
+        Returns:
+            Tuple of (embedding, status)
+        """
+        try:
+            # Download image from URL
+            response = requests.get(image_url, timeout=10)
+            response.raise_for_status()
+            
+            # Convert to PIL Image
+            pil_image = Image.open(io.BytesIO(response.content))
+            
+            # Generate embedding
+            return EmbeddingGenerator.generate_embedding_from_image(pil_image)
+            
+        except requests.RequestException as e:
+            logger.error(f"Failed to download image for {student_id}: {str(e)}")
+            return None, "failed"
+        except Exception as e:
+            logger.error(f"Embedding generation from URL failed for {student_id}: {str(e)}")
             return None, "failed"

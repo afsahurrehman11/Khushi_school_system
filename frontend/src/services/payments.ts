@@ -83,7 +83,6 @@ class PaymentsService {
    */
   async updateFeePayment(id: string, updates: Partial<FeePayment>): Promise<FeePayment> {
     try {
-      const schoolId = authService.getSchoolId();
       const adminEmail = authService.getUser()?.email || 'unknown';
       logger.info('PAYMENTS', `Updating fee payment ${id} by ${adminEmail}`);
       
@@ -148,7 +147,6 @@ class PaymentsService {
    */
   async createPayment(payment: Partial<Payment>): Promise<Payment> {
     try {
-      const schoolId = authService.getSchoolId();
       const adminEmail = authService.getUser()?.email || 'unknown';
       logger.info('PAYMENTS', `Creating payment ${payment.amount} by ${adminEmail}`);
       

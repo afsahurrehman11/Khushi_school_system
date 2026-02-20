@@ -157,7 +157,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
 
     try {
       const res = await uploadForPreview(file, duplicateAction, zipFile);
-      logger.info('IMPORT', `✅ Preview generated: ${res.rows?.length || 0} rows`);
+      logger.info('IMPORT', `✅ Preview generated: ${res.total_rows ?? res.preview_data?.length ?? 0} rows`);
       setPreview(res);
       setStep('preview');
     } catch (err: any) {

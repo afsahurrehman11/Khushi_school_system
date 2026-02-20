@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, X } from 'lucide-react';
+import { ArrowLeft, Check } from 'lucide-react';
 import Button from '../../../components/Button';
 import { getAttendanceForDate, markAttendance } from '../services/attendanceApi';
 import api from '../../../utils/api';
@@ -23,7 +23,6 @@ const MarkAttendance: React.FC = () => {
 
   const [students, setStudents] = useState<StudentAttendance[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Load students and existing attendance

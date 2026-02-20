@@ -43,6 +43,8 @@ class StudentSchema(BaseModel):
     embedding_model: Optional[str] = None
     embedding_generated_at: Optional[datetime] = None
     embedding_status: Optional[str] = None  # "pending", "generated", "failed"
+    embedding_version: Optional[str] = None
+    face_image_updated_at: Optional[datetime] = None
 
 class StudentInDB(StudentSchema):
     id: Optional[str] = None

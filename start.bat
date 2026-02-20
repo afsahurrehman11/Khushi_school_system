@@ -22,7 +22,10 @@ if not exist %VENV_PY% (
 	set VENV_PY=python
 )
 
-start "Backend Server" cmd /k "cd /d "%REPO_DIR%\backend" && %VENV_PY% main.py"
+:: Development mode: disable RBAC permission checks to allow all users full access
+set DISABLE_RBAC=1
+
+start "Backend Server" cmd /k "cd /d "%REPO_DIR%\backend" && set DISABLE_RBAC=1 && %VENV_PY% main.py"
 
 :: Wait a bit to give backend process time to initialize
 timeout /t 2 /nobreak >nul

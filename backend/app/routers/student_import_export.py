@@ -249,7 +249,7 @@ async def upload_and_validate(
             "duplicate_rows": all_duplicate_count,
             "errors": all_errors[:100],  # cap preview at 100 errors
             "duplicate_action": duplicate_action,
-            "has_images": zip_content is not None,
+            "has_images": zip_path is not None,
             "preview_data": [
                 {k: v for k, v in r.items() if not k.startswith("_")}
                 for r in clean_rows[:20]
@@ -366,6 +366,56 @@ async def _run_import_background(import_id: str, user_email: str, school_id: str
         })
 
         logger.info(f"🟢 [BULK] Completed: {success} successful, {fail + log.get('failed_rows', 0)} failed")
+        
+        # Trigger embedding generation for newly imported students with images
+        try:
+            logger.info(f"🔵 [EMBEDDING] Triggering embedding generation for imported students")
+            from app.services.embedding_service import EmbeddingGenerator
+            
+            # Get newly created students with pending embeddings
+            newly_imported = db.students.find({
+                "school_id": school_id,
+                "embedding_status": "pending",
+                "profile_image_url": {"$exists": True, "$ne": None}
+            })
+            
+            embedding_count = 0
+            for student in newly_imported:
+                try:
+                    embedding, status = EmbeddingGenerator.generate_embedding_from_url(
+                        student.get("profile_image_url"),
+                        student.get("student_id")
+                    )
+                    if embedding and status == "generated":
+                        db.students.update_one(
+                            {"_id": student["_id"]},
+                            {
+                                "$set": {
+                                    "face_embedding": embedding,
+                                    "embedding_status": "generated",
+                                    "embedding_generated_at": datetime.utcnow(),
+                                    "embedding_model": "VGGFace2",
+                                    "embedding_version": "1.0",
+                                }
+                            }
+                        )
+                        embedding_count += 1
+                        logger.info(f"🟢 [EMBEDDING] Generated for {student.get('student_id')}")
+                    else:
+                        db.students.update_one(
+                            {"_id": student["_id"]},
+                            {"$set": {"embedding_status": "failed"}}
+                        )
+                except Exception as e:
+                    logger.warning(f"⚠️ [EMBEDDING] Failed for {student.get('student_id')}: {str(e)}")
+                    db.students.update_one(
+                        {"_id": student["_id"]},
+                        {"$set": {"embedding_status": "failed"}}
+                    )
+            
+            logger.info(f"🟢 [EMBEDDING] Generated embeddings for {embedding_count} students")
+        except Exception as e:
+            logger.warning(f"⚠️ [EMBEDDING] Embedding generation failed: {str(e)}")
         
         # Publish notification
         notification = {

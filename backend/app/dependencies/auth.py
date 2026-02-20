@@ -7,8 +7,13 @@ from app.models.user import TokenData
 from app.services.user import get_user_by_email
 from typing import Optional
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
+# ===== TEMPORARY: Disable RBAC completely for development =====
+# All permission checks are bypassed. Remove this line and restore env var check for production.
+RBAC_DISABLED = True
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -113,6 +118,10 @@ async def get_current_root(current_user: dict = Depends(get_current_user)) -> di
 def check_permission(required_permission: str):
     """Check if user has required permission"""
     async def permission_checker(current_user: dict = Depends(get_current_user)):
+        # Short-circuit and allow all actions when RBAC is disabled.
+        if RBAC_DISABLED:
+            logger.info("⚠️ RBAC disabled via DISABLE_RBAC — allowing all permissions for %s", current_user.get("email"))
+            return current_user
         from app.services.user import get_role_by_name
 
         role_name = current_user.get("role")

@@ -67,6 +67,14 @@ def create_indexes():
         # Classes - class_name/section unique per school
         logger.debug("Creating classes indexes")
         db.classes.create_index([("school_id", 1), ("class_name", 1), ("section", 1)], unique=True)
+        # also create normalized fields index to enforce normalization-based uniqueness
+        try:
+            db.classes.create_index([("school_id", 1), ("class_name_norm", 1), ("section_norm", 1)], unique=True)
+            logger.debug("Created normalized class_name_norm/section_norm index")
+            indexes_created += 1
+        except Exception:
+            # ignore if already exists or driver/version doesn't support
+            pass
         db.classes.create_index([("school_id", 1), ("created_at", -1)])
         indexes_created += 2
         logger.debug("Classes indexes created")

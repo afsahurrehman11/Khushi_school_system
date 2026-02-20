@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import logger from '../utils/logger';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Users, Settings, Bell, Menu, GraduationCap, LogOut, DollarSign, TrendingUp, Filter, FileSpreadsheet, MessageSquare } from 'lucide-react';
+import { Users, Settings, Bell, Menu, GraduationCap, LogOut, DollarSign, TrendingUp, Filter, FileSpreadsheet, MessageSquare, ScanFace } from 'lucide-react';
 import CashVerificationModal from '../features/accountant/components/CashVerificationModal';
 import { cashSessionService, CashSession } from '../features/accountant/services/cashSessionService';
 
@@ -59,6 +59,7 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
     { name: 'Accounting', href: '/dashboard/accountant', icon: TrendingUp, permission: 'accounting.dashboard_view' },
     { name: 'Reports', href: '/reports', icon: Filter, permission: 'reports.view' },
     { name: 'WhatsApp Bot', href: '/whatsapp-bot', icon: MessageSquare, permission: 'whatsapp.view' },
+    { name: 'Face App', href: '/face-app', icon: ScanFace, roles: ['Admin', 'Teacher'] },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 

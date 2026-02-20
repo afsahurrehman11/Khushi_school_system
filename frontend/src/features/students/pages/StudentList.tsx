@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, AlertCircle, ChevronDown, UserPlus, Upload } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, AlertCircle, ChevronDown, UserPlus } from 'lucide-react';
 import Modal from '../../../components/Modal';
 import Button from '../../../components/Button';
 import SearchBar from '../../../components/SearchBar';
@@ -12,13 +11,11 @@ import ViewToggle from '../../../components/ViewToggle';
 import StudentCard from '../../../components/StudentCard';
 import AddStudentModal from '../components/AddStudentModal';
 import MissingPhotosSection from '../components/MissingPhotosSection';
-import EmbeddingControlPanel from '../components/EmbeddingControlPanel';
 import BulkImportWithImagesModal from '../components/BulkImportWithImagesModal';
 import { apiCallJSON, getAuthHeaders } from '../../../utils/api';
 import { Student } from '../studentsData';
 
 const StudentList: React.FC = () => {
-  const navigate = useNavigate();
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -214,9 +211,6 @@ const StudentList: React.FC = () => {
               <p className="text-secondary-600">Select a class to view and manage students</p>
             </div>
             <div className="flex items-center gap-3">
-              <Button variant="secondary" size="sm" onClick={() => setBulkImportOpen(true)}>
-                <Upload className="w-4 h-4 mr-1" />Bulk Import
-              </Button>
               <Button variant="primary" onClick={async () => {
                 // Fetch classes first, then open modal so dropdowns are ready
                 try {
@@ -252,7 +246,6 @@ const StudentList: React.FC = () => {
           )}
 
           <MissingPhotosSection />
-          <EmbeddingControlPanel />
 
           <motion.div variants={gridContainer} initial="hidden" animate="show" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {classStats.map((classInfo) => (

@@ -59,7 +59,6 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
   const [inlineImageFile, setInlineImageFile] = useState<File | null>(null);
   const [inlinePreviewUrl, setInlinePreviewUrl] = useState<string | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
-  const [inlineUploading, setInlineUploading] = useState(false);
   const [showInlineCamera, setShowInlineCamera] = useState(false);
   const [inlineStream, setInlineStream] = useState<MediaStream | null>(null);
   const [classesList, setClassesList] = useState<Array<any>>([]);
@@ -152,7 +151,6 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
 
         // If user pre-selected or captured an image, upload it for the new student
         if (inlineImageFile) {
-          setInlineUploading(true);
           try {
             const formDataImg = new FormData();
             formDataImg.append('file', inlineImageFile);
@@ -179,11 +177,9 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
               URL.revokeObjectURL(inlinePreviewUrl);
               setInlinePreviewUrl(null);
             }
-          } catch (err: any) {
-            setInlineError(err.message || 'Image upload failed');
-          } finally {
-            setInlineUploading(false);
-          }
+            } catch (err: any) {
+              setInlineError(err.message || 'Image upload failed');
+            }
         }
 
         setFormData({ ...initialFormData });

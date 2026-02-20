@@ -29,7 +29,8 @@ import sys
 from app.config import settings
 from app.database import get_db
 from app.startup import ensure_collections_exist
-from app.routers import auth, users, students, fees, classes, teachers, grades, accounting, payments, reports, root, student_import_export, chalans, fee_categories, class_fee_assignments, notifications, fee_payments, accountant, payment_methods, schools, root_admin, cash_sessions, statistics, attendance, whatsapp
+from app.routers import auth, users, students, fees, classes, teachers, grades, accounting, payments, reports, root, student_import_export, chalans, fee_categories, class_fee_assignments, notifications, fee_payments, accountant, payment_methods, schools, root_admin, cash_sessions, statistics, attendance, whatsapp, face
+from app.services import face_service as _face_service_module
 
 # Configure logging (level configurable via LOG_LEVEL env var / settings.log_level)
 log_level_str = getattr(settings, "log_level", "INFO")
@@ -142,6 +143,7 @@ app.include_router(cash_sessions, tags=["Cash Sessions"])
 app.include_router(statistics, tags=["Statistics"])
 app.include_router(attendance, prefix="/api", tags=["Attendance"])
 app.include_router(whatsapp, tags=["WhatsApp"])
+app.include_router(face, tags=["Face Recognition"])
 
 @app.on_event("startup")
 async def startup_event():
@@ -170,6 +172,39 @@ async def startup_event():
             logger.error(f"❌ Collections check/creation failed: {exc}")
     else:
         logger.warning("⚠️ Skipping collection creation because the database is not connected.")
+
+    # Face recognition model & embedding cache: try disk cache first, else load from DB and persist
+    try:
+        # Attempt to load embeddings from disk cache
+        try:
+            counts = _face_service_module.load_cache_from_disk()
+            if (counts.get('students', 0) + counts.get('employees', 0)) > 0:
+                logger.info(f"✅ Face embeddings loaded from disk cache: {counts}")
+            else:
+                # Load from DB per-school and then persist
+                try:
+                    db = get_db()
+                    schools = list(db.schools.find()) if 'schools' in db.list_collection_names() else []
+                    if not schools:
+                        sample = db.users.find_one({"school_id": {"$exists": True}})
+                        if sample and sample.get('school_id'):
+                            schools = [{'_id': sample.get('school_id')}]
+
+                    for s in schools:
+                        sid = str(s.get('_id'))
+                        face_service = _face_service_module.FaceRecognitionService(db)
+                        await face_service.load_embeddings_to_cache(sid)
+
+                    # Persist to disk for faster future startups
+                    saved = _face_service_module.dump_cache_to_disk()
+                    logger.info(f"✅ Face embeddings cached to disk: {saved}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to load embeddings from DB or persist cache: {e}")
+        except Exception as e:
+            logger.warning(f"⚠️ Face cache disk load error: {e}")
+    except Exception as e:
+        # Importing or loading face services may fail if dependencies are missing; log and continue.
+        logger.warning(f"⚠️ Skipping face cache load on startup: {e}")
 
     logger.info("✅ All routers registered successfully")
     logger.info(f"📡 API running on configured origins: {settings.allowed_origins}")

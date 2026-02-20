@@ -4,76 +4,41 @@ import Button from '../../../components/Button';
 import ClassCard from '../components/ClassCard';
 import AddClassModal from '../components/AddClassModal';
 import { getClasses, deleteClass } from '../services/classesApi';
-import { getSubjects } from '../../subjects/services/subjectsApi';
-import api from '../../../utils/api';
 
 const ClassList: React.FC = () => {
   const [classes, setClasses] = useState<any[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [editClass, setEditClass] = useState<any | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
 
   const load = async () => {
+    setLoading(true);
     try {
-      // Fetch classes, subjects and teachers
-      const [data, subs, teachers] = await Promise.all([getClasses().catch(() => []), getSubjects().catch(() => []), api.get('/api/teachers').catch(() => [])]);
+      // Fetch classes directly from backend and render one card per DB record (class_name + section)
+      const data = await getClasses();
       const classesFromDb = Array.isArray(data) ? data : [];
-      const subjectList = Array.isArray(subs) ? subs : [];
-      const teacherList = Array.isArray(teachers) ? teachers : [];
 
-      const teacherMap: Record<string,string> = {};
-      teacherList.forEach((t:any) => { const id = t.id || t._id || t.teacherId || t.cnic; teacherMap[id] = t.name || t.fullName || id; });
-
-      // Build Grade 1..Grade 10 cards and aggregate assignments from subjects.assigned_classes
-      const grades = Array.from({ length: 10 }, (_, i) => `Grade ${i+1}`);
-      // map DB classes by name for linking
-      const classByName: Record<string, any> = {};
-      for (const cl of classesFromDb) {
-        const nameKey = (cl.class_name || cl.name || '').trim();
-        if (nameKey) classByName[nameKey] = cl;
-      }
-
-      const built: any[] = [];
-      for (const g of grades) {
-        // collect sections from DB and from subject assignments
-        const sections = new Set<string>();
-        for (const cl of classesFromDb) {
-          const nameKey = (cl.class_name || cl.name || '').trim();
-          if (nameKey === g) sections.add((cl.section || '').trim());
-        }
-        for (const s of subjectList) {
-          const assigned = Array.isArray(s.assigned_classes) ? s.assigned_classes : [];
-          for (const a of assigned) {
-            const cn = (a?.class_name || a?.class || '').trim();
-            if (cn === g) sections.add((a?.section || '').trim());
-          }
-        }
-        if (sections.size === 0) sections.add('');
-
-        for (const sec of sections) {
-          const dbClass = classesFromDb.find((cl:any) => ((cl.class_name || cl.name || '').trim() === g) && ((cl.section || '').trim() === sec));
-          const assignments: Array<{ subject:string; teacher:string; time:string }> = [];
-          for (const s of subjectList) {
-            const sName = s.subject_name || s.name || s.subject_code || (s.id || s._id) || '';
-            const assigned = Array.isArray(s.assigned_classes) ? s.assigned_classes : [];
-            for (const a of assigned) {
-              const className = (a?.class_name || a?.class || '').trim();
-              const section = (a?.section || '').trim();
-              if (!className) continue;
-              if (className === g && section === sec) {
-                const tid = a.teacher_id || a.teacher || '';
-                const teacherName = a.teacher_name || teacherMap[String(tid)] || String(tid) || 'Unknown';
-                assignments.push({ subject: sName, teacher: teacherName, time: a.time || '' });
-              }
-            }
-          }
-          const displayName = sec ? `${g} — ${sec}` : g;
-          built.push({ id: dbClass?.id || dbClass?._id, name: displayName, class_name: g, section: sec, capacity: dbClass?.capacity, assignments, _db: dbClass });
-        }
-      }
+        const built = classesFromDb.map((cl:any) => {
+        const className = (cl.class_name || cl.name || '').trim();
+        const section = (cl.section || '').trim();
+        const displayName = section ? `${className} — ${section}` : className;
+        const assignments = Array.isArray(cl.assigned_subjects) ? cl.assigned_subjects.map((a:any) => ({ subject: a.subject_name || a.subject || a.subject_id || '', teacher: a.teacher_name || a.teacher_id || '' , time: a.time || '' })) : [];
+        return {
+          id: cl.id || cl._id,
+          name: displayName,
+          class_name: className,
+          section: section,
+            // capacity removed
+          assignments,
+          _db: cl,
+        };
+      });
 
       setClasses(built);
     } catch (err) {
       setClasses([]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -89,16 +54,31 @@ const ClassList: React.FC = () => {
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {classes.map((c) => (
-            <ClassCard
-              key={c.id || c._id || c.class_name + '::' + (c.section||'') || c.name}
-              {...c}
-              onEdit={() => { setEditClass(c); setAddOpen(true); }}
-              onDelete={c.id ? async () => { await deleteClass(c.id); load(); } : undefined}
-            />
-          ))}
-        </div>
+        {loading ? (
+          <div className="py-16 flex items-center justify-center">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
+              <p className="text-secondary-600">Loading classes...</p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {classes.length === 0 ? (
+              <div className="col-span-1 md:col-span-3 bg-white rounded-xl shadow-soft p-8 text-center">
+                <p className="text-secondary-600">No classes found. Add a class to get started.</p>
+              </div>
+            ) : (
+              classes.map((c) => (
+                <ClassCard
+                  key={c.id || c._id || `${c.class_name || ''}::${c.section || ''}`}
+                  {...c}
+                  onEdit={() => { setEditClass(c); setAddOpen(true); }}
+                  onDelete={c.id ? async () => { await deleteClass(c.id); load(); } : undefined}
+                />
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       <AddClassModal isOpen={addOpen} onClose={() => setAddOpen(false)} cls={editClass} onSaved={() => load()} />

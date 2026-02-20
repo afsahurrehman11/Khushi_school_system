@@ -160,8 +160,6 @@ class StudentsService {
    */
   async importStudents(file: File): Promise<any> {
     try {
-      const schoolId = authService.getSchoolId();
-      const adminEmail = authService.getUser()?.email || 'unknown';
       logger.info('STUDENTS', `Importing students from: ${file.name}`);
       
       const formData = new FormData();
@@ -194,7 +192,6 @@ class StudentsService {
    */
   async confirmImport(importId: string): Promise<any> {
     try {
-      const schoolId = authService.getSchoolId();
       logger.info('STUDENTS', `Confirming import: ${importId}`);
       
       const response = await fetch(`${API_BASE_URL}/students-import-export/confirm/${importId}`, {
@@ -221,8 +218,6 @@ class StudentsService {
    */
   async exportStudents(classId?: string): Promise<Blob> {
     try {
-      const schoolId = authService.getSchoolId();
-      const adminEmail = authService.getUser()?.email || 'unknown';
       logger.info('STUDENTS', `Exporting students`);
       
       let url = `${API_BASE_URL}/students-import-export/export`;

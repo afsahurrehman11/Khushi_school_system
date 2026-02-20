@@ -124,11 +124,6 @@ const ClassDetails: React.FC = () => {
         <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">{fullName}</h1>
           <div className="flex flex-wrap gap-6 text-gray-600">
-            {classData.capacity && (
-              <div>
-                <span className="font-semibold">Capacity:</span> {classData.capacity} students
-              </div>
-            )}
             {classData.assignments && classData.assignments.length > 0 && (
               <div>
                 <span className="font-semibold">Subjects:</span> {classData.assignments.length}

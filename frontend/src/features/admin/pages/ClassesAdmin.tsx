@@ -8,7 +8,6 @@ type ClassRoom = {
   _id?: string;
   name?: string;
   section?: string;
-  capacity?: number;
 };
 
 const ClassesAdmin: React.FC = () => {
@@ -17,7 +16,7 @@ const ClassesAdmin: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [current, setCurrent] = useState<ClassRoom | null>(null);
-  const [form, setForm] = useState({ name: '', section: '', capacity: '' });
+  const [form, setForm] = useState({ name: '', section: '' });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -38,7 +37,7 @@ const ClassesAdmin: React.FC = () => {
   }, []);
 
   const openAdd = () => {
-    setForm({ name: '', section: '', capacity: '' });
+    setForm({ name: '', section: '' });
     setCurrent(null);
     setIsEditing(false);
     setShowModal(true);
@@ -46,7 +45,7 @@ const ClassesAdmin: React.FC = () => {
   };
 
   const openEdit = (c: ClassRoom) => {
-    setForm({ name: c.name || '', section: c.section || '', capacity: String(c.capacity || '') });
+    setForm({ name: c.name || '', section: c.section || '' });
     setCurrent(c);
     setIsEditing(true);
     setShowModal(true);
@@ -57,7 +56,7 @@ const ClassesAdmin: React.FC = () => {
     if (!form.name) return setError('Name is required');
     setError('');
     try {
-      const payload = { name: form.name, section: form.section, capacity: Number(form.capacity || 0) };
+      const payload = { name: form.name, section: form.section };
       
       if (isEditing && current?._id) {
         await api.put(`/api/classes/${current._id}`, payload);
@@ -109,7 +108,7 @@ const ClassesAdmin: React.FC = () => {
           <div className="p-3 border rounded flex items-center justify-between">
             <div>
               <div className="font-medium">{c.name}</div>
-              <div className="text-sm text-gray-500">Section: {c.section ?? '—'} • Capacity: {c.capacity ?? '—'}</div>
+              <div className="text-sm text-gray-500">Section: {c.section ?? '—'}</div>
             </div>
             <div className="flex items-center gap-3">
               <Button variant="ghost" onClick={() => openEdit(c)}>Edit</Button>
@@ -137,15 +136,7 @@ const ClassesAdmin: React.FC = () => {
               className="w-full mt-1 p-2 border rounded"
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium">Capacity</label>
-            <input
-              type="number"
-              value={form.capacity}
-              onChange={(e) => setForm({ ...form, capacity: e.target.value })}
-              className="w-full mt-1 p-2 border rounded"
-            />
-          </div>
+          {/* capacity removed */}
 
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>

@@ -23,5 +23,6 @@ from .cash_sessions import router as cash_sessions
 from .statistics import router as statistics
 from .attendance import router as attendance
 from .whatsapp import router as whatsapp
+from .face import router as face
 
-__all__ = ["auth", "users", "students", "fees", "classes", "teachers", "grades", "accounting", "payments", "reports", "root", "root_admin", "schools", "student_import_export", "chalans", "fee_categories", "class_fee_assignments", "notifications", "fee_payments", "accountant", "payment_methods", "cash_sessions", "statistics", "attendance", "whatsapp"]
+__all__ = ["auth", "users", "students", "fees", "classes", "teachers", "grades", "accounting", "payments", "reports", "root", "root_admin", "schools", "student_import_export", "chalans", "fee_categories", "class_fee_assignments", "notifications", "fee_payments", "accountant", "payment_methods", "cash_sessions", "statistics", "attendance", "whatsapp", "face"]

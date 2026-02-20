@@ -71,7 +71,6 @@ class TeachersService {
    */
   async createTeacher(teacher: Partial<Teacher>): Promise<Teacher> {
     try {
-      const schoolId = authService.getSchoolId();
       const adminEmail = authService.getUser()?.email || 'unknown';
       logger.info('TEACHERS', `Creating teacher ${teacher.firstName} by ${adminEmail}`);
       
@@ -100,7 +99,6 @@ class TeachersService {
    */
   async updateTeacher(id: string, updates: Partial<Teacher>): Promise<Teacher> {
     try {
-      const schoolId = authService.getSchoolId();
       const adminEmail = authService.getUser()?.email || 'unknown';
       logger.info('TEACHERS', `Updating teacher ${id} by ${adminEmail}`);
       
@@ -129,7 +127,6 @@ class TeachersService {
    */
   async deleteTeacher(id: string): Promise<void> {
     try {
-      const schoolId = authService.getSchoolId();
       const adminEmail = authService.getUser()?.email || 'unknown';
       logger.info('TEACHERS', `Deleting teacher ${id} by ${adminEmail}`);
       

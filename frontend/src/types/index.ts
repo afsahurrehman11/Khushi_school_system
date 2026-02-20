@@ -149,7 +149,6 @@ export interface Class {
   section?: string;
   grade?: string;
   classTeacherId?: string;
-  capacity?: number;
   createdAt: string;
   updatedAt: string;
   isActive: boolean;

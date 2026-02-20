@@ -26,22 +26,43 @@ from app.utils.student_id_utils import generate_imported_student_id, validate_st
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 TEMPLATE_COLUMNS = [
+    # Required columns (must appear first in template)
     "Student_ID",
     "Full_Name",
     "Roll_Number",
     "Class",
     "Section",
+    "Father_Name",
+    "Father_CNIC",
+    # Optional columns
     "Gender",
     "Date_of_Birth",
-    "Parent_Name",
-    "Parent_CNIC",
     "Parent_Contact",
     "Address",
     "Admission_Date",
     "Image_Name",
 ]
 
-REQUIRED_COLUMNS = {"Student_ID", "Full_Name", "Roll_Number", "Class", "Parent_CNIC"}
+# Required columns — must be present in uploaded file
+REQUIRED_COLUMNS = {
+    "student_id",
+    "full_name",
+    "roll_number",
+    "class",
+    "section",
+    "father_cnic",
+}
+
+# Optional columns — ignored if not present
+OPTIONAL_COLUMNS = {
+    "father_name",
+    "gender",
+    "date_of_birth",
+    "parent_contact",
+    "address",
+    "admission_date",
+    "image_name",
+}
 
 EXAMPLE_ROW = [
     "1",  # Will be converted to 0000-1
@@ -49,10 +70,10 @@ EXAMPLE_ROW = [
     "101",
     "Grade-5",
     "A",
-    "Male",
-    "2015-03-22",
     "Ahmed Khan",
     "12345-1234567-1",
+    "Male",
+    "2015-03-22",
     "03001234567",
     "123 Main St, Lahore",
     "2025-04-01",
@@ -127,13 +148,17 @@ def generate_sample_template() -> bytes:
 
     # Instructions row
     ws.cell(row=4, column=1, value="Instructions:").font = Font(bold=True)
-    ws.cell(row=5, column=1, value="• Dark blue columns are REQUIRED.").font = Font(color="1F4E79")
-    ws.cell(row=6, column=1, value="• Light blue columns are optional.").font = Font(color="4472C4")
-    ws.cell(row=7, column=1, value="• Date format: YYYY-MM-DD").font = Font(color="808080")
-    ws.cell(row=8, column=1, value="• Student_ID: Enter numeric ID (will be prefixed with 0000- automatically)").font = Font(color="808080")
-    ws.cell(row=9, column=1, value="• Gender: Male / Female / Other").font = Font(color="808080")
-    ws.cell(row=10, column=1, value="• Image_Name: Filename of student image in ZIP file (e.g., john.jpg)").font = Font(color="808080")
-    ws.cell(row=11, column=1, value="• Remove this example row before importing.").font = Font(color="808080")
+    ws.cell(row=5, column=1, value="• Dark blue columns are REQUIRED. All must be present in your file.").font = Font(color="1F4E79")
+    ws.cell(row=6, column=1, value="• Light blue columns are optional. You can include them or leave them blank.").font = Font(color="4472C4")
+    ws.cell(row=7, column=1, value="• Extra columns (beyond these) will be ignored during import.").font = Font(color="808080")
+    ws.cell(row=8, column=1, value="• Column order does NOT matter as long as headers match.").font = Font(color="808080")
+    ws.cell(row=9, column=1, value="• Date format: YYYY-MM-DD").font = Font(color="808080")
+    ws.cell(row=10, column=1, value="• Student_ID: Enter numeric ID (will be prefixed with 0000- automatically)").font = Font(color="808080")
+    ws.cell(row=11, column=1, value="• Father_CNIC: Required. Format: XXXXX-XXXXXXX-X").font = Font(color="808080")
+    ws.cell(row=12, column=1, value="• Section: Required. E.g., A, B, 1, 2").font = Font(color="808080")
+    ws.cell(row=13, column=1, value="• Gender: Optional. Male / Female / Other").font = Font(color="808080")
+    ws.cell(row=14, column=1, value="• Image_Name: Optional. Filename of student image in ZIP file (e.g., john.jpg)").font = Font(color="808080")
+    ws.cell(row=15, column=1, value="• Remove this example row before importing.").font = Font(color="808080")
 
     bio = BytesIO()
     wb.save(bio)
@@ -181,13 +206,18 @@ def _build_col_map(header_row: tuple) -> Dict[str, int]:
     return col_map
 
 
-def _check_template_match(col_map: Dict[str, int]) -> Optional[str]:
-    """Return an error message if the uploaded file doesn't match the template."""
-    expected_keys = {c.lower() for c in TEMPLATE_COLUMNS}
+def _check_required_columns(col_map: Dict[str, int]) -> Optional[str]:
+    """
+    Validate that all REQUIRED columns are present in the uploaded file.
+    Extra columns are ignored. Column order doesn't matter.
+    
+    Return an error message if any required column is missing.
+    """
     found_keys = set(col_map.keys())
-    missing = {c.lower() for c in REQUIRED_COLUMNS} - found_keys
+    missing = REQUIRED_COLUMNS - found_keys
     if missing:
-        return f"Uploaded file structure does not match the sample template. Missing required columns: {', '.join(sorted(missing))}"
+        missing_display = ", ".join(sorted([c.replace("_", " ").title() for c in missing]))
+        return f"Missing required columns: {missing_display}. Please ensure your file includes all required columns and try again."
     return None
 
 
@@ -214,8 +244,8 @@ def parse_and_validate_rows(xlsx_bytes: bytes) -> Dict[str, Any]:
 
     col_map = _build_col_map(header_row)
 
-    # Template structure check
-    mismatch_err = _check_template_match(col_map)
+    # Flexible template validation — check required columns only
+    mismatch_err = _check_required_columns(col_map)
     if mismatch_err:
         return {"total_rows": 0, "valid_rows": [], "error_rows": [{"row": 0, "column": "-", "value": "-", "reason": mismatch_err}], "duplicate_rows": [], "duplicate_ids": set()}
 
@@ -245,8 +275,8 @@ def parse_and_validate_rows(xlsx_bytes: bytes) -> Dict[str, Any]:
         section = _cell(row_data, "section")
         gender_raw = _cell(row_data, "gender")
         dob_raw = _cell(row_data, "date_of_birth")
-        parent_name = _cell(row_data, "parent_name")
-        parent_cnic = _cell(row_data, "parent_cnic")
+        father_name = _cell(row_data, "father_name")
+        father_cnic = _cell(row_data, "father_cnic")
         parent_contact = _cell(row_data, "parent_contact")
         address = _cell(row_data, "address")
         admission_date_raw = _cell(row_data, "admission_date")
@@ -261,8 +291,10 @@ def parse_and_validate_rows(xlsx_bytes: bytes) -> Dict[str, Any]:
             row_errors.append({"row": row_num, "column": "Roll_Number", "value": "", "reason": "Required field missing"})
         if not class_val:
             row_errors.append({"row": row_num, "column": "Class", "value": "", "reason": "Required field missing"})
-        if not parent_cnic:
-            row_errors.append({"row": row_num, "column": "Parent_CNIC", "value": "", "reason": "Required field missing"})
+        if not section:
+            row_errors.append({"row": row_num, "column": "Section", "value": "", "reason": "Required field missing"})
+        if not father_cnic:
+            row_errors.append({"row": row_num, "column": "Father_CNIC", "value": "", "reason": "Required field missing"})
 
         # Gender normalization
         gender = ""
@@ -315,11 +347,11 @@ def parse_and_validate_rows(xlsx_bytes: bytes) -> Dict[str, Any]:
             "full_name": full_name,
             "roll_number": roll_number,
             "class_id": class_val,
-            "section": section or "A",
+            "section": section,  # Now required, so always present
             "gender": gender or "Not specified",
             "date_of_birth": dob or datetime.utcnow().strftime("%Y-%m-%d"),
-            "parent_name": parent_name,
-            "parent_cnic": parent_cnic,
+            "father_name": father_name,
+            "father_cnic": father_cnic,
             "parent_contact": parent_contact,
             "address": address,
             "admission_date": admission_date or datetime.utcnow().strftime("%Y-%m-%d"),
@@ -337,7 +369,7 @@ def parse_and_validate_rows(xlsx_bytes: bytes) -> Dict[str, Any]:
     }
 
 
-def check_db_duplicates(valid_rows: List[Dict], db) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+def check_db_duplicates(valid_rows: List[Dict], db, school_id: str = None) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """
     Check valid rows against database for duplicates.
     For import, generate student_id as 0000-<excel_id> and check uniqueness.
@@ -350,8 +382,12 @@ def check_db_duplicates(valid_rows: List[Dict], db) -> Tuple[List[Dict], List[Di
         excel_id = row["student_id"]
         generated_student_id = generate_imported_student_id(excel_id)
 
-        # Check if generated student_id exists
-        existing_by_id = db.students.find_one({"student_id": generated_student_id})
+        # Check if generated student_id exists (with school_id isolation if provided)
+        query = {"student_id": generated_student_id}
+        if school_id:
+            query["school_id"] = school_id
+        
+        existing_by_id = db.students.find_one(query)
 
         if existing_by_id:
             db_dups.append({"row": row["row_num"], "column": "Student_ID", "value": excel_id, "reason": f"Generated ID {generated_student_id} already exists in database"})
@@ -382,8 +418,8 @@ def build_student_doc(row: Dict) -> Dict:
         "date_of_birth": row["date_of_birth"],
         "admission_date": row["admission_date"],
         "guardian_info": {
-            "father_name": row.get("parent_name", ""),
-            "parent_cnic": row.get("parent_cnic", ""),
+            "father_name": row.get("father_name", ""),
+            "parent_cnic": row.get("father_cnic", ""),
             "guardian_contact": row.get("parent_contact", ""),
             "address": row.get("address", ""),
         },
@@ -469,14 +505,15 @@ def execute_import_transaction(
 
 
 def export_students_xlsx(students: List[Dict]) -> bytes:
-    """Export students list to xlsx bytes matching the template structure."""
+    """Export students list to xlsx bytes matching the template structure with new required columns."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Students"
 
     # Header styles
     header_font = Font(bold=True, color="FFFFFF", size=11)
-    header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+    header_fill_required = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+    header_fill_optional = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     thin_border = Border(
         left=Side(style="thin"), right=Side(style="thin"),
         top=Side(style="thin"), bottom=Side(style="thin"),
@@ -485,7 +522,8 @@ def export_students_xlsx(students: List[Dict]) -> bytes:
     for col_idx, col_name in enumerate(TEMPLATE_COLUMNS, start=1):
         cell = ws.cell(row=1, column=col_idx, value=col_name)
         cell.font = header_font
-        cell.fill = header_fill
+        is_required = col_name.lower().replace(" ", "_") in REQUIRED_COLUMNS
+        cell.fill = header_fill_required if is_required else header_fill_optional
         cell.alignment = Alignment(horizontal="center")
         cell.border = thin_border
         ws.column_dimensions[cell.column_letter].width = max(len(col_name) + 6, 16)
@@ -499,13 +537,14 @@ def export_students_xlsx(students: List[Dict]) -> bytes:
             _sanitize_cell(s.get("roll_number", "")),
             _sanitize_cell(s.get("class_id", "") or s.get("class", "")),
             _sanitize_cell(s.get("section", "")),
+            _sanitize_cell(guardian.get("father_name", "")),
+            _sanitize_cell(guardian.get("parent_cnic", "")),
             _sanitize_cell(s.get("gender", "")),
             _sanitize_cell(s.get("date_of_birth", "")),
-            _sanitize_cell(guardian.get("father_name", "") or guardian.get("guardian_name", "")),
-            _sanitize_cell(guardian.get("parent_cnic", "")),
             _sanitize_cell(guardian.get("guardian_contact", "") or contact.get("phone", "")),
             _sanitize_cell(guardian.get("address", "") or s.get("address", "")),
             _sanitize_cell(s.get("admission_date", "")),
+            _sanitize_cell(s.get("image_name", "") or ""),  # Image name if available
         ]
         for col_idx, val in enumerate(row_data, start=1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)

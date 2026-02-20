@@ -21,8 +21,7 @@ class StudentsService {
     pageSize: number = 50
   ): Promise<PaginatedResponse<Student>> {
     try {
-      const schoolId = authService.getSchoolId();
-      logger.info('STUDENTS', `Fetching students (page ${page}) for school ${schoolId}`);
+      logger.info('STUDENTS', `Fetching students (page ${page}) for school ${authService.getSchoolId()}`);
       
       let url = `${this.endpoint}?page=${page}&page_size=${pageSize}`;
       if (classId) {
@@ -38,7 +37,7 @@ class StudentsService {
       }
 
       const data = await response.json();
-      logger.info('STUDENTS', `Fetched ${data.items?.length || 0} students for school ${schoolId}`);
+      logger.info('STUDENTS', `Fetched ${data.items?.length || 0} students for school ${authService.getSchoolId()}`);
       return data;
     } catch (error: any) {
       logger.error('STUDENTS', `Error fetching students: ${error.message}`);
@@ -51,8 +50,7 @@ class StudentsService {
    */
   async getStudent(id: string): Promise<Student> {
     try {
-      const schoolId = authService.getSchoolId();
-      logger.info('STUDENTS', `Fetching student ${id} for school ${schoolId}`);
+      logger.info('STUDENTS', `Fetching student ${id} for school ${authService.getSchoolId()}`);
       
       const response = await fetch(`${this.endpoint}/${id}`, {
         headers: authService.getAuthHeaders(),
@@ -76,9 +74,7 @@ class StudentsService {
    */
   async createStudent(student: Partial<Student>): Promise<Student> {
     try {
-      const schoolId = authService.getSchoolId();
-      const adminEmail = authService.getUser()?.email || 'unknown';
-      logger.info('STUDENTS', `Creating student ${student.firstName} by ${adminEmail} in ${schoolId}`);
+      logger.info('STUDENTS', `Creating student ${student.firstName} by ${authService.getUser()?.email || 'unknown'} in ${authService.getSchoolId()}`);
       
       const response = await fetch(this.endpoint, {
         method: 'POST',
@@ -105,9 +101,7 @@ class StudentsService {
    */
   async updateStudent(id: string, updates: Partial<Student>): Promise<Student> {
     try {
-      const schoolId = authService.getSchoolId();
-      const adminEmail = authService.getUser()?.email || 'unknown';
-      logger.info('STUDENTS', `Updating student ${id} by ${adminEmail}`);
+      logger.info('STUDENTS', `Updating student ${id} by ${authService.getUser()?.email || 'unknown'}`);
       
       const response = await fetch(`${this.endpoint}/${id}`, {
         method: 'PUT',
@@ -134,9 +128,7 @@ class StudentsService {
    */
   async deleteStudent(id: string): Promise<void> {
     try {
-      const schoolId = authService.getSchoolId();
-      const adminEmail = authService.getUser()?.email || 'unknown';
-      logger.info('STUDENTS', `Deleting student ${id} by ${adminEmail}`);
+      logger.info('STUDENTS', `Deleting student ${id} by ${authService.getUser()?.email || 'unknown'}`);
       
       const response = await fetch(`${this.endpoint}/${id}`, {
         method: 'DELETE',

@@ -14,9 +14,16 @@ if hasattr(_ForwardRef, "_evaluate"):
         # If not provided in kwargs, use the type_params value (the set() from Pydantic).
         if 'recursive_guard' not in kwargs:
             kwargs['recursive_guard'] = type_params if type_params is not None else set()
-        
-        return _orig_forwardref_evaluate(self, globalns=globalns, localns=localns, 
-                                         type_params=type_params, **kwargs)
+        # Call the original implementation. Different Python versions have
+        # different signatures for ForwardRef._evaluate():
+        # - Py3.12+: (self, globalns, localns, type_params=None, *, recursive_guard)
+        # - Py3.11 and earlier: (self, globalns, localns, recursive_guard)
+        # Try the Py3.12-style call first and fall back to the older form on TypeError.
+        try:
+            return _orig_forwardref_evaluate(self, globalns=globalns, localns=localns,
+                                             type_params=type_params, **kwargs)
+        except TypeError:
+            return _orig_forwardref_evaluate(self, globalns=globalns, localns=localns, **kwargs)
 
     _ForwardRef._evaluate = _compat_forwardref_evaluate
 

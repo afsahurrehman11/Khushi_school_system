@@ -7,7 +7,7 @@ import { Teacher, PaginatedResponse } from '../types';
 import { authService } from './auth';
 import logger from '../utils/logger';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000/api' : 'https://khushi-school-system.onrender.com/api');
 
 class TeachersService {
   private endpoint = `${API_BASE_URL}/teachers`;

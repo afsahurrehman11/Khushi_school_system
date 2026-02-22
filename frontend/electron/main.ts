@@ -48,7 +48,8 @@ try {
 export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
 // Renderer distribution directory inside packaged app
-export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'frontend', 'dist')
+// Renderer distribution directory inside packaged app: use `dist` at app root
+export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
@@ -98,13 +99,13 @@ function createWindow() {
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
   } else {
-    // In production: load from frontend/dist inside the app resources
+    // In production: load from `dist` inside the app resources (no extra "frontend" folder)
     // When packaged, electron-builder extracts files to: <app>/resources/app/
-    const indexPath = path.join(__dirname, '..', 'frontend', 'dist', 'index.html')
-    
+    const indexPath = path.join(RENDERER_DIST, 'index.html')
+
     console.log('Loading production HTML from:', indexPath)
     console.log('File exists:', fs.existsSync(indexPath))
-    
+
     win.loadFile(indexPath)
   }
 }

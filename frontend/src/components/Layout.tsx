@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import logger from '../utils/logger';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Users, Settings, Bell, Menu, GraduationCap, LogOut, DollarSign, TrendingUp, Filter, FileSpreadsheet, MessageSquare, ScanFace } from 'lucide-react';
+import { Settings, Bell, Menu, GraduationCap, LogOut, DollarSign, TrendingUp, Filter, MessageSquare, ScanFace } from 'lucide-react';
 import CashVerificationModal from '../features/accountant/components/CashVerificationModal';
 import { cashSessionService, CashSession } from '../features/accountant/services/cashSessionService';
 
@@ -11,46 +11,26 @@ interface LayoutProps {
   onLogout: () => void;
 }
 
-interface User {
-  id: string;
-  email: string;
-  role: { name: string; permissions: string[] } | string;
-}
-
 const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
-  const location = useLocation();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    logger.info('LAYOUT', `Current route: ${location.pathname}`);
-  }, [location]);
-  const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
-  const [user, setUser] = useState<User | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [currentSession, setCurrentSession] = useState<CashSession | null>(null);
   const [loadingSession, setLoadingSession] = useState(false);
+  const [user, setUser] = useState<any>(null);
+
+  const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
-    const userJson = localStorage.getItem('user');
-
-    if (userJson) {
-      try {
-        const parsed = JSON.parse(userJson);
-
-        // Normalize role shape: backend may return role as a string or an object
-        if (parsed.role && typeof parsed.role === 'string') {
-          parsed.role = { name: parsed.role, permissions: [] };
-        }
-        setUser(parsed);
-      } catch (err) {
-        setUser(null);
-      }
+    try {
+      const stored = localStorage.getItem('user');
+      if (stored) setUser(JSON.parse(stored));
+    } catch (err) {
+      logger.warn('LAYOUT', 'Failed to parse stored user');
     }
   }, []);
 
   const navigation = [
-    { name: 'Students', href: '/students', icon: Users, permission: 'students.read' },
-    { name: 'Import / Export', href: '/students/import-export', icon: FileSpreadsheet, permission: 'students.read' },
     { name: 'Admin', href: '/dashboard/admin', icon: Settings, roles: ['Admin', 'Root'] },
     { name: 'Teachers', href: '/teachers', icon: GraduationCap, permission: 'teachers.read' },
     { name: 'Subjects', href: '/subjects', icon: GraduationCap, permission: 'subjects.read' },
@@ -128,8 +108,8 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
           </div>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 px-4 py-6 space-y-1">
+        {/* Navigation (scrollable) */}
+        <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto custom-scrollbar">
           {navigation.map((item) => {
             const Icon = item.icon;
             // permission guard: if item.roles is defined, check role membership
@@ -168,8 +148,8 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
           })}
         </nav>
 
-        {/* User Info */}
-        <div className="p-4 border-t border-secondary-200 space-y-3">
+        {/* User Info (fixed footer) */}
+        <div className="p-4 border-t border-secondary-200 space-y-3 flex-shrink-0">
           <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-secondary-50">
             <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
               <span className="text-primary-700 font-semibold">
@@ -195,7 +175,7 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
       {/* Main Content */}
       <div className={`flex-1 flex flex-col transition-all duration-300 ${isSidebarOpen ? 'ml-64' : 'ml-0'}`}>
         {/* Top Bar */}
-        <header className="h-16 bg-white border-b border-secondary-200 flex items-center justify-between px-6 shadow-soft">
+        <header className="h-16 bg-white border-b border-secondary-200 flex items-center px-6 shadow-soft">
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
             className="p-2 rounded-lg hover:bg-secondary-100 transition-colors"
@@ -203,22 +183,14 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
             <Menu className="w-5 h-5 text-secondary-600" />
           </button>
 
-          <div className="flex items-center gap-4">
-            {/* Notifications */}
+          <div className="flex-1" />
+
+          {/* Notifications only (right-most) */}
+          <div className="flex items-center">
             <button className="relative p-2 rounded-lg hover:bg-secondary-100 transition-colors">
               <Bell className="w-5 h-5 text-secondary-600" />
               <span className="absolute top-1 right-1 w-2 h-2 bg-danger-500 rounded-full"></span>
             </button>
-
-            {/* Current Date */}
-            <div className="text-sm text-secondary-600">
-              {new Date().toLocaleDateString('en-IN', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-              })}
-            </div>
           </div>
         </header>
 

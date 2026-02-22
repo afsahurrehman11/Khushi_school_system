@@ -39,7 +39,10 @@ from app.config import settings
 from app.database import get_db
 from app.startup import ensure_collections_exist
 from app.routers import auth, users, students, fees, classes, teachers, grades, accounting, payments, reports, root, student_import_export, chalans, fee_categories, class_fee_assignments, notifications, fee_payments, accountant, payment_methods, schools, root_admin, cash_sessions, statistics, attendance, whatsapp, face
+from app.routers import saas as saas_router
+from app.routers import billing as billing_router
 from app.services import face_service as _face_service_module
+from app.middleware.database_routing import database_routing_middleware
 
 # Configure logging (level configurable via LOG_LEVEL env var / settings.log_level)
 log_level_str = getattr(settings, "log_level", "INFO")
@@ -154,8 +157,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add database routing middleware for multi-tenant support
+@app.middleware("http")
+async def db_routing_middleware(request, call_next):
+    return await database_routing_middleware(request, call_next)
+
 # Include routers
 app.include_router(auth, prefix="/api", tags=["Authentication"])
+app.include_router(saas_router, prefix="/api/saas", tags=["SaaS Management"])
+app.include_router(billing_router, prefix="/api/billing", tags=["Billing"])
 app.include_router(users, prefix="/api/admin", tags=["User Management"])
 app.include_router(students, prefix="/api", tags=["Students"])
 app.include_router(fees, prefix="/api", tags=["Fees"])
@@ -207,6 +217,32 @@ async def startup_event():
                 logger.info("✅ All required collections already exist")
         except Exception as exc:
             logger.error(f"❌ Collections check/creation failed: {exc}")
+        
+        # Initialize SaaS root database and indexes
+        try:
+            from app.services.saas_db import get_saas_root_db
+            saas_db = get_saas_root_db()
+            
+            # Create indexes for saas_root_db
+            saas_db.schools.create_index("school_id", unique=True)
+            saas_db.schools.create_index("admin_email", unique=True)
+            saas_db.schools.create_index("database_name", unique=True)
+            saas_db.schools.create_index("status")
+            saas_db.usage_snapshots.create_index([("school_id", 1), ("date", -1)])
+            saas_db.usage_snapshots.create_index("date")
+            
+            logger.info("✅ SaaS root database initialized with indexes")
+        except Exception as e:
+            logger.warning(f"⚠️ SaaS root database initialization: {e}")
+        
+        # Start SaaS background jobs (daily snapshots, cleanup)
+        try:
+            from app.services.saas_jobs import start_background_jobs
+            await start_background_jobs()
+            logger.info("✅ SaaS background jobs started")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to start SaaS background jobs: {e}")
+            
     else:
         logger.warning("⚠️ Skipping collection creation because the database is not connected.")
 
@@ -263,6 +299,15 @@ async def startup_event():
 async def shutdown_event():
     """Application shutdown event"""
     logger.info("🛑 Shutting down Khushi ERP System API")
+    
+    # Stop SaaS background jobs
+    try:
+        from app.services.saas_jobs import stop_background_jobs
+        await stop_background_jobs()
+        logger.info("🛑 SaaS background jobs stopped")
+    except Exception as e:
+        logger.warning(f"⚠️ Error stopping SaaS background jobs: {e}")
+    
     # Stop self-ping task if running
     try:
         task = getattr(app.state, "self_ping_task", None)

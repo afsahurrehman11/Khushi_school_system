@@ -1,8 +1,8 @@
 import { app as e, BrowserWindow as r } from "electron";
-import { fileURLToPath as p } from "node:url";
+import { fileURLToPath as l } from "node:url";
 import n from "node:path";
 import a from "node:fs";
-import l from "node:os";
+import m from "node:os";
 e.disableHardwareAcceleration();
 e.commandLine.appendSwitch("disable-gpu");
 e.commandLine.appendSwitch("enable-software-rasterizer");
@@ -13,18 +13,18 @@ e.commandLine.appendSwitch("disable-dx12");
 e.commandLine.appendSwitch("disable-accelerated-2d-canvas");
 e.commandLine.appendSwitch("disable-direct-composition");
 e.commandLine.appendSwitch("disable-gpu-memory-buffer-video-frames");
-const s = n.dirname(p(import.meta.url));
+const s = n.dirname(l(import.meta.url));
 process.env.APP_ROOT = n.join(s, "..");
 try {
-  const i = n.join(l.tmpdir(), "khushi-erps-electron");
+  const i = n.join(m.tmpdir(), "khushi-erps-electron");
   e.setPath("userData", i);
 } catch {
 }
-const t = process.env.VITE_DEV_SERVER_URL, b = n.join(process.env.APP_ROOT, "dist-electron"), m = n.join(process.env.APP_ROOT, "frontend", "dist");
-process.env.VITE_PUBLIC = t ? n.join(process.env.APP_ROOT, "public") : m;
+const t = process.env.VITE_DEV_SERVER_URL, b = n.join(process.env.APP_ROOT, "dist-electron"), d = n.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = t ? n.join(process.env.APP_ROOT, "public") : d;
 let o;
-const f = e.requestSingleInstanceLock();
-f || (e.quit(), process.exit(0));
+const w = e.requestSingleInstanceLock();
+w || (e.quit(), process.exit(0));
 e.on("second-instance", () => {
   o && (o.isMinimized() && o.restore(), o.focus());
 });
@@ -41,7 +41,7 @@ const c = () => {
 process.on("SIGINT", c);
 process.on("SIGTERM", c);
 process.on("exit", c);
-function d() {
+function p() {
   if (o = new r({
     icon: n.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
     webPreferences: {
@@ -54,7 +54,7 @@ function d() {
   }), t)
     o.loadURL(t);
   else {
-    const i = n.join(s, "..", "frontend", "dist", "index.html");
+    const i = n.join(d, "index.html");
     console.log("Loading production HTML from:", i), console.log("File exists:", a.existsSync(i)), o.loadFile(i);
   }
 }
@@ -62,11 +62,11 @@ e.on("window-all-closed", () => {
   process.platform !== "darwin" && (e.quit(), o = null);
 });
 e.on("activate", () => {
-  r.getAllWindows().length === 0 && d();
+  r.getAllWindows().length === 0 && p();
 });
-e.whenReady().then(d);
+e.whenReady().then(p);
 export {
   b as MAIN_DIST,
-  m as RENDERER_DIST,
+  d as RENDERER_DIST,
   t as VITE_DEV_SERVER_URL
 };

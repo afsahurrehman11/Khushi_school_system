@@ -4,6 +4,291 @@
  */
 
 /**
+ * SaaS School Plans
+ */
+export type SchoolPlan = "trial" | "basic" | "standard" | "premium" | "enterprise";
+
+/**
+ * SaaS School Status
+ */
+export type SchoolStatus = "active" | "suspended" | "deleted" | "pending";
+
+/**
+ * SaaS School Type - For root admin management
+ */
+export interface SaaSSchool {
+  id: string;
+  school_id: string;
+  school_name: string;
+  database_name: string;
+  admin_email: string;
+  plan: SchoolPlan;
+  status: SchoolStatus;
+  email?: string;
+  phone?: string;
+  city?: string;
+  created_at: string;
+  student_count: number;
+  teacher_count: number;
+  storage_bytes: number;
+}
+
+/**
+ * SaaS School Create Request
+ */
+export interface SaaSSchoolCreate {
+  school_name: string;
+  admin_email: string;
+  admin_password: string;
+  admin_name?: string;
+  plan?: SchoolPlan;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  postal_code?: string;
+}
+
+/**
+ * SaaS Overview Stats
+ */
+export interface SaaSOverviewStats {
+  total_schools: number;
+  active_schools: number;
+  suspended_schools: number;
+  total_students: number;
+  total_teachers: number;
+  total_storage_bytes: number;
+  trial_schools: number;
+  basic_schools: number;
+  standard_schools: number;
+  premium_schools: number;
+  enterprise_schools: number;
+}
+
+/**
+ * Storage History Item
+ */
+export interface StorageHistoryItem {
+  date: string;
+  storage_bytes: number;
+}
+
+/**
+ * School Storage History
+ */
+export interface SchoolStorageHistory {
+  school_id: string;
+  school_name: string;
+  history: StorageHistoryItem[];
+}
+
+// ================= Billing Types =================
+
+/**
+ * Billing Period Type
+ */
+export type BillingPeriod = "monthly" | "quarterly" | "yearly";
+
+/**
+ * Invoice Status Type
+ */
+export type InvoiceStatus = "draft" | "pending" | "paid" | "overdue" | "cancelled";
+
+/**
+ * Billing Configuration
+ */
+export interface BillingConfig {
+  id?: string;
+  total_mongo_cost: number;
+  billing_period: BillingPeriod;
+  period_start: string;
+  period_end: string;
+  fixed_cpu_ram_cost: number;
+  dynamic_storage_cost: number;
+  markup_percentage: number;
+  created_at?: string;
+  updated_at?: string;
+  created_by?: string;
+}
+
+/**
+ * Billing Config Create Request
+ */
+export interface BillingConfigCreate {
+  total_mongo_cost: number;
+  billing_period: BillingPeriod;
+  period_start: string;
+  period_end: string;
+  fixed_cpu_ram_cost: number;
+  dynamic_storage_cost: number;
+  markup_percentage?: number;
+}
+
+/**
+ * Cost Breakdown
+ */
+export interface CostBreakdown {
+  fixed_cost: number;
+  storage_cost: number;
+  base_total: number;
+  markup_amount: number;
+  subtotal: number;
+  misc_charges: number;
+  misc_charges_description?: string;
+  crash_recovery_charges: number;
+  urgent_recovery_charges: number;
+  discount: number;
+  discount_description?: string;
+  total: number;
+}
+
+/**
+ * Invoice Type
+ */
+export interface Invoice {
+  id: string;
+  invoice_number: string;
+  school_id: string;
+  school_name: string;
+  database_name?: string;
+  billing_period: BillingPeriod;
+  period_start: string;
+  period_end: string;
+  storage_bytes: number;
+  storage_percentage: number;
+  student_count: number;
+  teacher_count: number;
+  cost_breakdown: CostBreakdown;
+  status: InvoiceStatus;
+  notes?: string;
+  internal_notes?: string;
+  created_at: string;
+  updated_at: string;
+  issued_at?: string;
+  paid_at?: string;
+  due_date?: string;
+  total_amount: number;
+}
+
+/**
+ * Invoice Create Request
+ */
+export interface InvoiceCreate {
+  school_id: string;
+  billing_period?: BillingPeriod;
+  period_start: string;
+  period_end: string;
+  due_date?: string;
+  notes?: string;
+}
+
+/**
+ * Invoice Update Request
+ */
+export interface InvoiceUpdate {
+  misc_charges?: number;
+  misc_charges_description?: string;
+  crash_recovery_charges?: number;
+  urgent_recovery_charges?: number;
+  discount?: number;
+  discount_description?: string;
+  status?: InvoiceStatus;
+  notes?: string;
+  internal_notes?: string;
+  due_date?: string;
+}
+
+/**
+ * Bulk Invoice Generate Request
+ */
+export interface BulkInvoiceGenerate {
+  billing_period?: BillingPeriod;
+  period_start: string;
+  period_end: string;
+  due_date?: string;
+}
+
+/**
+ * Revenue Analytics
+ */
+export interface RevenueAnalytics {
+  total_predicted_revenue: number;
+  total_mongo_cost: number;
+  total_profit: number;
+  profit_margin_percentage: number;
+  current_period_revenue: number;
+  previous_period_revenue: number;
+  revenue_growth_percentage: number;
+  revenue_by_plan: Record<string, number>;
+}
+
+/**
+ * Storage Analytics
+ */
+export interface StorageAnalytics {
+  total_storage_bytes: number;
+  average_storage_per_school: number;
+  top_schools: Array<{
+    school_id: string;
+    school_name: string;
+    storage_bytes: number;
+    percentage: number;
+  }>;
+  storage_distribution: Array<{
+    school_name: string;
+    storage_bytes: number;
+  }>;
+}
+
+/**
+ * Billing Analytics
+ */
+export interface BillingAnalytics {
+  revenue: RevenueAnalytics;
+  storage: StorageAnalytics;
+  total_invoices: number;
+  draft_invoices: number;
+  pending_invoices: number;
+  paid_invoices: number;
+  overdue_invoices: number;
+  schools_exceeding_storage: Array<{
+    school_id: string;
+    school_name: string;
+    storage_bytes: number;
+  }>;
+  schools_exceeding_budget: Array<{
+    school_id: string;
+    school_name: string;
+  }>;
+}
+
+/**
+ * Billing Change Log
+ */
+export interface BillingChangeLog {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  action: string;
+  changes: Record<string, { old: unknown; new: unknown }>;
+  performed_by: string;
+  performed_at: string;
+  ip_address?: string;
+}
+
+/**
+ * School Billing History Item
+ */
+export interface SchoolBillingHistoryItem {
+  period: string;
+  total: number;
+  storage_bytes: number;
+}
+
+/**
  * School Type - Core multi-tenant entity
  */
 export interface School {

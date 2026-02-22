@@ -18,6 +18,7 @@ import NotificationToast from './components/NotificationToast';
 // import startNotificationSSE from './features/accountant/services/NotificationSSE';
 import LoginPageNew from './pages/Login';
 import RootAdminDashboard from './pages/RootAdminDashboard';
+import BillingDashboard from './pages/BillingDashboard';
 import { authService } from './services/auth';
 
 interface ProtectedRouteProps {
@@ -151,6 +152,12 @@ function App() {
         <Route path="/root-admin" element={
           <ProtectedRoute 
             element={<RootAdminDashboard />} 
+            requiredRoles={['Root']} 
+          />
+        } />
+        <Route path="/billing" element={
+          <ProtectedRoute 
+            element={<BillingDashboard />} 
             requiredRoles={['Root']} 
           />
         } />

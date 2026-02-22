@@ -5,8 +5,25 @@ try:
 except ImportError:
     from pydantic import BaseSettings
 from dotenv import load_dotenv
+import pathlib
+import logging
 
-load_dotenv()
+# Load environment variables: prefer backend/.env, fall back to project root .env
+logger = logging.getLogger(__name__)
+BASE_DIR = pathlib.Path(__file__).resolve().parents[1]  # backend/
+BACKEND_ENV = BASE_DIR / '.env'
+ROOT_ENV = BASE_DIR.parent / '.env'
+
+if BACKEND_ENV.exists():
+    load_dotenv(dotenv_path=str(BACKEND_ENV))
+    logger.debug(f"Loaded environment from {BACKEND_ENV}")
+elif ROOT_ENV.exists():
+    # Backwards compatibility: load root .env if backend/.env not present
+    load_dotenv(dotenv_path=str(ROOT_ENV))
+    logger.warning(f"Loaded environment from project root {ROOT_ENV}; consider moving secrets to backend/.env")
+else:
+    # No .env file found; rely on process environment variables (e.g., Render or CI)
+    logger.debug("No .env file found for backend; using process environment variables")
 
 
 def _db_name_from_uri(uri: str) -> Optional[str]:
@@ -61,9 +78,9 @@ class Settings(BaseSettings):
     access_log: bool = os.environ.get("LOG_ACCESS", "true").lower() in ("1", "true", "yes")
 
     # Cloudinary Configuration
-    cloudinary_cloud_name: str = os.environ.get("CLOUDINARY_CLOUD_NAME", "diddrewkq")
-    cloudinary_api_key: str = os.environ.get("CLOUDINARY_API_KEY", "873389445629329")
-    cloudinary_api_secret: str = os.environ.get("CLOUDINARY_API_SECRET", "F3yS5EVT5MMp09_ZyR0sbYBocjQ")
+    cloudinary_cloud_name: str = os.environ.get("CLOUDINARY_CLOUD_NAME", "")
+    cloudinary_api_key: str = os.environ.get("CLOUDINARY_API_KEY", "")
+    cloudinary_api_secret: str = os.environ.get("CLOUDINARY_API_SECRET", "")
     
     # School Configuration
     school_name: str = os.environ.get("SCHOOL_NAME", "school")
@@ -75,23 +92,20 @@ class Settings(BaseSettings):
     whatsapp_business_account_id: str = os.environ.get("WHATSAPP_BUSINESS_ACCOUNT_ID", "")
 
     # Self-ping (keep-alive) configuration
-    # Provide `SELF_PING_URL` as the deployed application URL (including scheme),
-    # e.g. https://my-app.onrender.com
-    self_ping_url: Optional[str] = os.environ.get("SELF_PING_URL", None)
+    # Hard-coded deployed URL for self-ping. This value is used when no
+    # environment variable is provided and enables the self-ping task.
+    # Replace with your deployed URL if different.
+    self_ping_url: Optional[str] = "https://khushi-school-system.onrender.com"
     # Interval in minutes between pings (default 57)
     self_ping_interval_minutes: int = int(os.environ.get("SELF_PING_INTERVAL_MINUTES", 57))
-    # Whether to enable the self-ping background task. If not set, it's enabled
-    # when `SELF_PING_URL` is provided.
-    enable_self_ping: bool = os.environ.get("ENABLE_SELF_PING", "").lower() in ("1", "true", "yes")
+    # Whether to enable the self-ping background task. Hard-coded to True
+    # so the self-ping runs by default using the above URL.
+    enable_self_ping: bool = True
 
     class Config:
         env_file = ".env"
 
 settings = Settings()
-
-# If enable_self_ping wasn't explicitly set via env, enable it when a URL is present
-if not settings.enable_self_ping and settings.self_ping_url:
-    settings.enable_self_ping = True
 
 # Ensure `settings.database_name` is set. Prefer explicit setting, then URI
 # path, then hard-coded default to preserve existing behavior.

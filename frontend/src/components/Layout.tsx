@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import logger from '../utils/logger';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Settings, Bell, Menu, GraduationCap, LogOut, DollarSign, TrendingUp, Filter, MessageSquare, ScanFace } from 'lucide-react';
+import { Settings, Bell, Menu, GraduationCap, LogOut, DollarSign, TrendingUp, Filter, MessageSquare, ScanFace, Users, FileUp } from 'lucide-react';
 import CashVerificationModal from '../features/accountant/components/CashVerificationModal';
 import { cashSessionService, CashSession } from '../features/accountant/services/cashSessionService';
 
@@ -32,6 +32,8 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
 
   const navigation = [
     { name: 'Admin', href: '/dashboard/admin', icon: Settings, roles: ['Admin', 'Root'] },
+    { name: 'Students', href: '/students', icon: Users, roles: ['Admin', 'Teacher', 'Accountant'] },
+    { name: 'Import/Export', href: '/students/import-export', icon: FileUp, roles: ['Admin'] },
     { name: 'Teachers', href: '/teachers', icon: GraduationCap, permission: 'teachers.read' },
     { name: 'Subjects', href: '/subjects', icon: GraduationCap, permission: 'subjects.read' },
     { name: 'Classes', href: '/classes', icon: TrendingUp, permission: 'classes.read' },

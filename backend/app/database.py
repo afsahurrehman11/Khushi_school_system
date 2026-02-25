@@ -115,6 +115,17 @@ def get_db():
     c = ensure_client_connected()
     if c is None:
         raise RuntimeError("Database is not connected. Check MONGO_URI or FALLBACK_MONGO_URI and network/DNS settings.")
+    
+    # Check if we have school-specific database context
+    try:
+        from app.middleware.database_routing import get_current_database_name
+        db_name = get_current_database_name()
+        if db_name:
+            return c[db_name]
+    except Exception:
+        # If context is not available or middleware not loaded, fall back to default
+        pass
+    
     return c[settings.database_name]
 
 def close_db():

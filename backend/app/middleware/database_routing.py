@@ -1,6 +1,12 @@
 """
 Dynamic Database Routing Middleware
-Routes requests to the correct school database based on JWT token
+Routes requests to the correct school database based on JWT token.
+
+STRICT TENANT ISOLATION:
+- Non-root users can ONLY access their own database
+- Database context comes STRICTLY from JWT token
+- No ability to override tenant_db from frontend
+- Cross-tenant access attempts return 403
 """
 
 from fastapi import Request, HTTPException, status, Depends
@@ -17,9 +23,12 @@ from app.models.saas import SchoolStatus
 
 logger = logging.getLogger(__name__)
 
-# Context variable to store the current database for the request
+# Context variables to store the current database for the request
+# These are the ONLY way to access tenant context in routes
 current_school_db: ContextVar[Optional[str]] = ContextVar('current_school_db', default=None)
 current_school_id: ContextVar[Optional[str]] = ContextVar('current_school_id', default=None)
+current_school_slug: ContextVar[Optional[str]] = ContextVar('current_school_slug', default=None)
+current_user_role: ContextVar[Optional[str]] = ContextVar('current_user_role', default=None)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -34,19 +43,35 @@ def get_current_school_id() -> Optional[str]:
     return current_school_id.get()
 
 
+def get_current_school_slug() -> Optional[str]:
+    """Get the current school slug from context"""
+    return current_school_slug.get()
+
+
 def get_db_for_request():
     """
     Get the database for the current request.
-    Uses the database_name from JWT token context.
-    Falls back to default database if not in school context.
+    Uses the database_name from JWT token context STRICTLY.
+    
+    IMPORTANT: This function enforces tenant isolation.
+    Non-root users can ONLY access their assigned database.
     """
     db_name = get_current_database_name()
+    role = current_user_role.get()
+    
     if db_name:
         return get_school_database(db_name)
     
-    # Fallback to original database for backward compatibility
-    from app.database import get_db
-    return get_db()
+    # Only root users can fall back to default database
+    if role and role.lower() == "root":
+        from app.database import get_db
+        return get_db()
+    
+    # Non-root users without database context should fail
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Database context required - tenant isolation enforced"
+    )
 
 
 async def extract_school_context(token: str = Depends(oauth2_scheme)) -> dict:
@@ -61,6 +86,7 @@ async def extract_school_context(token: str = Depends(oauth2_scheme)) -> dict:
         role = payload.get("role")
         database_name = payload.get("database_name")
         school_id = payload.get("school_id")
+        school_slug = payload.get("school_slug")
         
         if not email:
             raise HTTPException(
@@ -73,6 +99,10 @@ async def extract_school_context(token: str = Depends(oauth2_scheme)) -> dict:
             current_school_db.set(database_name)
         if school_id:
             current_school_id.set(school_id)
+        if school_slug:
+            current_school_slug.set(school_slug)
+        if role:
+            current_user_role.set(role)
         
         return payload
         
@@ -89,18 +119,23 @@ async def verify_school_access(token: str = Depends(oauth2_scheme)) -> dict:
     """
     Verify that the school in the token is active and accessible.
     Sets up database context for the request.
+    
+    ENFORCES STRICT TENANT ISOLATION:
+    - Root users have access to everything
+    - Non-root users MUST have school context
+    - School status is verified before access
     """
     payload = await extract_school_context(token)
     
-    role = payload.get("role")
+    role = payload.get("role", "").lower()
     school_id = payload.get("school_id")
     database_name = payload.get("database_name")
     
     # Root users have access to everything
-    if role == "Root":
+    if role == "root":
         return payload
     
-    # Non-root users must have school context
+    # Non-root users MUST have school context
     if not school_id or not database_name:
         logger.warning(f"Missing school context for user: {payload.get('sub')}")
         raise HTTPException(
@@ -119,14 +154,16 @@ async def verify_school_access(token: str = Depends(oauth2_scheme)) -> dict:
             detail="School not found"
         )
     
-    if school.get("status") == SchoolStatus.SUSPENDED.value:
+    school_status = school.get("status", "").lower()
+    
+    if school_status == "suspended":
         logger.warning(f"Access blocked - school suspended: {school_id}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="School is suspended. Contact administrator."
         )
     
-    if school.get("status") == SchoolStatus.DELETED.value:
+    if school_status == "deleted":
         logger.warning(f"Access blocked - school deleted: {school_id}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -141,14 +178,18 @@ class SchoolDatabaseDependency:
     Dependency class that provides the correct database based on JWT token.
     Usage in routes:
         db = Depends(SchoolDatabaseDependency())
+    
+    ENFORCES TENANT ISOLATION:
+    - Database comes ONLY from token
+    - No ability to specify database from request
     """
     async def __call__(self, token: str = Depends(oauth2_scheme)):
         payload = await verify_school_access(token)
         
         database_name = payload.get("database_name")
-        role = payload.get("role")
+        role = payload.get("role", "").lower()
         
-        if role == "Root":
+        if role == "root":
             # Root users accessing school data need explicit database specification
             # They use the default database or explicitly specify one
             from app.database import get_db
@@ -157,9 +198,11 @@ class SchoolDatabaseDependency:
         if database_name:
             return get_school_database(database_name)
         
-        # Fallback
-        from app.database import get_db
-        return get_db()
+        # This should never happen due to verify_school_access checks
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Database context required - tenant isolation enforced"
+        )
 
 
 def require_school_context(func: Callable):
@@ -183,24 +226,28 @@ def school_isolation_check(requested_school_id: str = None):
     """
     Check that the user has access to the requested school.
     Root users can access any school.
-    Other users can only access their own school.
+    Other users can ONLY access their own school.
+    
+    HARD REQUIREMENT:
+    - Cross-tenant access returns 403
+    - No exceptions for any role except root
     """
     async def checker(token: str = Depends(oauth2_scheme)):
         payload = await extract_school_context(token)
         
-        role = payload.get("role")
+        role = payload.get("role", "").lower()
         user_school_id = payload.get("school_id")
         
         # Root users bypass isolation
-        if role == "Root":
+        if role == "root":
             return payload
         
-        # Check school match
+        # STRICT TENANT ISOLATION CHECK
         if requested_school_id and user_school_id != requested_school_id:
-            logger.warning(f"School isolation violation: user {payload.get('sub')} tried to access {requested_school_id}")
+            logger.warning(f"🚨 TENANT ISOLATION VIOLATION: user {payload.get('sub')} (school {user_school_id}) tried to access {requested_school_id}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cannot access data from another school"
+                detail="Access denied - you cannot access data from another school"
             )
         
         return payload
@@ -214,6 +261,10 @@ async def database_routing_middleware(request: Request, call_next):
     """
     Middleware to set up database context for each request.
     Extracts database_name from JWT and makes it available to routes.
+    
+    STRICT TENANT ISOLATION:
+    - Context comes ONLY from JWT token
+    - No override possible from request headers or body
     """
     # Skip for public endpoints
     public_paths = ["/", "/health", "/api/token", "/docs", "/openapi.json", "/redoc"]
@@ -229,12 +280,18 @@ async def database_routing_middleware(request: Request, call_next):
             
             database_name = payload.get("database_name")
             school_id = payload.get("school_id")
+            school_slug = payload.get("school_slug")
+            role = payload.get("role")
             
-            # Set context variables
+            # Set context variables - these are the ONLY source of tenant info
             if database_name:
                 current_school_db.set(database_name)
             if school_id:
                 current_school_id.set(school_id)
+            if school_slug:
+                current_school_slug.set(school_slug)
+            if role:
+                current_user_role.set(role)
                 
         except JWTError:
             # Token invalid, let the route handler deal with it
@@ -243,9 +300,11 @@ async def database_routing_middleware(request: Request, call_next):
     # Process the request
     response = await call_next(request)
     
-    # Reset context
+    # Reset context after request
     current_school_db.set(None)
     current_school_id.set(None)
+    current_school_slug.set(None)
+    current_user_role.set(None)
     
     return response
 
@@ -258,6 +317,7 @@ def get_user_school_context(payload: dict) -> dict:
         "email": payload.get("sub"),
         "role": payload.get("role"),
         "school_id": payload.get("school_id"),
+        "school_slug": payload.get("school_slug"),
         "database_name": payload.get("database_name"),
     }
 
@@ -265,7 +325,9 @@ def get_user_school_context(payload: dict) -> dict:
 def create_school_token_data(
     email: str,
     role: str,
+    user_id: str = None,
     school_id: Optional[str] = None,
+    school_slug: Optional[str] = None,
     database_name: Optional[str] = None
 ) -> dict:
     """Create token data dict with school context"""
@@ -274,8 +336,12 @@ def create_school_token_data(
         "role": role,
     }
     
+    if user_id:
+        data["user_id"] = user_id
     if school_id:
         data["school_id"] = school_id
+    if school_slug:
+        data["school_slug"] = school_slug
     if database_name:
         data["database_name"] = database_name
     

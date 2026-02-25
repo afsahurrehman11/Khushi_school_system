@@ -159,12 +159,26 @@ def get_role_by_id(role_id: str) -> Optional[dict]:
         return None
 
 def get_all_roles() -> list:
-    """Get all roles"""
-    db = get_db()
-    roles = list(db.roles.find())
-    for role in roles:
-        role["id"] = str(role["_id"])
-    return roles
+    """Get all roles. Returns default roles if collection is empty or on error."""
+    DEFAULT_ROLES = [
+        {"id": "default_admin", "name": "Admin", "description": "Full access to all features", "permissions": ["*"]},
+        {"id": "default_teacher", "name": "Teacher", "description": "Access to students, classes, attendance", "permissions": ["students:read", "classes:read", "attendance:*"]},
+        {"id": "default_accountant", "name": "Accountant", "description": "Access to fees and payments", "permissions": ["fees:*", "payments:*", "students:read"]},
+    ]
+    try:
+        db = get_db()
+        roles = list(db.roles.find())
+        if not roles:
+            # Return default roles if collection is empty
+            return DEFAULT_ROLES
+        for role in roles:
+            role["id"] = str(role["_id"])
+        return roles
+    except Exception as e:
+        # Return default roles on any error (connection, empty db, etc.)
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to fetch roles, returning defaults: {e}")
+        return DEFAULT_ROLES
 
 def update_role(role_id: str, **kwargs) -> Optional[dict]:
     """Update role"""

@@ -34,13 +34,8 @@ const Login: React.FC = () => {
         
         // Redirect based on role
         setTimeout(() => {
-          if (user?.role === 'Root') {
-            navigate('/root-admin');
-          } else if (user?.role === 'Admin') {
-            navigate('/admin');
-          } else {
-            navigate('/');
-          }
+          const redirectPath = authService.getRedirectPathForRole(user?.role || '');
+          navigate(redirectPath);
         }, 1500);
       } else {
         throw new Error('No token received from server');

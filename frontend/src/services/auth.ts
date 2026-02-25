@@ -1,6 +1,7 @@
 /**
  * Authentication Service
  * Handles login, token management, and user context
+ * Uses centralized global_users for authentication
  */
 
 import { LoginRequest, LoginResponse, User, TokenPayload } from '../types';
@@ -14,6 +15,7 @@ class AuthService {
 
   /**
    * Login user with email and password
+   * Uses centralized authentication against global_users
    */
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     try {
@@ -46,10 +48,25 @@ class AuthService {
         this.setUser(user);
       }
 
-      return { token, user } as any;
+      return { token, user, access_token: token, token_type: 'bearer' } as LoginResponse;
     } catch (error: any) {
       logger.error('AUTH', `[API] ❌ Login error: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Set authentication from external source (e.g., after school creation)
+   * This allows auto-login without a separate login request
+   */
+  setAuthFromResponse(authData: LoginResponse): void {
+    const token = authData.access_token || (authData as any).token;
+    const user = authData.user;
+    
+    if (token && user) {
+      logger.info('AUTH', `[API] 🔓 Setting auth from response: ${user.email} (${user.role})`);
+      this.setToken(token);
+      this.setUser(user);
     }
   }
 
@@ -137,6 +154,22 @@ class AuthService {
   }
 
   /**
+   * Get current school_slug from token
+   */
+  getSchoolSlug(): string | null {
+    const payload = this.parseToken();
+    return payload?.school_slug || null;
+  }
+
+  /**
+   * Get current database_name from token
+   */
+  getDatabaseName(): string | null {
+    const payload = this.parseToken();
+    return payload?.database_name || null;
+  }
+
+  /**
    * Check if token is expired
    */
   isTokenExpired(): boolean {
@@ -145,6 +178,23 @@ class AuthService {
 
     const now = Math.floor(Date.now() / 1000);
     return payload.exp <= now;
+  }
+
+  /**
+   * Get redirect path based on user role
+   */
+  getRedirectPathForRole(role: string): string {
+    const normalizedRole = role.toLowerCase();
+    switch (normalizedRole) {
+      case 'root':
+        return '/root-admin';
+      case 'admin':
+        return '/students';
+      case 'staff':
+        return '/students';
+      default:
+        return '/login';
+    }
   }
 }
 

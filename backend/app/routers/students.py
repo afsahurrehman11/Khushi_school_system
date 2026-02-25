@@ -7,7 +7,7 @@ from app.services.student import (
 )
 from app.services.student import import_students_from_workbook_bytes, export_students_to_workbook_bytes, parse_students_from_workbook_bytes, import_students_with_images
 from app.services.student_image_service import StudentImageService
-from app.services.cloudinary_service import CloudinaryService
+from app.services.image_service import ImageService
 from app.services.embedding_job import BackgroundEmbeddingService
 from fastapi import UploadFile, File, Form
 from fastapi.responses import StreamingResponse
@@ -171,9 +171,9 @@ async def create_student_with_image(
         
         logger.info(f"🟢 [STUDENT] Creating: {data.get('full_name', 'Unknown')}")
         
-        # Process image first if provided
-        image_url = None
-        image_public_id = None
+        # Process image first if provided - store as base64 blob
+        image_blob = None
+        image_type = None
         
         if image and image.filename:
             logger.info(f"🔵 [UPLOAD] Processing image: {image.filename}")
@@ -184,31 +184,18 @@ async def create_student_with_image(
                 logger.error("🔴 [UPLOAD] Empty image file")
                 raise HTTPException(status_code=400, detail="Empty image file")
             
-            # Validate image format
-            allowed_formats = ['.jpg', '.jpeg', '.png']
-            file_ext = image.filename.lower().split('.')[-1] if '.' in image.filename else ''
-            if f'.{file_ext}' not in allowed_formats:
-                logger.error(f"🔴 [UPLOAD] Invalid format: {file_ext}")
-                raise HTTPException(status_code=400, detail="Invalid image format. Allowed: jpg, jpeg, png")
-            
-            # Generate temp student_id for folder path (will update after creation)
-            temp_id = f"temp_{datetime.utcnow().timestamp()}"
-            
-            # Upload to Cloudinary
-            upload_result = CloudinaryService.upload_image(
+            # Process and convert to base64 blob
+            image_blob, image_type, error = ImageService.process_and_store(
                 image_content,
-                image.filename,
-                temp_id,
-                school_id
+                max_dimension=800,
+                quality=85
             )
             
-            if not upload_result:
-                logger.error("🔴 [UPLOAD] Failed - aborting student creation")
-                raise HTTPException(status_code=400, detail="Image upload failed. Student not created.")
+            if error:
+                logger.error(f"🔴 [UPLOAD] Image processing failed: {error}")
+                raise HTTPException(status_code=400, detail=error)
             
-            image_url = upload_result["secure_url"]
-            image_public_id = upload_result["public_id"]
-            logger.info(f"🟢 [UPLOAD] Success: {image.filename}")
+            logger.info(f"🟢 [UPLOAD] Image processed: {image.filename}")
         
         # Normalize keys
         if 'name' in data and 'full_name' not in data:
@@ -237,20 +224,17 @@ async def create_student_with_image(
                 raise HTTPException(status_code=400, detail="Missing school context for student creation")
 
         data['school_id'] = school_id
-        # Add image data if uploaded
-        if image_url:
-            data['profile_image_url'] = image_url
-            data['profile_image_public_id'] = image_public_id
+        
+        # Add image data if uploaded (stored as base64 blob)
+        if image_blob:
+            data['profile_image_blob'] = image_blob
+            data['profile_image_type'] = image_type
             data['image_uploaded_at'] = datetime.utcnow()
             data['embedding_status'] = 'pending'
         
         # Create student
         student = create_student(data)
         if not student:
-            # Rollback image upload if student creation failed
-            if image_public_id:
-                logger.warning(f"🔴 [STUDENT] Creation failed - rolling back image upload")
-                CloudinaryService.delete_image(image_public_id)
             raise HTTPException(status_code=400, detail="Failed to create student. Student ID may already exist.")
         
         logger.info(f"🟢 [STUDENT] Created: {student['student_id']}")

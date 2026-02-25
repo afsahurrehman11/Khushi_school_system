@@ -4,9 +4,12 @@ Models for the root SaaS database (saas_root_db)
 """
 
 from pydantic import BaseModel, Field, validator
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 from datetime import datetime
 from enum import Enum
+
+if TYPE_CHECKING:
+    from . import SaaSSchoolResponse
 
 
 # ================= Enums =================
@@ -62,6 +65,7 @@ class SaaSSchoolInDB(BaseModel):
     id: Optional[str] = None
     school_id: str  # UUID or ObjectId string
     school_name: str  # Display name
+    school_slug: str  # Unique, lowercase, no spaces - used for email domains
     database_name: str  # Actual MongoDB database name
     admin_email: str
     hashed_password: str  # Stored hashed password
@@ -77,6 +81,14 @@ class SaaSSchoolInDB(BaseModel):
     country: Optional[str] = None
     postal_code: Optional[str] = None
     logo_url: Optional[str] = None
+    
+    # Payment/Suspension settings
+    payment_due_day: Optional[int] = None  # Day of month (1-28) when payment is due
+    auto_suspend_enabled: bool = False  # Whether to auto-suspend after due date
+    grace_period_days: int = 3  # Days after due date before auto-suspension
+    last_payment_date: Optional[datetime] = None  # When they last paid
+    next_payment_due: Optional[datetime] = None  # Next payment due date
+    suspension_reason: Optional[str] = None  # Reason if suspended
     
     # Timestamps
     created_at: datetime
@@ -96,6 +108,7 @@ class SaaSSchoolResponse(BaseModel):
     id: str
     school_id: str
     school_name: str
+    school_slug: str
     database_name: str
     admin_email: str
     plan: SchoolPlan
@@ -107,6 +120,14 @@ class SaaSSchoolResponse(BaseModel):
     student_count: int = 0
     teacher_count: int = 0
     storage_bytes: int = 0
+    # Payment/Suspension fields
+    payment_due_day: Optional[int] = None
+    auto_suspend_enabled: bool = False
+    grace_period_days: int = 3
+    last_payment_date: Optional[datetime] = None
+    next_payment_due: Optional[datetime] = None
+    suspension_reason: Optional[str] = None
+    suspended_at: Optional[datetime] = None
 
 
 class SaaSSchoolUpdate(BaseModel):
@@ -126,6 +147,21 @@ class SaaSSchoolUpdate(BaseModel):
 class SaaSSchoolSuspend(BaseModel):
     """Suspend school request"""
     reason: Optional[str] = None
+
+
+class SaaSSchoolPaymentSettings(BaseModel):
+    """Update school payment/suspension settings"""
+    payment_due_day: Optional[int] = Field(None, ge=1, le=28, description="Day of month (1-28)")
+    auto_suspend_enabled: Optional[bool] = None
+    grace_period_days: Optional[int] = Field(None, ge=0, le=30)
+    next_payment_due: Optional[datetime] = None
+
+
+class SaaSSchoolRecordPayment(BaseModel):
+    """Record a payment for a school"""
+    amount: float = Field(..., gt=0)
+    payment_date: Optional[datetime] = None
+    notes: Optional[str] = None
 
 
 class SaaSPasswordReset(BaseModel):
@@ -195,7 +231,96 @@ class SchoolStorageHistory(BaseModel):
     history: List[dict]  # [{date: str, storage_bytes: int}]
 
 
-# ================= Root User Models =================
+# ================= Global Users Models (Central Auth) =================
+
+class GlobalUserRole(str, Enum):
+    """User roles in the system"""
+    ROOT = "root"
+    ADMIN = "admin"
+    STAFF = "staff"
+
+
+class GlobalUserCreate(BaseModel):
+    """Schema for creating a user in global_users"""
+    name: str = Field(..., min_length=1, max_length=100)
+    email: str = Field(..., description="Unique email for authentication")
+    password: str = Field(..., min_length=6)
+    role: GlobalUserRole
+    school_id: Optional[str] = None  # Nullable for root users
+    school_slug: Optional[str] = None  # Nullable for root users
+    database_name: Optional[str] = None  # Nullable for root users
+
+
+class GlobalUserInDB(BaseModel):
+    """Global user as stored in saas_root_db.global_users"""
+    id: Optional[str] = None
+    name: str
+    email: str  # Unique, indexed
+    password_hash: str
+    role: GlobalUserRole
+    school_id: Optional[str] = None  # Nullable for root
+    school_slug: Optional[str] = None  # Nullable for root  
+    database_name: Optional[str] = None  # Nullable for root
+    is_active: bool = True
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class GlobalUserResponse(BaseModel):
+    """Response model for global user (excludes password)"""
+    id: str
+    name: str
+    email: str
+    role: GlobalUserRole
+    school_id: Optional[str] = None
+    school_slug: Optional[str] = None
+    database_name: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+
+
+class StaffCreate(BaseModel):
+    """Schema for admin creating staff users"""
+    name: str = Field(..., min_length=1, max_length=100)
+    email_prefix: str = Field(..., min_length=1, max_length=50, description="Prefix for email (before @school_slug)")
+    password: str = Field(..., min_length=6)
+    
+    @validator('email_prefix')
+    def validate_email_prefix(cls, v):
+        """Ensure email prefix is alphanumeric with dots/underscores only"""
+        import re
+        if not re.match(r'^[a-zA-Z0-9._]+$', v):
+            raise ValueError('Email prefix can only contain letters, numbers, dots, and underscores')
+        return v.lower()
+
+
+# ================= Auth Response Models =================
+
+class AuthTokenData(BaseModel):
+    """JWT token data structure"""
+    user_id: str
+    email: str
+    role: str
+    database_name: Optional[str] = None
+    school_slug: Optional[str] = None
+    school_id: Optional[str] = None
+    exp: int
+
+
+class LoginResponse(BaseModel):
+    """Login response with token and user info"""
+    access_token: str
+    token_type: str = "bearer"
+    user: GlobalUserResponse
+
+
+class SchoolCreatedResponse(BaseModel):
+    """Response after creating a school with auto-login"""
+    school: "SaaSSchoolResponse"
+    auth: LoginResponse  # Admin auto-login credentials
+
+
+# ================= Root User Models (Legacy - Kept for compatibility) =================
 
 class RootUserCreate(BaseModel):
     """Create a root user (super admin)"""
@@ -245,7 +370,7 @@ class InvoiceStatus(str, Enum):
 class BillingConfig(BaseModel):
     """Global billing configuration stored in saas_root_db.billing_config"""
     id: Optional[str] = None
-    # MongoDB Atlas Cost Input (manual for free tier)
+    # MongoDB Atlas Cost Input (manual for free tier, will use Billing API later)
     total_mongo_cost: float = 0.0  # Total MongoDB bill for the period
     billing_period: BillingPeriod = BillingPeriod.MONTHLY
     period_start: datetime
@@ -259,6 +384,16 @@ class BillingConfig(BaseModel):
     
     # Markup/Profit settings
     markup_percentage: float = 20.0  # Default 20% markup
+    
+    # Global miscellaneous amount applied to ALL schools equally
+    global_misc_amount: float = 0.0  # e.g., $3 extra per school
+    global_misc_description: Optional[str] = None  # Reason for misc charge
+    
+    # MongoDB Billing API settings (for future paid cluster integration)
+    mongo_billing_api_enabled: bool = False  # Whether to fetch from MongoDB Billing API
+    mongo_org_id: Optional[str] = None  # MongoDB Atlas Organization ID
+    mongo_api_public_key: Optional[str] = None  # For Billing API
+    mongo_api_private_key: Optional[str] = None  # For Billing API (encrypted)
     
     created_at: datetime
     updated_at: datetime
@@ -274,6 +409,9 @@ class BillingConfigCreate(BaseModel):
     fixed_cpu_ram_cost: float = Field(..., ge=0, description="Fixed CPU/RAM cost portion")
     dynamic_storage_cost: float = Field(..., ge=0, description="Dynamic storage cost portion")
     markup_percentage: float = Field(default=20.0, ge=0, le=100)
+    # Global miscellaneous charges
+    global_misc_amount: float = Field(default=0.0, ge=0, description="Extra amount per school")
+    global_misc_description: Optional[str] = Field(default=None, description="Description for misc charge")
 
 
 class CostBreakdown(BaseModel):

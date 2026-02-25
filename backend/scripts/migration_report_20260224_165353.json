@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-02-24T16:53:53.614672",
+  "mode": "dry_run",
+  "schools_processed": 1,
+  "users_migrated": 1,
+  "users_skipped": 0,
+  "users_errored": 0,
+  "details": [
+    {
+      "status": "would_migrate",
+      "email": "hamza@edu",
+      "role": "admin",
+      "school": "hamza_school",
+      "database": "school_hamza_school_20260221"
+    }
+  ]
+}

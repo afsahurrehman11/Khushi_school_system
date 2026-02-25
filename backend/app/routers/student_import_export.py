@@ -4,12 +4,13 @@ Student Import / Export Router — Admin-only.
 Endpoints:
   GET   /students-import-export/sample-template        — download sample xlsx
   POST  /students-import-export/upload                  — upload & validate (returns preview)
-  POST  /students-import-export/confirm/{log_id}        — confirm import after preview
+  POST  /students-import-export/confirm/{log_id}        — confirm import (all-or-nothing)
   GET   /students-import-export/status/{log_id}         — poll import status
-  GET   /students-import-export/error-report/{log_id}   — download error xlsx
   GET   /students-import-export/export                  — export students xlsx
   GET   /students-import-export/history                 — import history list
   GET   /students-import-export/notifications/stream    — SSE stream for realtime notifications
+
+NOTE: Error reporting is shown inline in the UI. No downloadable error report endpoint.
 """
 
 import asyncio
@@ -26,6 +27,7 @@ from fastapi.responses import StreamingResponse, Response
 
 from app.dependencies.auth import check_permission, get_current_user
 from app.database import get_db
+from app.services.saas_db import get_school_database
 from app.services.excel_service import (
     MAX_FILE_SIZE,
     generate_sample_template,
@@ -33,7 +35,6 @@ from app.services.excel_service import (
     check_db_duplicates,
     execute_import_transaction,
     export_students_xlsx,
-    generate_error_report,
 )
 from app.services.import_log_service import (
     create_import_log,
@@ -295,7 +296,7 @@ async def confirm_import(
 
         # Launch background task
         asyncio.get_event_loop().create_task(
-            _run_import_background(import_id, admin_email, school_id)
+            _run_import_background(import_id, admin_email, school_id, current_user.get("database_name"))
         )
 
         logger.info(f"[SCHOOL:{school_id}] ✅ Import started in background")
@@ -310,7 +311,7 @@ async def confirm_import(
         raise HTTPException(status_code=500, detail=f"Failed to confirm import: {str(e)}")
 
 
-async def _run_import_background(import_id: str, user_email: str, school_id: str):
+async def _run_import_background(import_id: str, user_email: str, school_id: str, database_name: str):
     """Background coroutine that performs the actual database writes with image processing."""
     logger.info(f"🔵 [BULK] Starting background import for {import_id}")
     try:
@@ -324,7 +325,7 @@ async def _run_import_background(import_id: str, user_email: str, school_id: str
         duplicate_action = log.get("duplicate_action", "skip")
         zip_path = log.get("_zip_path")
 
-        db = get_db()
+        db = get_school_database(database_name)
 
         rows_to_update = updatable_rows if duplicate_action == "update" else []
 
@@ -491,46 +492,6 @@ async def get_import_status(
         raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
 
 
-@router.get("/error-report/{import_id}")
-async def download_error_report(
-    import_id: str,
-    current_user: dict = Depends(require_school_admin),
-):
-    """Download the error report as an Excel file."""
-    school_id = current_user.get("school_id")
-    admin_email = current_user.get("email", "")
-    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Downloading error report for {import_id}")
-    
-    try:
-        log = get_import_log(import_id)
-        if not log:
-            logger.error(f"[SCHOOL:{school_id}] ❌ Import log not found: {import_id}")
-            raise HTTPException(status_code=404, detail="Import log not found")
-        
-        # Verify school_id matches
-        if log.get("school_id") != school_id:
-            logger.error(f"[SCHOOL:{school_id}] ❌ School mismatch for import {import_id}")
-            raise HTTPException(status_code=403, detail="Access denied")
-
-        errors = log.get("errors", [])
-        if not errors:
-            logger.error(f"[SCHOOL:{school_id}] ❌ No errors to report for {import_id}")
-            raise HTTPException(status_code=404, detail="No errors to report")
-
-        xlsx_bytes = generate_error_report(errors)
-        logger.info(f"[SCHOOL:{school_id}] ✅ Error report generated")
-        return Response(
-            content=xlsx_bytes,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": 'attachment; filename="students_import_errors.xlsx"'},
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[SCHOOL:{school_id}] ❌ Failed to generate error report: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate error report: {str(e)}")
-
-
 @router.get("/export")
 async def export_students(
     class_id: Optional[str] = Query(None),
@@ -642,3 +603,203 @@ async def notification_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Incomplete Students Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/incomplete-students")
+async def get_incomplete_students(
+    class_id: Optional[str] = Query(None),
+    current_user: dict = Depends(require_school_admin),
+):
+    """
+    Get all students with incomplete/missing data, grouped by class.
+    """
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email", "")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching incomplete students")
+    
+    try:
+        db = get_db()
+        
+        # Find students where data_status is 'incomplete' OR have missing optional fields
+        query = {
+            "school_id": school_id,
+            "$or": [
+                {"data_status": "incomplete"},
+                {"missing_fields": {"$exists": True, "$ne": []}},
+                # Also check for empty optional fields
+                {"section": {"$in": [None, ""]}},
+                {"gender": {"$in": [None, ""]}},
+                {"date_of_birth": {"$in": [None, ""]}},
+                {"guardian_info.father_name": {"$in": [None, ""]}},
+                {"guardian_info.parent_cnic": {"$in": [None, ""]}},
+                {"guardian_info.guardian_contact": {"$in": [None, ""]}},
+                {"guardian_info.address": {"$in": [None, ""]}},
+            ]
+        }
+        
+        if class_id:
+            query["class_id"] = class_id
+        
+        students_cursor = db.students.find(query)
+        
+        # Group by class
+        grouped = {}
+        total_incomplete = 0
+        
+        for student in students_cursor:
+            cls = student.get("class_id", "Unassigned")
+            if cls not in grouped:
+                grouped[cls] = {
+                    "class_id": cls,
+                    "class_name": cls,
+                    "students": [],
+                    "total_missing_fields": 0,
+                }
+            
+            # Calculate missing fields for this student
+            guardian = student.get("guardian_info", {}) or {}
+            missing = []
+            if not student.get("section"): missing.append("section")
+            if not student.get("gender"): missing.append("gender")
+            if not student.get("date_of_birth"): missing.append("date_of_birth")
+            if not guardian.get("father_name"): missing.append("father_name")
+            if not guardian.get("parent_cnic"): missing.append("father_cnic")
+            if not guardian.get("guardian_contact"): missing.append("parent_contact")
+            if not guardian.get("address"): missing.append("address")
+            if not student.get("profile_image_blob"): missing.append("profile_image")
+            
+            if missing:
+                student_data = {
+                    "id": str(student.get("_id", "")),
+                    "student_id": student.get("student_id", ""),
+                    "registration_number": student.get("registration_number", ""),
+                    "full_name": student.get("full_name", ""),
+                    "roll_number": student.get("roll_number", ""),
+                    "class_id": cls,
+                    "section": student.get("section", ""),
+                    "missing_fields": missing,
+                    "current_data": {
+                        "gender": student.get("gender", ""),
+                        "date_of_birth": student.get("date_of_birth", ""),
+                        "father_name": guardian.get("father_name", ""),
+                        "father_cnic": guardian.get("parent_cnic", ""),
+                        "parent_contact": guardian.get("guardian_contact", ""),
+                        "address": guardian.get("address", ""),
+                    }
+                }
+                grouped[cls]["students"].append(student_data)
+                grouped[cls]["total_missing_fields"] += len(missing)
+                total_incomplete += 1
+        
+        # Sort classes alphabetically
+        result = sorted(grouped.values(), key=lambda x: x["class_name"])
+        
+        logger.info(f"[SCHOOL:{school_id}] ✅ Found {total_incomplete} students with incomplete data")
+        return {
+            "total_incomplete_students": total_incomplete,
+            "classes": result,
+        }
+    except Exception as e:
+        logger.exception(f"[SCHOOL:{school_id}] ❌ Failed to fetch incomplete students: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch incomplete students: {str(e)}")
+
+
+@router.patch("/incomplete-students/{student_id}")
+async def update_incomplete_student(
+    student_id: str,
+    updates: dict,
+    current_user: dict = Depends(require_school_admin),
+):
+    """
+    Update a student's missing fields.
+    """
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email", "")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Updating student {student_id}")
+    
+    try:
+        from bson.objectid import ObjectId
+        db = get_db()
+        
+        # Find the student
+        student = db.students.find_one({
+            "_id": ObjectId(student_id),
+            "school_id": school_id
+        })
+        
+        if not student:
+            raise HTTPException(status_code=404, detail="Student not found")
+        
+        # Build update document
+        update_doc = {"updated_at": datetime.utcnow()}
+        
+        # Direct fields
+        for field in ["section", "gender", "date_of_birth"]:
+            if field in updates and updates[field]:
+                update_doc[field] = updates[field]
+        
+        # Guardian info fields
+        guardian_updates = {}
+        if "father_name" in updates and updates["father_name"]:
+            guardian_updates["guardian_info.father_name"] = updates["father_name"]
+        if "father_cnic" in updates and updates["father_cnic"]:
+            guardian_updates["guardian_info.parent_cnic"] = updates["father_cnic"]
+        if "parent_contact" in updates and updates["parent_contact"]:
+            guardian_updates["guardian_info.guardian_contact"] = updates["parent_contact"]
+            update_doc["contact_info.phone"] = updates["parent_contact"]
+        if "address" in updates and updates["address"]:
+            guardian_updates["guardian_info.address"] = updates["address"]
+        
+        update_doc.update(guardian_updates)
+        
+        # Recalculate data status
+        existing_guardian = student.get("guardian_info", {}) or {}
+        merged_guardian = {
+            "father_name": updates.get("father_name") or existing_guardian.get("father_name", ""),
+            "parent_cnic": updates.get("father_cnic") or existing_guardian.get("parent_cnic", ""),
+            "guardian_contact": updates.get("parent_contact") or existing_guardian.get("guardian_contact", ""),
+            "address": updates.get("address") or existing_guardian.get("address", ""),
+        }
+        merged_student = {
+            "section": updates.get("section") or student.get("section", ""),
+            "gender": updates.get("gender") or student.get("gender", ""),
+            "date_of_birth": updates.get("date_of_birth") or student.get("date_of_birth", ""),
+        }
+        
+        new_missing = []
+        if not merged_student.get("section"): new_missing.append("section")
+        if not merged_student.get("gender"): new_missing.append("gender")
+        if not merged_student.get("date_of_birth"): new_missing.append("date_of_birth")
+        if not merged_guardian.get("father_name"): new_missing.append("father_name")
+        if not merged_guardian.get("parent_cnic"): new_missing.append("father_cnic")
+        if not merged_guardian.get("guardian_contact"): new_missing.append("parent_contact")
+        if not merged_guardian.get("address"): new_missing.append("address")
+        
+        update_doc["data_status"] = "complete" if not new_missing else "incomplete"
+        update_doc["missing_fields"] = new_missing
+        
+        # Perform update
+        result = db.students.update_one(
+            {"_id": ObjectId(student_id)},
+            {"$set": update_doc}
+        )
+        
+        if result.modified_count == 0:
+            logger.warning(f"[SCHOOL:{school_id}] No changes made to student {student_id}")
+        
+        logger.info(f"[SCHOOL:{school_id}] ✅ Updated student {student_id}")
+        return {
+            "success": True,
+            "message": "Student updated successfully",
+            "data_status": update_doc["data_status"],
+            "remaining_missing_fields": new_missing,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"[SCHOOL:{school_id}] ❌ Failed to update student: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update student: {str(e)}")

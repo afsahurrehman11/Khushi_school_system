@@ -1,5 +1,6 @@
 // Students feature exports
 export { default as StudentList } from './pages/StudentList';
+export { default as StudentImportExportPage } from './pages/StudentImportExportPage';
 export { studentsData } from './studentsData';
 export { default as ImportModal } from './components/ImportModal';
 export { default as ExportModal } from './components/ExportModal';

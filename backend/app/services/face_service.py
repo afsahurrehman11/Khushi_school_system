@@ -171,7 +171,7 @@ class FaceRecognitionService:
                 _embedding_cache["students"][str(student["_id"])] = {
                     "embedding": embedding,
                     "name": student.get("full_name", "Unknown"),
-                    "profile_image_url": student.get("profile_image_url"),
+                    "has_image": student.get("profile_image_blob") is not None,
                     "student_id": student.get("student_id"),
                     "class_id": student.get("class_id"),
                     "section": student.get("section"),
@@ -195,7 +195,7 @@ class FaceRecognitionService:
                 _embedding_cache["employees"][str(teacher["_id"])] = {
                     "embedding": embedding,
                     "name": teacher.get("name", "Unknown"),
-                    "profile_image_url": teacher.get("profile_image_url"),
+                    "has_image": teacher.get("profile_image_blob") is not None,
                     "teacher_id": teacher.get("teacher_id"),
                     "email": teacher.get("email"),
                     "school_id": school_id
@@ -231,7 +231,8 @@ class FaceRecognitionService:
     
     async def generate_embedding_from_url(self, image_url: str) -> Tuple[Optional[List[float]], Optional[str]]:
         """
-        Download image from Cloudinary and generate embedding.
+        Download image from URL and generate embedding.
+        DEPRECATED: Use generate_embedding_from_blob instead.
         Returns (embedding_list, error_message)
         """
         try:
@@ -261,6 +262,36 @@ class FaceRecognitionService:
             
         except Exception as e:
             logger.error(f"Embedding generation failed: {e}")
+            return None, str(e)
+    
+    async def generate_embedding_from_blob(self, base64_blob: str) -> Tuple[Optional[List[float]], Optional[str]]:
+        """
+        Generate embedding from base64 encoded image blob stored in MongoDB.
+        This is the preferred method for blob-based storage.
+        Returns (embedding_list, error_message)
+        """
+        try:
+            import base64
+            
+            # Decode base64 to bytes
+            try:
+                image_data = base64.b64decode(base64_blob)
+            except Exception as e:
+                logger.error(f"Failed to decode base64 image: {e}")
+                return None, "Invalid base64 image data"
+            
+            logger.info(f"Decoded image blob: {len(image_data)} bytes")
+            
+            # Generate embedding
+            embedding = self._image_bytes_to_embedding(image_data)
+            
+            if embedding is None:
+                return None, "No face detected in image"
+            
+            return embedding.tolist(), None
+            
+        except Exception as e:
+            logger.error(f"Blob embedding generation failed: {e}")
             return None, str(e)
     
     def _image_bytes_to_embedding(self, data: bytes) -> Optional[np.ndarray]:

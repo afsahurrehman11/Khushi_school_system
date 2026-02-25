@@ -1,20 +1,20 @@
-"""Student image management service"""
+"""Student image management service - MongoDB Blob Storage"""
 import logging
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 from datetime import datetime
 from bson import ObjectId
 import base64
 from io import BytesIO
 from PIL import Image
 
-from app.services.cloudinary_service import CloudinaryService
+from app.services.image_service import ImageService
 from app.database import get_db
 
 logger = logging.getLogger(__name__)
 
 
 class StudentImageService:
-    """Service for managing student images and embeddings"""
+    """Service for managing student images stored as blobs in MongoDB"""
     
     @staticmethod
     async def upload_student_image(
@@ -22,15 +22,15 @@ class StudentImageService:
         file_content: bytes,
         file_name: str,
         school_id: str = None
-    ) -> Dict[str, any]:
+    ) -> Dict[str, Any]:
         """
-        Upload image for a student
+        Upload image for a student - stores as base64 blob in MongoDB
         
         Args:
             student_id: MongoDB ObjectId as string
             file_content: Image file bytes
             file_name: Original filename
-            school_id: School ID for folder isolation
+            school_id: School ID for validation
             
         Returns:
             Dict with success status and image details
@@ -38,82 +38,56 @@ class StudentImageService:
         try:
             logger.info(f"🔵 [UPLOAD] Processing image for student: {student_id}")
             
-            # Validate image
-            try:
-                image = Image.open(BytesIO(file_content))
-                image.verify()
-                image = Image.open(BytesIO(file_content))  # Reopen after verify
-            except Exception as e:
-                logger.error(f"🔴 [UPLOAD] Invalid image file for student {student_id}: {str(e)}")
+            # Process and convert to base64 blob
+            image_blob, image_type, error = ImageService.process_and_store(
+                file_content,
+                max_dimension=800,
+                quality=85
+            )
+            
+            if error:
+                logger.error(f"🔴 [UPLOAD] Image processing failed for student {student_id}: {error}")
                 return {
                     "success": False,
-                    "error": f"Invalid image file: {str(e)}"
+                    "error": error
                 }
             
-            # Get student's school_id if not provided
+            # Update student document with blob
             db = get_db()
             student_collection = db["students"]
             
-            if not school_id:
-                student = student_collection.find_one({"_id": ObjectId(student_id)})
-                if student:
-                    school_id = student.get("school_id")
+            # Build query
+            query = {"_id": ObjectId(student_id)}
+            if school_id:
+                query["school_id"] = school_id
             
-            # Upload to Cloudinary
-            cloudinary_result = CloudinaryService.upload_image(
-                file_content,
-                file_name,
-                student_id,
-                school_id
-            )
-
-            # CloudinaryService returns either a result dict or an error dict {"error": msg}
-            if not cloudinary_result:
-                logger.error(f"🔴 [UPLOAD] Cloudinary returned no result for student {student_id}")
-                return {
-                    "success": False,
-                    "error": "Failed to upload image to cloud storage"
-                }
-
-            if isinstance(cloudinary_result, dict) and cloudinary_result.get("error"):
-                err_msg = cloudinary_result.get("error")
-                logger.error(f"🔴 [UPLOAD] Cloudinary error for student {student_id}: {err_msg}")
-                return {
-                    "success": False,
-                    "error": f"Cloud storage error: {err_msg}"
-                }
-
-            logger.info(f"🟢 [UPLOAD] Cloudinary success for student {student_id}")
-            
-            # Update student document
             result = student_collection.update_one(
-                {"_id": ObjectId(student_id)},
+                query,
                 {
                     "$set": {
-                        "profile_image_url": cloudinary_result["secure_url"],
-                        "profile_image_public_id": cloudinary_result["public_id"],
+                        "profile_image_blob": image_blob,
+                        "profile_image_type": image_type,
                         "image_uploaded_at": datetime.utcnow(),
+                        "face_image_updated_at": datetime.utcnow(),
                         "embedding_status": "pending",
+                        "face_embedding": None,
                         "updated_at": datetime.utcnow()
                     }
                 }
             )
 
-            logger.info(f"Student DB update result for {student_id}: matched={getattr(result, 'matched_count', None)}, modified={getattr(result, 'modified_count', None)}")
-
             if result.modified_count == 0:
-                # Try to delete uploaded image if student update failed
-                logger.warning(f"No student document updated for {student_id} after Cloudinary upload; rolling back cloud image {cloudinary_result.get('public_id')}")
-                CloudinaryService.delete_image(cloudinary_result["public_id"])
+                logger.warning(f"No student document updated for {student_id}")
                 return {
                     "success": False,
                     "error": "Student not found"
                 }
             
+            logger.info(f"🟢 [UPLOAD] Image stored for student {student_id}")
+            
             return {
                 "success": True,
-                "image_url": cloudinary_result["secure_url"],
-                "public_id": cloudinary_result["public_id"],
+                "image_type": image_type,
                 "message": "Image uploaded successfully. Face embedding pending generation."
             }
             
@@ -125,39 +99,63 @@ class StudentImageService:
             }
     
     @staticmethod
-    async def delete_student_image(student_id: str) -> Dict[str, any]:
-        """
-        Delete image for a student
-        
-        Args:
-            student_id: MongoDB ObjectId as string
-            
-        Returns:
-            Dict with success status
-        """
+    async def upload_cnic_image(
+        student_id: str,
+        file_content: bytes,
+        school_id: str = None
+    ) -> Dict[str, Any]:
+        """Upload CNIC image for a student (optional)"""
         try:
+            # Process CNIC image with higher quality for readability
+            image_blob, image_type, error = ImageService.process_and_store(
+                file_content,
+                max_dimension=1200,
+                quality=90
+            )
+            
+            if error:
+                return {"success": False, "error": error}
+            
             db = get_db()
-            student_collection = db["students"]
+            query = {"_id": ObjectId(student_id)}
+            if school_id:
+                query["school_id"] = school_id
             
-            # Get student to find public_id
-            student = student_collection.find_one({"_id": ObjectId(student_id)})
-            
-            if not student:
-                return {"success": False, "error": "Student not found"}
-            
-            public_id = student.get("profile_image_public_id")
-            
-            # Delete from Cloudinary
-            if public_id:
-                CloudinaryService.delete_image(public_id)
-            
-            # Update student document
-            result = student_collection.update_one(
-                {"_id": ObjectId(student_id)},
+            result = db.students.update_one(
+                query,
                 {
                     "$set": {
-                        "profile_image_url": None,
-                        "profile_image_public_id": None,
+                        "cnic_image_blob": image_blob,
+                        "cnic_image_type": image_type,
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+            
+            if result.modified_count == 0:
+                return {"success": False, "error": "Student not found"}
+            
+            return {"success": True, "message": "CNIC image uploaded"}
+            
+        except Exception as e:
+            logger.error(f"Error uploading CNIC for student {student_id}: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    @staticmethod
+    async def delete_student_image(student_id: str, school_id: str = None) -> Dict[str, Any]:
+        """Delete profile image for a student"""
+        try:
+            db = get_db()
+            query = {"_id": ObjectId(student_id)}
+            if school_id:
+                query["school_id"] = school_id
+            
+            result = db.students.update_one(
+                query,
+                {
+                    "$set": {
+                        "profile_image_blob": None,
+                        "profile_image_type": None,
                         "image_uploaded_at": None,
                         "embedding_status": None,
                         "face_embedding": None,
@@ -168,34 +166,76 @@ class StudentImageService:
                 }
             )
             
+            if result.modified_count == 0:
+                return {"success": False, "error": "Student not found"}
+            
             return {"success": True, "message": "Image deleted successfully"}
             
         except Exception as e:
             logger.error(f"Error deleting image for student {student_id}: {str(e)}")
-            return {
-                "success": False,
-                "error": f"Delete failed: {str(e)}"
-            }
+            return {"success": False, "error": str(e)}
     
     @staticmethod
-    async def get_students_missing_photos(class_id: Optional[str] = None) -> Dict[str, any]:
-        """
-        Get students missing profile photos
-        
-        Args:
-            class_id: Optional class filter
-            
-        Returns:
-            Dict with per-class missing photo statistics
-        """
+    def get_profile_image_data_url(student_id: str, school_id: str = None) -> Optional[str]:
+        """Get student profile image as data URL for display"""
         try:
             db = get_db()
-            student_collection = db["students"]
+            query = {"_id": ObjectId(student_id)}
+            if school_id:
+                query["school_id"] = school_id
             
-            # Build match filter
-            match_filter = {"profile_image_url": {"$exists": False}}
+            student = db.students.find_one(
+                query,
+                {"profile_image_blob": 1, "profile_image_type": 1}
+            )
+            
+            if student and student.get("profile_image_blob"):
+                mime_type = student.get("profile_image_type", "image/jpeg")
+                return f"data:{mime_type};base64,{student['profile_image_blob']}"
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting image for student {student_id}: {str(e)}")
+            return None
+    
+    @staticmethod
+    def get_profile_image_bytes(student_id: str, school_id: str = None) -> Optional[bytes]:
+        """Get student profile image as bytes for embedding generation"""
+        try:
+            db = get_db()
+            query = {"_id": ObjectId(student_id)}
+            if school_id:
+                query["school_id"] = school_id
+            
+            student = db.students.find_one(query, {"profile_image_blob": 1})
+            
+            if student and student.get("profile_image_blob"):
+                return base64.b64decode(student["profile_image_blob"])
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting image bytes for student {student_id}: {str(e)}")
+            return None
+    
+    @staticmethod
+    async def get_students_missing_photos(class_id: Optional[str] = None, school_id: str = None) -> Dict[str, Any]:
+        """Get statistics of students missing profile photos"""
+        try:
+            db = get_db()
+            
+            # Build match filter for missing photos
+            match_filter = {
+                "$or": [
+                    {"profile_image_blob": {"$exists": False}},
+                    {"profile_image_blob": None}
+                ]
+            }
             if class_id:
                 match_filter["class_id"] = class_id
+            if school_id:
+                match_filter["school_id"] = school_id
             
             # Aggregate by class
             pipeline = [
@@ -209,10 +249,15 @@ class StudentImageService:
                 {"$sort": {"_id": 1}}
             ]
             
-            missing_by_class = list(student_collection.aggregate(pipeline))
+            missing_by_class = list(db.students.aggregate(pipeline))
             
             # Get total counts per class
-            total_by_class_pipeline = [
+            total_filter = {}
+            if school_id:
+                total_filter["school_id"] = school_id
+            
+            total_pipeline = [
+                {"$match": total_filter},
                 {
                     "$group": {
                         "_id": "$class_id",
@@ -221,53 +266,46 @@ class StudentImageService:
                 }
             ]
             
-            total_by_class = list(student_collection.aggregate(total_by_class_pipeline))
+            total_by_class = list(db.students.aggregate(total_pipeline))
             total_dict = {item["_id"]: item["total_count"] for item in total_by_class}
             
             # Combine results
             result = []
             for missing_item in missing_by_class:
                 class_id_val = missing_item["_id"]
+                total = total_dict.get(class_id_val, 0)
                 result.append({
                     "class_id": class_id_val,
                     "missing_count": missing_item["missing_count"],
-                    "total_count": total_dict.get(class_id_val, 0),
+                    "total_count": total,
                     "percentage_missing": round(
-                        (missing_item["missing_count"] / total_dict.get(class_id_val, 1)) * 100, 2
+                        (missing_item["missing_count"] / max(total, 1)) * 100, 2
                     )
                 })
             
-            return {
-                "success": True,
-                "data": result
-            }
+            return {"success": True, "data": result}
             
         except Exception as e:
             logger.error(f"Error fetching missing photos: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
     
     @staticmethod
-    async def get_class_students_missing_photos(class_id: str) -> Dict[str, any]:
-        """
-        Get list of students in specific class missing photos
-        
-        Args:
-            class_id: Class ID
-            
-        Returns:
-            Dict with student list
-        """
+    async def get_class_students_missing_photos(class_id: str, school_id: str = None) -> Dict[str, Any]:
+        """Get list of students in specific class missing photos"""
         try:
             db = get_db()
-            student_collection = db["students"]
             
-            students = list(student_collection.find({
+            query = {
                 "class_id": class_id,
-                "profile_image_url": {"$exists": False}
-            }))
+                "$or": [
+                    {"profile_image_blob": {"$exists": False}},
+                    {"profile_image_blob": None}
+                ]
+            }
+            if school_id:
+                query["school_id"] = school_id
+            
+            students = list(db.students.find(query))
             
             return {
                 "success": True,
@@ -285,7 +323,4 @@ class StudentImageService:
             
         except Exception as e:
             logger.error(f"Error fetching students missing photos: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}

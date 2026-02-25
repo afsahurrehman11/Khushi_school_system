@@ -251,7 +251,7 @@ class EmbeddingGenerator:
     @staticmethod
     def generate_embedding_from_url(image_url: str, student_id: str = "unknown") -> Tuple[Optional[list], Optional[str]]:
         """
-        Generate face embedding from image URL (e.g., Cloudinary)
+        Generate face embedding from image URL
         
         Args:
             image_url: URL to the image
@@ -276,4 +276,32 @@ class EmbeddingGenerator:
             return None, "failed"
         except Exception as e:
             logger.error(f"Embedding generation from URL failed for {student_id}: {str(e)}")
+            return None, "failed"
+    
+    @staticmethod
+    def generate_embedding_from_blob(base64_blob: str, student_id: str = "unknown") -> Tuple[Optional[list], Optional[str]]:
+        """
+        Generate face embedding from base64 image blob stored in MongoDB
+        
+        Args:
+            base64_blob: Base64 encoded image string
+            student_id: Student ID for logging purposes
+            
+        Returns:
+            Tuple of (embedding, status)
+        """
+        try:
+            import base64
+            
+            # Decode base64 to bytes
+            image_bytes = base64.b64decode(base64_blob)
+            
+            # Convert to PIL Image
+            pil_image = Image.open(io.BytesIO(image_bytes))
+            
+            # Generate embedding
+            return EmbeddingGenerator.generate_embedding_from_image(pil_image)
+            
+        except Exception as e:
+            logger.error(f"Embedding generation from blob failed for {student_id}: {str(e)}")
             return None, "failed"

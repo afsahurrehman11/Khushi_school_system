@@ -6,7 +6,7 @@ Handles multi-tenant database operations for the SaaS system
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.errors import ConfigurationError
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 import os
 import re
@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Root SaaS database name
 SAAS_ROOT_DB_NAME = "saas_root_db"
+SAAS_ROOT_DB = SAAS_ROOT_DB_NAME  # Alias for export
 
 # Lazy client initialization
 _client: Optional[MongoClient] = None
@@ -326,4 +327,179 @@ def get_school_by_id(school_id: str) -> Optional[Dict]:
         return school
     except Exception as e:
         logger.error(f"❌ Failed to look up school by id {school_id}: {e}")
+        return None
+
+
+# ================= Global Users Management =================
+
+def get_global_user_by_email(email: str) -> Optional[Dict]:
+    """
+    Look up a user by email from saas_root_db.global_users.
+    This is the ONLY authentication source.
+    """
+    try:
+        root_db = get_saas_root_db()
+        user = root_db.global_users.find_one({"email": email.lower().strip()})
+        if user:
+            user["id"] = str(user.pop("_id"))
+        return user
+    except Exception as e:
+        logger.error(f"❌ Failed to look up global user by email {email}: {e}")
+        return None
+
+
+def get_global_user_by_id(user_id: str) -> Optional[Dict]:
+    """Look up a user by ID from saas_root_db.global_users"""
+    try:
+        root_db = get_saas_root_db()
+        user = root_db.global_users.find_one({"_id": ObjectId(user_id)})
+        if user:
+            user["id"] = str(user.pop("_id"))
+        return user
+    except Exception as e:
+        logger.error(f"❌ Failed to look up global user by id {user_id}: {e}")
+        return None
+
+
+def create_global_user(user_data: Dict) -> Optional[Dict]:
+    """
+    Create a new user in saas_root_db.global_users.
+    
+    user_data should contain:
+    - name: str
+    - email: str (will be lowercased)
+    - password_hash: str
+    - role: str ("root", "admin", "staff")
+    - school_id: Optional[str]
+    - school_slug: Optional[str]
+    - database_name: Optional[str]
+    """
+    try:
+        root_db = get_saas_root_db()
+        
+        email = user_data.get("email", "").lower().strip()
+        
+        # Check if email already exists globally
+        if root_db.global_users.find_one({"email": email}):
+            logger.warning(f"❌ Global user creation failed - email exists: {email}")
+            return None
+        
+        from datetime import datetime
+        now = datetime.utcnow()
+        
+        user_doc = {
+            "name": user_data.get("name"),
+            "email": email,
+            "password_hash": user_data.get("password_hash"),
+            "role": user_data.get("role"),
+            "school_id": user_data.get("school_id"),
+            "school_slug": user_data.get("school_slug"),
+            "database_name": user_data.get("database_name"),
+            "is_active": user_data.get("is_active", True),
+            "created_at": now,
+            "updated_at": now,
+        }
+        
+        result = root_db.global_users.insert_one(user_doc)
+        user_doc["id"] = str(result.inserted_id)
+        
+        logger.info(f"✅ Created global user: {email} (Role: {user_doc['role']})")
+        return user_doc
+    except Exception as e:
+        logger.error(f"❌ Failed to create global user: {e}")
+        return None
+
+
+def update_global_user(user_id: str, update_data: Dict) -> Optional[Dict]:
+    """Update a global user in saas_root_db.global_users"""
+    try:
+        root_db = get_saas_root_db()
+        
+        from datetime import datetime
+        update_data["updated_at"] = datetime.utcnow()
+        
+        result = root_db.global_users.find_one_and_update(
+            {"_id": ObjectId(user_id)},
+            {"$set": update_data},
+            return_document=True
+        )
+        
+        if result:
+            result["id"] = str(result.pop("_id"))
+            logger.info(f"✅ Updated global user: {user_id}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Failed to update global user {user_id}: {e}")
+        return None
+
+
+def get_global_users_by_school(school_id: str) -> List[Dict]:
+    """Get all global users for a specific school"""
+    try:
+        root_db = get_saas_root_db()
+        users = list(root_db.global_users.find({"school_id": school_id}))
+        for user in users:
+            user["id"] = str(user.pop("_id"))
+        return users
+    except Exception as e:
+        logger.error(f"❌ Failed to list global users for school {school_id}: {e}")
+        return []
+
+
+def delete_global_user(user_id: str, hard_delete: bool = False) -> bool:
+    """Delete or deactivate a global user"""
+    try:
+        root_db = get_saas_root_db()
+        
+        if hard_delete:
+            result = root_db.global_users.delete_one({"_id": ObjectId(user_id)})
+            logger.info(f"🗑️ Hard deleted global user: {user_id}")
+            return result.deleted_count > 0
+        else:
+            from datetime import datetime
+            result = root_db.global_users.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": {"is_active": False, "updated_at": datetime.utcnow()}}
+            )
+            logger.info(f"🗑️ Soft deleted global user: {user_id}")
+            return result.modified_count > 0
+    except Exception as e:
+        logger.error(f"❌ Failed to delete global user {user_id}: {e}")
+        return False
+
+
+def generate_school_slug(school_name: str) -> str:
+    """
+    Generate a unique school slug from school name.
+    Slug is lowercase, no spaces, alphanumeric with underscores only.
+    """
+    import re
+    
+    # Remove special characters, replace spaces with underscores, lowercase
+    slug = re.sub(r'[^a-zA-Z0-9\s]', '', school_name.lower())
+    slug = re.sub(r'\s+', '_', slug.strip())
+    slug = re.sub(r'_+', '_', slug)
+    
+    # Ensure slug is unique
+    root_db = get_saas_root_db()
+    original_slug = slug
+    counter = 1
+    
+    while root_db.schools.find_one({"school_slug": slug}):
+        slug = f"{original_slug}_{counter}"
+        counter += 1
+    
+    return slug
+
+
+def get_school_by_slug(slug: str) -> Optional[Dict]:
+    """Look up a school by school_slug from saas_root_db"""
+    try:
+        root_db = get_saas_root_db()
+        school = root_db.schools.find_one({"school_slug": slug.lower()})
+        if school:
+            school["id"] = str(school.pop("_id"))
+        return school
+    except Exception as e:
+        logger.error(f"❌ Failed to look up school by slug {slug}: {e}")
         return None

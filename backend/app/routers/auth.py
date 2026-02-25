@@ -1,10 +1,17 @@
+"""
+Centralized Authentication Router
+ALL authentication goes through saas_root_db.global_users ONLY.
+No database scanning, no multi-DB lookup, no dynamic role detection.
+"""
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from app.config import settings
-from app.models.user import LoginRequest, TokenResponse
-from app.services.user import get_user_by_email
-from app.dependencies.auth import create_access_token, get_current_user, get_current_admin
+from app.models.user import TokenResponse
+from app.dependencies.auth import create_access_token, get_current_user
+from app.services.saas_db import get_global_user_by_email, get_saas_root_db
 from datetime import timedelta
+import hashlib
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,88 +19,53 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def hash_password(password: str) -> str:
+    """Hash password using SHA256 (use bcrypt in production)"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify password against hash"""
+    return hash_password(plain_password) == hashed_password
+
+
 @router.post("/token", response_model=TokenResponse)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     """
-    Login endpoint with multi-tenant SaaS support.
+    Centralized login endpoint.
     
-    - Root users: Authenticated against saas_root_db, no school context
-    - School admins: Authenticated against saas_root_db, includes database_name in token
-    - Other users: Authenticated against their school's database
+    AUTHENTICATION FLOW:
+    1. Query ONLY saas_root_db.global_users by email
+    2. Validate password
+    3. If role == "root": Load root dashboard context
+    4. If role == "admin" or "staff": Include database_name in JWT
+    
+    FORBIDDEN:
+    - Scanning multiple databases
+    - Looping over tenant DBs
+    - Email parsing for role detection
+    - Guessing user role dynamically
     """
     email = form_data.username.lower().strip()
     password = form_data.password
     
-    logger.info(f"🔐 Login attempt for email: {email}")
+    logger.info(f"🔐 Login attempt for: {email}")
     
-    # First, try to authenticate as a school admin via SaaS system
-    try:
-        from app.services.saas_service import authenticate_school_admin
-        from app.services.saas_db import get_school_database, get_saas_root_db
-        
-        school = authenticate_school_admin(email, password)
-        
-        if school:
-            # School admin login successful
-            school_id = school.get("school_id")
-            database_name = school.get("database_name")
-            school_name = school.get("school_name")
-            
-            logger.info(f"✅ School admin login: {email} (School: {school_name}, DB: {database_name})")
-            
-            access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
-            
-            # Include database_name in token for dynamic routing
-            token_data = {
-                "sub": email,
-                "role": "Admin",
-                "school_id": school_id,
-                "database_name": database_name,
-            }
-            
-            access_token = create_access_token(
-                data=token_data,
-                expires_delta=access_token_expires
-            )
-            
-            return {
-                "access_token": access_token,
-                "token_type": "bearer",
-                "user": {
-                    "id": school.get("id", school_id),
-                    "email": email,
-                    "name": school_name + " Admin",
-                    "role": "Admin",
-                    "school_id": school_id,
-                    "database_name": database_name,
-                    "created_at": school.get("created_at"),
-                    "is_active": True
-                }
-            }
-            
-    except ValueError as e:
-        # School suspended or deleted
-        logger.warning(f"❌ Login blocked: {str(e)} - {email}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(e),
-        )
-    except Exception as e:
-        # SaaS auth failed, try regular auth
-        logger.debug(f"SaaS auth not applicable for {email}: {e}")
+    # ============================================
+    # SINGLE SOURCE OF TRUTH: global_users ONLY
+    # ============================================
+    user = get_global_user_by_email(email)
     
-    # Try regular user authentication (Root users or users in default DB)
-    user = get_user_by_email(email)
     if not user:
-        logger.warning(f"❌ Login failed: User not found - {email}")
+        logger.warning(f"❌ Login failed: User not found in global_users - {email}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    # For dev purposes, password is stored in plaintext
-    if password != user.get("password"):
+    
+    # Verify password
+    if not verify_password(password, user.get("password_hash", "")):
         logger.warning(f"❌ Login failed: Invalid password - {email}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -108,57 +80,93 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is deactivated",
         )
-
-    role = user.get("role")
+    
+    role = user.get("role", "").lower()
     school_id = user.get("school_id")
+    school_slug = user.get("school_slug")
+    database_name = user.get("database_name")
     
-    logger.info(f"✅ Login successful: {email} (Role: {role}, School: {school_id or 'N/A - Root'})")
-
-    access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
-    
-    # Build token data
-    token_data = {"sub": user["email"], "role": role}
-    
-    if school_id:
-        token_data["school_id"] = school_id
+    # For non-root users, verify school is active
+    if role != "root" and school_id:
+        root_db = get_saas_root_db()
+        school = root_db.schools.find_one({"school_id": school_id})
         
-        # Try to get database_name from saas_root_db for non-Root users
-        try:
-            from app.services.saas_db import get_school_by_id
-            school = get_school_by_id(school_id)
-            if school and school.get("database_name"):
-                token_data["database_name"] = school.get("database_name")
-        except Exception:
-            pass
+        if not school:
+            logger.warning(f"❌ Login blocked: School not found - {email}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="School not found",
+            )
+        
+        if school.get("status") == "suspended":
+            logger.warning(f"❌ Login blocked: School suspended - {email}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="School is suspended. Contact administrator.",
+            )
+        
+        if school.get("status") == "deleted":
+            logger.warning(f"❌ Login blocked: School deleted - {email}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="School has been deleted.",
+            )
     
+    # Build JWT with proper structure
+    # Role stored as capitalized for frontend compatibility
+    display_role = role.capitalize()  # "root" -> "Root", "admin" -> "Admin", "staff" -> "Staff"
+    
+    token_data = {
+        "sub": email,
+        "user_id": user.get("id"),
+        "role": display_role,
+    }
+    
+    # Add school context for non-root users
+    if role != "root":
+        if database_name:
+            token_data["database_name"] = database_name
+        if school_slug:
+            token_data["school_slug"] = school_slug
+        if school_id:
+            token_data["school_id"] = school_id
+    
+    logger.info(f"✅ Login successful: {email} (Role: {display_role}, DB: {database_name or 'N/A'})")
+    
+    access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
     access_token = create_access_token(
         data=token_data,
         expires_delta=access_token_expires
     )
-
+    
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user": {
-            "id": user["id"],
-            "email": user["email"],
-            "name": user["name"],
-            "role": role,
+            "id": user.get("id"),
+            "email": email,
+            "name": user.get("name"),
+            "role": display_role,
             "school_id": school_id,
-            "database_name": token_data.get("database_name"),
-            "created_at": user["created_at"],
-            "is_active": user["is_active"]
+            "school_slug": school_slug,
+            "database_name": database_name,
+            "created_at": user.get("created_at"),
+            "is_active": user.get("is_active", True)
         }
     }
 
+
 @router.get("/me")
 async def get_current_user_info(current_user: dict = Depends(get_current_user)):
-    """Get current user information"""
+    """Get current user information from global_users"""
     return {
-        "id": current_user["id"],
-        "email": current_user["email"],
-        "name": current_user["name"],
-        "role": current_user["role"],
-        "created_at": current_user["created_at"],
-        "is_active": current_user["is_active"]
+        "id": current_user.get("id"),
+        "email": current_user.get("email"),
+        "name": current_user.get("name"),
+        "role": current_user.get("role"),
+        "school_id": current_user.get("school_id"),
+        "school_slug": current_user.get("school_slug"),
+        "database_name": current_user.get("database_name"),
+        "created_at": current_user.get("created_at"),
+        "is_active": current_user.get("is_active", True)
     }

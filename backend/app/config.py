@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     log_level: str = os.environ.get("LOG_LEVEL", "INFO")
     # Control whether index creation runs on startup (use 'false' to skip)
     create_indexes: bool = os.environ.get("CREATE_INDEXES", "true").lower() in ("1", "true", "yes")
+    # Control whether to seed test data (teachers) on startup - NEVER enable in production
+    seed_test_data: bool = os.environ.get("SEED_TEST_DATA", "false").lower() in ("1", "true", "yes")
     # Log output format: 'text' or 'json'
     log_format: str = os.environ.get("LOG_FORMAT", "text")
     # Whether to show HTTP access logs from Uvicorn
@@ -108,7 +110,7 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Ensure `settings.database_name` is set. Prefer explicit setting, then URI
-# path, then hard-coded default to preserve existing behavior.
+# path, then fall back to 'khushi_school' (the single school database).
 if not settings.database_name:
     parsed = _db_name_from_uri(settings.mongo_uri)
-    settings.database_name = parsed or "cms_db"
+    settings.database_name = parsed or "khushi_school"

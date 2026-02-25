@@ -4,6 +4,11 @@
  */
 
 /**
+ * Global User Roles
+ */
+export type GlobalUserRole = "root" | "admin" | "staff";
+
+/**
  * SaaS School Plans
  */
 export type SchoolPlan = "trial" | "basic" | "standard" | "premium" | "enterprise";
@@ -14,12 +19,73 @@ export type SchoolPlan = "trial" | "basic" | "standard" | "premium" | "enterpris
 export type SchoolStatus = "active" | "suspended" | "deleted" | "pending";
 
 /**
+ * Global User Type (Central Auth)
+ */
+export interface GlobalUser {
+  id: string;
+  name: string;
+  email: string;
+  role: GlobalUserRole;
+  school_id?: string;
+  school_slug?: string;
+  database_name?: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+/**
+ * JWT Token Payload
+ */
+export interface TokenPayload {
+  sub: string;
+  user_id: string;
+  role: string;
+  database_name?: string;
+  school_slug?: string;
+  school_id?: string;
+  exp: number;
+}
+
+/**
+ * Login Request
+ */
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+/**
+ * Login Response
+ */
+export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  user: User;
+}
+
+/**
+ * User Type (from auth response)
+ */
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  school_id?: string;
+  school_slug?: string;
+  database_name?: string;
+  created_at: string;
+  is_active: boolean;
+}
+
+/**
  * SaaS School Type - For root admin management
  */
 export interface SaaSSchool {
   id: string;
   school_id: string;
   school_name: string;
+  school_slug: string;
   database_name: string;
   admin_email: string;
   plan: SchoolPlan;
@@ -31,6 +97,14 @@ export interface SaaSSchool {
   student_count: number;
   teacher_count: number;
   storage_bytes: number;
+  // Payment/Suspension settings
+  payment_due_day?: number;
+  auto_suspend_enabled?: boolean;
+  grace_period_days?: number;
+  last_payment_date?: string;
+  next_payment_due?: string;
+  suspension_reason?: string;
+  suspended_at?: string;
 }
 
 /**
@@ -49,6 +123,24 @@ export interface SaaSSchoolCreate {
   state?: string;
   country?: string;
   postal_code?: string;
+}
+
+/**
+ * School Created Response (with admin auto-login)
+ */
+export interface SchoolCreatedResponse {
+  school: SaaSSchool;
+  admin_auth: LoginResponse;
+  admin_password: string;  // Plain text password to show to root once
+}
+
+/**
+ * Staff Create Request
+ */
+export interface StaffCreateRequest {
+  name: string;
+  email_prefix: string;
+  password: string;
 }
 
 /**
@@ -109,6 +201,12 @@ export interface BillingConfig {
   fixed_cpu_ram_cost: number;
   dynamic_storage_cost: number;
   markup_percentage: number;
+  // Global miscellaneous charges
+  global_misc_amount?: number;
+  global_misc_description?: string;
+  // MongoDB Billing API settings (for future)
+  mongo_billing_api_enabled?: boolean;
+  mongo_org_id?: string;
   created_at?: string;
   updated_at?: string;
   created_by?: string;
@@ -125,6 +223,9 @@ export interface BillingConfigCreate {
   fixed_cpu_ram_cost: number;
   dynamic_storage_cost: number;
   markup_percentage?: number;
+  // Global misc charges
+  global_misc_amount?: number;
+  global_misc_description?: string;
 }
 
 /**
@@ -209,6 +310,25 @@ export interface BulkInvoiceGenerate {
   period_start: string;
   period_end: string;
   due_date?: string;
+}
+
+/**
+ * Payment Settings Update Request
+ */
+export interface PaymentSettingsUpdate {
+  payment_due_day?: number;
+  auto_suspend_enabled?: boolean;
+  grace_period_days?: number;
+  next_payment_due?: string;
+}
+
+/**
+ * Record Payment Request
+ */
+export interface RecordPaymentRequest {
+  amount: number;
+  payment_date?: string;
+  notes?: string;
 }
 
 /**

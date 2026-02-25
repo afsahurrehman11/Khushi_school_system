@@ -3,14 +3,14 @@ import logger from './utils/logger';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
-import { StudentList } from './features/students';
+import { StudentList, StudentImportExportPage } from './features/students';
 import { TeacherList } from './features/teachers';
 import { SubjectList } from './features/subjects';
 import { ClassList, ClassDetails, AttendanceList, MarkAttendance } from './features/classes';
 import { ChalanList } from './features/chalans';
 import { config } from './config';
 import { AccountantDashboard, FeePage, ReportsPage } from './features/accountant';
-import { AdminDashboard, StudentImportExport } from './features/admin';
+import { AdminDashboard } from './features/admin';
 import { WhatsAppDashboard } from './features/whatsapp';
 import { FaceDashboard, FaceStudents, FaceEmployees, FaceRecognition, FaceSettings } from './features/face';
 import ImportNotificationToast from './features/students/components/ImportNotificationToast';
@@ -19,6 +19,8 @@ import NotificationToast from './components/NotificationToast';
 import LoginPageNew from './pages/Login';
 import RootAdminDashboard from './pages/RootAdminDashboard';
 import BillingDashboard from './pages/BillingDashboard';
+import FeeVoucherPrintPage from './pages/FeeVoucherPrintPage';
+import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import { authService } from './services/auth';
 
 interface ProtectedRouteProps {
@@ -249,7 +251,19 @@ function App() {
                 />
                 <Route
                   path="/students/import-export"
-                  element={<ProtectedRoute element={<StudentImportExport />} requiredRoles={['Admin', 'Teacher', 'Accountant']} />}
+                  element={<ProtectedRoute element={<StudentImportExportPage />} requiredRoles={['Admin', 'Teacher', 'Accountant']} />}
+                />
+                <Route
+                  path="/students/incomplete-data"
+                  element={<ProtectedRoute element={<StudentImportExportPage />} requiredRoles={['Admin']} />}
+                />
+                <Route
+                  path="/fees/print"
+                  element={<ProtectedRoute element={<FeeVoucherPrintPage />} requiredRoles={['Admin', 'Accountant']} />}
+                />
+                <Route
+                  path="/analytics"
+                  element={<ProtectedRoute element={<AnalyticsDashboard />} requiredRoles={['Admin']} />}
                 />
                 <Route
                   path="/teachers"

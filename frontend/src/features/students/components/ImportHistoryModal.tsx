@@ -6,7 +6,6 @@ import {
   XCircle,
   AlertTriangle,
   Loader2,
-  Download,
   Clock,
   RefreshCw,
 } from 'lucide-react';
@@ -14,7 +13,7 @@ import Modal from '../../../components/Modal';
 import Button from '../../../components/Button';
 import Badge from '../../../components/Badge';
 import type { ImportLogEntry } from '../types/importExport';
-import { getImportHistory, downloadErrorReport } from '../services/importExportApi';
+import { getImportHistory } from '../services/importExportApi';
 
 interface ImportHistoryModalProps {
   isOpen: boolean;
@@ -72,14 +71,6 @@ const ImportHistoryModal: React.FC<ImportHistoryModalProps> = ({ isOpen, onClose
       fetchHistory();
     }
   }, [isOpen]);
-
-  const handleDownloadErrors = async (importId: string) => {
-    try {
-      await downloadErrorReport(importId);
-    } catch {
-      // silently fail
-    }
-  };
 
   const formatDate = (dateStr: string) => {
     try {
@@ -183,16 +174,7 @@ const ImportHistoryModal: React.FC<ImportHistoryModalProps> = ({ isOpen, onClose
                           {log.duplicate_count}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {(log.status === 'completed_with_errors' || log.status === 'failed') && log.failed_rows > 0 && (
-                            <button
-                              onClick={() => handleDownloadErrors(log.id)}
-                              className="text-primary-600 hover:text-primary-700 inline-flex items-center gap-1 text-xs"
-                              title="Download Error Report"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                              Errors
-                            </button>
-                          )}
+                          {/* Error download removed - errors shown inline */}
                         </td>
                       </motion.tr>
                     );

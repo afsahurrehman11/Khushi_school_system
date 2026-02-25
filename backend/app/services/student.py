@@ -349,7 +349,7 @@ def import_students_with_images(xlsx_bytes: bytes, zip_bytes: Optional[bytes], c
             logger.info("📦 Processing images from ZIP file")
             
             try:
-                # Extract and process images
+                # Extract and process images - store as base64 blobs
                 with zipfile.ZipFile(BytesIO(zip_bytes), 'r') as zip_ref:
                     for file_info in zip_ref.filelist:
                         try:
@@ -375,25 +375,26 @@ def import_students_with_images(xlsx_bytes: bytes, zip_bytes: Optional[bytes], c
                                 # Read image
                                 image_content = zip_ref.read(filename)
                                 
-                                # Lazy import to avoid circular dependency
-                                from app.services.cloudinary_service import CloudinaryService
+                                # Import image service for blob storage
+                                from app.services.image_service import ImageService
                                 
-                                student_id = str(matching_student.get('_id', ''))
-                                upload_result = CloudinaryService.upload_image(
+                                # Process and convert to base64 blob
+                                image_blob, image_type, error = ImageService.process_and_store(
                                     image_content,
-                                    filename,
-                                    student_id
+                                    max_dimension=800,
+                                    quality=85
                                 )
                                 
-                                if upload_result:
-                                    # Update student with image
+                                if image_blob:
+                                    # Update student with image blob
+                                    student_id = str(matching_student.get('_id', ''))
                                     db = get_db()
                                     db.students.update_one(
                                         {"_id": ObjectId(student_id)},
                                         {
                                             "$set": {
-                                                "profile_image_url": upload_result["secure_url"],
-                                                "profile_image_public_id": upload_result["public_id"],
+                                                "profile_image_blob": image_blob,
+                                                "profile_image_type": image_type,
                                                 "image_uploaded_at": datetime.utcnow(),
                                                 "embedding_status": "pending",
                                                 "updated_at": datetime.utcnow()
@@ -401,10 +402,10 @@ def import_students_with_images(xlsx_bytes: bytes, zip_bytes: Optional[bytes], c
                                         }
                                     )
                                     images_uploaded += 1
-                                    logger.info(f"✅ Image uploaded for {matching_student.get('student_id')}")
+                                    logger.info(f"✅ Image stored for {matching_student.get('student_id')}")
                                 else:
                                     image_failures += 1
-                                    logger.warning(f"⚠️ Failed to upload image for {matching_student.get('student_id')}")
+                                    logger.warning(f"⚠️ Failed to process image for {matching_student.get('student_id')}: {error}")
                         except Exception as e:
                             image_failures += 1
                             logger.error(f"Error processing image {filename}: {str(e)}")

@@ -3,6 +3,7 @@ import runpy
 from pathlib import Path
 from datetime import datetime
 from app.database import get_db
+from app.services.saas_db import get_mongo_client, SAAS_ROOT_DB
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,44 @@ REQUIRED_COLLECTIONS = [
     "payment_methods",
     "attendance",
 ]
+
+
+def ensure_global_users_collection():
+    """
+    Ensure the global_users collection exists in saas_root_db with proper indexes.
+    This is the SINGLE SOURCE OF TRUTH for all user authentication.
+    """
+    try:
+        client = get_mongo_client()
+        root_db = client[SAAS_ROOT_DB]
+        
+        # Create collection if not exists
+        if "global_users" not in root_db.list_collection_names():
+            root_db.create_collection("global_users")
+            logger.info("✅ Created global_users collection in saas_root_db")
+        
+        # Create indexes
+        global_users = root_db.global_users
+        
+        # Unique index on email (critical for login)
+        global_users.create_index("email", unique=True, background=True)
+        # Index for school lookups
+        global_users.create_index("school_id", background=True)
+        # Index for role-based queries
+        global_users.create_index("role", background=True)
+        # Compound index for school + active status
+        global_users.create_index([("school_id", 1), ("is_active", 1)], background=True)
+        
+        logger.info("✅ global_users indexes ensured")
+        
+        # Also ensure schools collection has school_slug index
+        if "schools" in root_db.list_collection_names():
+            root_db.schools.create_index("school_slug", unique=True, sparse=True, background=True)
+            logger.info("✅ schools.school_slug index ensured")
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to setup global_users: {e}")
+        # Don't raise - allow app to continue even if this fails
 
 
 def ensure_collections_exist():
@@ -75,17 +114,27 @@ def ensure_collections_exist():
     else:
         logger.info("✅ All required collections already exist")
 
+    # Ensure global_users collection exists in saas_root_db
+    try:
+        ensure_global_users_collection()
+    except Exception:
+        logger.warning("⚠️ ensure_global_users_collection failed; continuing startup")
+
     # Ensure default roles and permissions are present so Admin users can access academic data
     try:
         ensure_default_roles()
     except Exception:
         logger.warning("⚠️ ensure_default_roles failed; continuing startup")
 
-    # Ensure each school has a minimal set of teacher profiles so admin UIs show data
+    # Check if root user exists - WARN if not, but do NOT auto-create
     try:
-        ensure_default_teachers()
+        check_root_user_exists()
     except Exception:
-        logger.warning("⚠️ ensure_default_teachers failed; continuing startup")
+        logger.warning("⚠️ check_root_user_exists failed; continuing startup")
+
+    # NOTE: Auto-creation of schools/admins is DISABLED
+    # Admin accounts must ONLY be created via root UI
+    # Teacher seeding is also disabled in production
 
     return {"created": created, "existing": existing}
 
@@ -223,3 +272,35 @@ def ensure_default_teachers(min_count: int = 10):
             logger.info(f"[SCHOOL:{school_id}] ✅ Seeded {len(res.inserted_ids)} teacher profiles")
         except Exception as e:
             logger.warning(f"[SCHOOL:{school_id}] ⚠️ Failed to seed teachers: {e}")
+
+
+def check_root_user_exists():
+    """
+    Check if root@edu user exists in saas_root_db.global_users.
+    
+    If root user does NOT exist, log a WARNING but do NOT auto-create.
+    Root user must be created manually or via a one-time setup script.
+    """
+    try:
+        client = get_mongo_client()
+        root_db = client[SAAS_ROOT_DB]
+        
+        ROOT_EMAIL = "root@edu"
+        
+        root_user = root_db.global_users.find_one({"email": ROOT_EMAIL})
+        
+        if root_user:
+            logger.info(f"✅ Root user exists: {ROOT_EMAIL}")
+            return True
+        else:
+            logger.warning("=" * 60)
+            logger.warning("⚠️  WARNING: Root user does not exist in saas_root_db")
+            logger.warning(f"⚠️  Expected email: {ROOT_EMAIL}")
+            logger.warning("⚠️  Please run the setup script to create the root user:")
+            logger.warning("⚠️  python scripts/setup_root_user.py")
+            logger.warning("=" * 60)
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to check root user: {e}")
+        return False

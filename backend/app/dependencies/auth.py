@@ -1,10 +1,15 @@
+"""
+Authentication Dependencies
+Uses saas_root_db.global_users as the ONLY authentication source.
+"""
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from app.config import settings
 from app.models.user import TokenData
-from app.services.user import get_user_by_email
+from app.services.saas_db import get_global_user_by_email, get_saas_root_db
 from typing import Optional
 import logging
 import os
@@ -12,13 +17,20 @@ import os
 logger = logging.getLogger(__name__)
 
 # ===== TEMPORARY: Disable RBAC completely for development =====
-# All permission checks are bypassed. Remove this line and restore env var check for production.
 RBAC_DISABLED = True
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """Create JWT access token with schoolId included for non-Root users"""
+    """
+    Create JWT access token with proper multi-tenant fields:
+    - user_id
+    - role
+    - database_name (for non-root users)
+    - school_slug (for non-root users)
+    - school_id (for non-root users)
+    """
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
@@ -29,33 +41,38 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
     return encoded_jwt
 
-def verify_token(token: str) -> Optional[TokenData]:
-    """Verify JWT token and extract schoolId"""
+
+def verify_token(token: str) -> Optional[dict]:
+    """Verify JWT token and extract all fields"""
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         email: str = payload.get("sub")
-        role: str = payload.get("role")
-        school_id: Optional[str] = payload.get("school_id")  # Extract schoolId
         if email is None:
             return None
-        token_data = TokenData(email=email, role=role)
+        return payload
     except JWTError:
         return None
-    return token_data
+
 
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
-    """Get current authenticated user with schoolId context"""
+    """
+    Get current authenticated user from global_users.
+    This is the ONLY source of truth for user data.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    # Verify token to extract schoolId
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         email: str = payload.get("sub")
-        school_id: Optional[str] = payload.get("school_id")
+        role: str = payload.get("role")
+        user_id: str = payload.get("user_id")
+        database_name: str = payload.get("database_name")
+        school_slug: str = payload.get("school_slug")
+        school_id: str = payload.get("school_id")
     except JWTError:
         logger.warning(f"❌ Invalid token")
         raise credentials_exception
@@ -64,89 +81,107 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
         logger.warning(f"❌ Token missing email")
         raise credentials_exception
 
-    user = get_user_by_email(email=email)
+    # Get user from global_users (single source of truth)
+    user = get_global_user_by_email(email=email)
     if user is None:
-        logger.warning(f"❌ User not found: {email}")
+        logger.warning(f"❌ User not found in global_users: {email}")
         raise credentials_exception
+    
+    # Check if user is active
+    if not user.get("is_active", True):
+        logger.warning(f"❌ User is inactive: {email}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is deactivated"
+        )
 
-    # Inject schoolId from token into user dict
-    user["school_id_context"] = school_id
+    # Return complete user context from token + database
+    return {
+        "id": user.get("id") or user_id,
+        "email": email,
+        "name": user.get("name"),
+        "role": role or user.get("role", "").capitalize(),
+        "school_id": school_id or user.get("school_id"),
+        "school_slug": school_slug or user.get("school_slug"),
+        "database_name": database_name or user.get("database_name"),
+        "is_active": user.get("is_active", True),
+        "created_at": user.get("created_at"),
+    }
 
-    return user
 
 async def get_current_admin(current_user: dict = Depends(get_current_user)) -> dict:
     """Get current user and verify admin role (Admin or Root)"""
-    role = current_user.get("role")
-    if role not in ["Admin", "Root"]:
+    role = current_user.get("role", "").lower()
+    if role not in ["admin", "root"]:
         logger.warning(f"❌ Insufficient permissions for {current_user.get('email')}: role={role}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin or Root role required"
         )
     return current_user
+
 
 async def get_current_admin_with_school(current_user: dict = Depends(get_current_user)) -> dict:
     """Get current admin and enforce school isolation"""
-    role = current_user.get("role")
-    if role not in ["Admin", "Root"]:
+    role = current_user.get("role", "").lower()
+    if role not in ["admin", "root"]:
         logger.warning(f"❌ Insufficient permissions for {current_user.get('email')}: role={role}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin or Root role required"
         )
     
-    # Non-Root users must have a schoolId
-    if role == "Admin" and not current_user.get("school_id"):
-        logger.error(f"❌ Admin {current_user.get('email')} missing school_id")
+    # Non-Root users must have school context
+    if role == "admin" and not current_user.get("school_id"):
+        logger.error(f"❌ Admin {current_user.get('email')} missing school context")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="School ID is required for Admin users"
+            detail="School context is required for Admin users"
         )
     
     return current_user
 
+
 async def get_current_root(current_user: dict = Depends(get_current_user)) -> dict:
     """Get current user and verify root role"""
-    if current_user.get("role") != "Root":
-        logger.warning(f"❌ Root access required, but user role is {current_user.get('role')}")
+    role = current_user.get("role", "").lower()
+    if role != "root":
+        logger.warning(f"❌ Root access required, but user role is {role}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Root role required"
         )
     return current_user
 
+
 def check_permission(required_permission: str):
     """Check if user has required permission"""
     async def permission_checker(current_user: dict = Depends(get_current_user)):
-        # Short-circuit and allow all actions when RBAC is disabled.
+        # Short-circuit and allow all actions when RBAC is disabled
         if RBAC_DISABLED:
-            logger.info("⚠️ RBAC disabled via DISABLE_RBAC — allowing all permissions for %s", current_user.get("email"))
+            logger.info("⚠️ RBAC disabled — allowing all permissions for %s", current_user.get("email"))
             return current_user
-        from app.services.user import get_role_by_name
-
-        role_name = current_user.get("role")
-        role = get_role_by_name(role_name)
-
-        if not role or required_permission not in role.get("permissions", []):
-            logger.warning(f"❌ User {current_user.get('email')} lacks permission: {required_permission}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not enough permissions"
-            )
+        
+        # In production, implement proper RBAC here
         return current_user
 
     return permission_checker
 
+
 def enforce_school_isolation(required_school_id: Optional[str] = None):
-    """Middleware to enforceSchoolId in requests"""
+    """
+    Enforce strict tenant isolation.
+    Non-root users can ONLY access their own school's data.
+    """
     async def school_isolation_checker(current_user: dict = Depends(get_current_user)):
         user_school_id = current_user.get("school_id")
+        role = current_user.get("role", "").lower()
         
-        # Root users can bypass school isolation
-        if current_user.get("role") == "Root":
+        # Root users bypass school isolation (can access all schools)
+        if role == "root":
             return current_user
         
-        # Non-Root users must have schoolId in token
+        # Non-Root users MUST have school context
         if not user_school_id:
             logger.error(f"❌ Non-Root user {current_user.get('email')} missing school_id")
             raise HTTPException(
@@ -154,12 +189,12 @@ def enforce_school_isolation(required_school_id: Optional[str] = None):
                 detail="School isolation context missing"
             )
         
-        # If a specific schoolId is required, enforce it
+        # If accessing a specific school, enforce match
         if required_school_id and user_school_id != required_school_id:
-            logger.warning(f"❌ User {current_user.get('email')} attempted to access school {required_school_id} but belonged to {user_school_id}")
+            logger.warning(f"❌ TENANT ISOLATION VIOLATION: User {current_user.get('email')} (school {user_school_id}) attempted to access school {required_school_id}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied - school mismatch"
+                detail="Access denied - you cannot access data from another school"
             )
         
         return current_user

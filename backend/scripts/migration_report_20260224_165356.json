@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-02-24T16:53:56.790965",
+  "mode": "dry_run",
+  "schools_processed": 1,
+  "users_migrated": 0,
+  "users_skipped": 1,
+  "users_errored": 0,
+  "details": [
+    {
+      "status": "skipped",
+      "reason": "already_exists",
+      "email": "hamza@edu",
+      "existing_school_id": "178f9264-a52e-4482-98e0-5b5f66deaefd"
+    }
+  ]
+}

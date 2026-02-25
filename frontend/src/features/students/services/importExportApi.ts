@@ -7,6 +7,7 @@ import type {
   ImportConfirmResponse,
   ImportStatusResponse,
   ImportLogEntry,
+  IncompleteStudentsResponse,
 } from '../types/importExport';
 
 const BASE = '/api/students-import-export';
@@ -90,26 +91,6 @@ export async function getImportStatus(importId: string): Promise<ImportStatusRes
     throw new Error(err.detail || 'Status check failed');
   }
   return response.json();
-}
-
-/**
- * Download error report.
- */
-export async function downloadErrorReport(importId: string): Promise<void> {
-  const response = await apiCall(`${BASE}/error-report/${importId}`);
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({ detail: 'Download failed' }));
-    throw new Error(err.detail || 'Download failed');
-  }
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'students_import_errors.xlsx';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
 }
 
 /**
@@ -218,4 +199,45 @@ export function createNotificationStream(
   return {
     close: () => abortController.abort(),
   } as unknown as EventSource;
+}
+
+/**
+ * Get incomplete students grouped by class.
+ */
+export async function getIncompleteStudents(classId?: string): Promise<IncompleteStudentsResponse> {
+  const params = new URLSearchParams();
+  if (classId) params.set('class_id', classId);
+  
+  const qs = params.toString();
+  const url = `${BASE}/incomplete-students${qs ? `?${qs}` : ''}`;
+  
+  const response = await apiCall(url);
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Failed to load incomplete students' }));
+    throw new Error(err.detail || 'Failed to load incomplete students');
+  }
+  return response.json();
+}
+
+/**
+ * Update an incomplete student's missing fields.
+ */
+export async function updateIncompleteStudent(
+  studentId: string,
+  updates: Record<string, string>
+): Promise<{ success: boolean; message: string; data_status: string; remaining_missing_fields: string[] }> {
+  const response = await apiCall(`${BASE}/incomplete-students/${studentId}`, {
+    method: 'PATCH',
+    headers: {
+      ...getAuthHeaders(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(updates),
+  });
+  
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Update failed' }));
+    throw new Error(err.detail || 'Update failed');
+  }
+  return response.json();
 }

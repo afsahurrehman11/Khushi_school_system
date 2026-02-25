@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-02-24T16:53:55.131726",
+  "mode": "live",
+  "schools_processed": 1,
+  "users_migrated": 1,
+  "users_skipped": 0,
+  "users_errored": 0,
+  "details": [
+    {
+      "status": "migrated",
+      "email": "hamza@edu",
+      "role": "admin",
+      "school": "hamza_school",
+      "global_user_id": "699dd7a3747e43402be77f55"
+    }
+  ]
+}

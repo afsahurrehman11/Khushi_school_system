@@ -130,6 +130,84 @@ class UsageSnapshotJob:
         self.is_running = False
 
 
+class BillingCheckJob:
+    """
+    Background job that checks for overdue payments and auto-suspends schools.
+    Runs daily to enforce payment deadlines.
+    """
+    
+    def __init__(self, grace_period_days: int = 7):
+        self.grace_period_days = grace_period_days
+        self.is_running = False
+        self.last_run: Optional[datetime] = None
+        self.stop_event: Optional[asyncio.Event] = None
+    
+    async def check_and_suspend_overdue(self) -> dict:
+        """
+        Check all active schools for overdue payments and auto-suspend them.
+        Returns summary of results.
+        """
+        from app.services.saas_service import check_and_suspend_overdue_schools
+        
+        logger.info("[BILLING_JOB] Starting overdue payment check")
+        
+        try:
+            results = check_and_suspend_overdue_schools(self.grace_period_days)
+            self.last_run = datetime.utcnow()
+            
+            logger.info(
+                f"[BILLING_JOB] Completed: {results.get('suspended', 0)} schools suspended, "
+                f"{results.get('checked', 0)} checked, {results.get('errors', 0)} errors"
+            )
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"[BILLING_JOB] ❌ Billing check failed: {e}")
+            return {"error": str(e)}
+    
+    async def start_scheduled_job(self, interval_hours: int = 24):
+        """
+        Start the scheduled billing check job.
+        Runs daily by default.
+        """
+        self.is_running = True
+        self.stop_event = asyncio.Event()
+        
+        logger.info(f"[BILLING_JOB] 🚀 Starting scheduled billing check (interval: {interval_hours}h)")
+        
+        # Wait 2 hours before first run to let the app stabilize
+        try:
+            await asyncio.wait_for(self.stop_event.wait(), timeout=7200)
+            return  # Stop event was set
+        except asyncio.TimeoutError:
+            pass  # Continue to first run
+        
+        while not self.stop_event.is_set():
+            try:
+                await self.check_and_suspend_overdue()
+            except Exception as e:
+                logger.error(f"[BILLING_JOB] ❌ Scheduled run failed: {e}")
+            
+            try:
+                await asyncio.wait_for(
+                    self.stop_event.wait(),
+                    timeout=interval_hours * 3600
+                )
+                break  # Stop event was set
+            except asyncio.TimeoutError:
+                pass  # Continue to next run
+        
+        self.is_running = False
+        logger.info("[BILLING_JOB] 🛑 Scheduled billing check stopped")
+    
+    def stop(self):
+        """Stop the scheduled job"""
+        if self.stop_event:
+            self.stop_event.set()
+        self.is_running = False
+
+
 class DataCleanupJob:
     """
     Background job for cleaning up old data.
@@ -241,6 +319,7 @@ class DataCleanupJob:
 # Global job instances
 _snapshot_job: Optional[UsageSnapshotJob] = None
 _cleanup_job: Optional[DataCleanupJob] = None
+_billing_job: Optional[BillingCheckJob] = None
 
 
 def get_snapshot_job() -> UsageSnapshotJob:
@@ -259,14 +338,24 @@ def get_cleanup_job() -> DataCleanupJob:
     return _cleanup_job
 
 
+def get_billing_job() -> BillingCheckJob:
+    """Get or create the billing check job instance"""
+    global _billing_job
+    if _billing_job is None:
+        _billing_job = BillingCheckJob()
+    return _billing_job
+
+
 async def start_background_jobs():
     """Start all background jobs (called from app startup)"""
     snapshot_job = get_snapshot_job()
     cleanup_job = get_cleanup_job()
+    billing_job = get_billing_job()
     
     # Start jobs in background
     asyncio.create_task(snapshot_job.start_scheduled_job(interval_hours=24))
     asyncio.create_task(cleanup_job.start_scheduled_job(interval_hours=48))
+    asyncio.create_task(billing_job.start_scheduled_job(interval_hours=24))
     
     logger.info("[BACKGROUND_JOBS] ✅ Background jobs started")
 
@@ -277,6 +366,8 @@ async def stop_background_jobs():
         _snapshot_job.stop()
     if _cleanup_job:
         _cleanup_job.stop()
+    if _billing_job:
+        _billing_job.stop()
     
     # Give jobs time to stop gracefully
     await asyncio.sleep(1)

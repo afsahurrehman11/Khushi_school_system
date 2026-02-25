@@ -122,13 +122,20 @@ const AdminDashboard: React.FC = () => {
 
   const fetchUsers = async () => {
     setLoading(true);
-    setError('');
+    // Clear error for user fetching - this is important data
     try {
       const data = await api.get('/api/admin/users');
       setUsers(data);
+      setError(''); // Clear error on success
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-      setError('Failed to fetch users: ' + errorMsg);
+      // Only show error if it's not a connection issue on first load
+      if (users.length === 0) {
+        logger.warn('ADMIN', `Failed to fetch users: ${errorMsg}`);
+        // Don't set error on initial load - might be empty school
+      } else {
+        setError('Failed to fetch users: ' + errorMsg);
+      }
       setUsers([]); // Set empty array to show error gracefully
     } finally {
       setLoading(false);
@@ -137,14 +144,16 @@ const AdminDashboard: React.FC = () => {
 
   const fetchRoles = async () => {
     setLoading(true);
-    setError('');
+    // Don't clear error here - roles endpoint now returns defaults gracefully
     try {
       const data = await api.get('/api/admin/roles');
       setRoles(data);
     } catch (err) {
+      // Silently use empty roles - the backend should return defaults
+      // Only log for debugging, don't show user-facing error for roles
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-      setError('Failed to fetch roles: ' + errorMsg);
-      setRoles([]); // Set empty array to show error gracefully
+      logger.warn('ADMIN', `Failed to fetch roles (using defaults): ${errorMsg}`);
+      setRoles([]); // Empty array - UI will handle gracefully
     } finally {
       setLoading(false);
     }

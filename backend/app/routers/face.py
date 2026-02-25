@@ -349,11 +349,12 @@ async def upload_face_image(
 ):
     """
     Upload face image and generate embedding.
-    Uploads to Cloudinary, then generates embedding.
+    Stores image as base64 blob in MongoDB and generates face embedding.
     """
-    from ..services.cloudinary_service import CloudinaryService
+    from ..services.image_service import ImageService
     from bson import ObjectId
     from datetime import datetime
+    import base64
     
     school_id = current_user.get("school_id")
     if not school_id:
@@ -362,7 +363,7 @@ async def upload_face_image(
     collection = db.students if person_type == "student" else db.teachers
     
     # Verify record exists
-    record = await collection.find_one({"_id": ObjectId(person_id), "school_id": school_id})
+    record = collection.find_one({"_id": ObjectId(person_id), "school_id": school_id})
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     
@@ -372,49 +373,39 @@ async def upload_face_image(
     
     logger.info(f"[FACE] Uploading image for {person_type}: {identifier}")
     
-    # Upload to Cloudinary
-    cloudinary_service = CloudinaryService()
-    folder = f"school_{school_id}/{person_type}s"
+    # Process and validate image
+    base64_blob, mime_type, error = ImageService.process_and_store(
+        file_content,
+        max_dimension=800,
+        quality=85
+    )
     
-    try:
-        upload_result = await cloudinary_service.upload_image(
-            file_content,
-            folder=folder,
-            public_id=f"{person_type}_{person_id}"
-        )
-    except Exception as e:
-        logger.error(f"[FACE][ERROR] Cloudinary upload failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Image upload failed: {str(e)}")
+    if error:
+        logger.error(f"[FACE][ERROR] Image processing failed: {error}")
+        raise HTTPException(status_code=400, detail=error)
     
-    # Delete old image if exists
-    old_public_id = record.get("profile_image_public_id")
-    if old_public_id:
-        try:
-            await cloudinary_service.delete_image(old_public_id)
-        except Exception:
-            pass
-    
-    # Update record with new image URL
-    await collection.update_one(
+    # Update record with new image blob
+    collection.update_one(
         {"_id": ObjectId(person_id)},
         {
             "$set": {
-                "profile_image_url": upload_result.get("secure_url"),
-                "profile_image_public_id": upload_result.get("public_id"),
+                "profile_image_blob": base64_blob,
+                "profile_image_type": mime_type,
                 "image_uploaded_at": datetime.utcnow(),
                 "face_image_updated_at": datetime.utcnow(),
                 "embedding_status": "pending",
-                "face_embedding": None
+                "face_embedding": None,
+                "updated_at": datetime.utcnow()
             }
         }
     )
     
-    # Generate new embedding
+    # Generate new embedding from blob
     face_service = FaceRecognitionService(db)
-    embedding, error = await face_service.generate_embedding_from_url(upload_result.get("secure_url"))
+    embedding, emb_error = await face_service.generate_embedding_from_blob(base64_blob)
     
     if embedding:
-        await collection.update_one(
+        collection.update_one(
             {"_id": ObjectId(person_id)},
             {
                 "$set": {
@@ -433,7 +424,7 @@ async def upload_face_image(
         cache_data = {
             "embedding": np.array(embedding, dtype=np.float32),
             "name": record.get("full_name") if person_type == "student" else record.get("name"),
-            "profile_image_url": upload_result.get("secure_url"),
+            "has_image": True,
             "school_id": school_id
         }
         if person_type == "student":
@@ -453,17 +444,52 @@ async def upload_face_image(
         
         return {
             "success": True,
-            "image_url": upload_result.get("secure_url"),
-            "embedding_status": "generated"
+            "embedding_status": "generated",
+            "message": "Image uploaded and face embedding generated"
         }
     else:
-        logger.error(f"[FACE][ERROR] Embedding generation failed: {error}")
+        logger.error(f"[FACE][ERROR] Embedding generation failed: {emb_error}")
         return {
             "success": True,
-            "image_url": upload_result.get("secure_url"),
             "embedding_status": "failed",
-            "embedding_error": error
+            "embedding_error": emb_error,
+            "message": "Image uploaded but face embedding failed"
         }
+
+
+# ============ Get Image ============
+
+@router.get("/image/{person_type}/{person_id}")
+async def get_face_image(
+    person_type: str,
+    person_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get face image as data URL for display"""
+    from bson import ObjectId
+    
+    school_id = current_user.get("school_id")
+    if not school_id:
+        raise HTTPException(status_code=400, detail="School ID required")
+    
+    collection = db.students if person_type == "student" else db.teachers
+    
+    record = collection.find_one(
+        {"_id": ObjectId(person_id), "school_id": school_id},
+        {"profile_image_blob": 1, "profile_image_type": 1}
+    )
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    
+    if not record.get("profile_image_blob"):
+        raise HTTPException(status_code=404, detail="No image found")
+    
+    mime_type = record.get("profile_image_type", "image/jpeg")
+    data_url = f"data:{mime_type};base64,{record['profile_image_blob']}"
+    
+    return {"image_url": data_url}
 
 
 # ============ Settings ============

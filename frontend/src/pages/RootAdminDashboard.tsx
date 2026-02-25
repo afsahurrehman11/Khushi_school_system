@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Plus, Trash2, Eye, EyeOff, AlertCircle, CheckCircle, Users, 
-  Building2, HardDrive, RefreshCw, Power, PowerOff,
+  Building2, HardDrive, RefreshCw, Power, PowerOff, Pause,
   Search, Key, BarChart3, Database, Loader2, Receipt,
-  LogOut
+  LogOut, Calendar, DollarSign, AlertTriangle
 } from 'lucide-react';
 import { 
   SaaSSchool, SaaSSchoolCreate, SaaSOverviewStats, 
@@ -116,13 +116,14 @@ const StorageChart: React.FC<{ history: SchoolStorageHistory[] }> = ({ history }
 // ================= School Table Component =================
 const SchoolTable: React.FC<{
   schools: SaaSSchool[];
-  onSuspend: (id: string) => void;
+  onTemporarySuspend: (id: string) => void;
   onReactivate: (id: string) => void;
-  onDelete: (id: string) => void;
+  onPermanentDelete: (id: string) => void;
   onResetPassword: (id: string) => void;
   onRefreshStats: (id: string) => void;
+  onBillingDaySettings: (school: SaaSSchool) => void;
   loading: boolean;
-}> = ({ schools, onSuspend, onReactivate, onDelete, onResetPassword, onRefreshStats, loading }) => {
+}> = ({ schools, onTemporarySuspend, onReactivate, onPermanentDelete, onResetPassword, onRefreshStats, onBillingDaySettings, loading }) => {
   const [sortField] = useState<string>('created_at');
   const [sortDir] = useState<'asc' | 'desc'>('desc');
   const [searchTerm, setSearchTerm] = useState('');
@@ -273,6 +274,15 @@ const SchoolTable: React.FC<{
                 </td>
                 <td className="px-4 py-4">
                   <div className="flex justify-end gap-1">
+                    {/* Billing Day Setting */}
+                    <button
+                      onClick={() => onBillingDaySettings(school)}
+                      className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-700 rounded"
+                      title="Set Billing Day (Auto-Suspend)"
+                    >
+                      <Calendar className="w-4 h-4" />
+                    </button>
+                    {/* Refresh Stats */}
                     <button
                       onClick={() => onRefreshStats(school.school_id)}
                       className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-700 rounded"
@@ -280,20 +290,22 @@ const SchoolTable: React.FC<{
                     >
                       <RefreshCw className="w-4 h-4" />
                     </button>
+                    {/* Reset Password */}
                     <button
                       onClick={() => onResetPassword(school.school_id)}
                       className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-700 rounded"
-                      title="Reset Password"
+                      title="Reset Admin Password"
                     >
                       <Key className="w-4 h-4" />
                     </button>
+                    {/* Temporary Suspend / Reactivate */}
                     {school.status === 'active' ? (
                       <button
-                        onClick={() => onSuspend(school.school_id)}
+                        onClick={() => onTemporarySuspend(school.school_id)}
                         className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-700 rounded"
-                        title="Suspend School"
+                        title="Temporary Suspend (Block Logins)"
                       >
-                        <PowerOff className="w-4 h-4" />
+                        <Pause className="w-4 h-4" />
                       </button>
                     ) : school.status === 'suspended' ? (
                       <button
@@ -304,10 +316,11 @@ const SchoolTable: React.FC<{
                         <Power className="w-4 h-4" />
                       </button>
                     ) : null}
+                    {/* Permanent Delete */}
                     <button
-                      onClick={() => onDelete(school.school_id)}
+                      onClick={() => onPermanentDelete(school.school_id)}
                       className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded"
-                      title="Delete School"
+                      title="Permanent Delete (Irreversible)"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -345,9 +358,42 @@ const CreateSchoolModal: React.FC<{
     city: '',
   });
   const [showPassword, setShowPassword] = useState(false);
+  const [emailPrefix, setEmailPrefix] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [validationError, setValidationError] = useState('');
+
+  // Email format: <school-name>@school
+  const EMAIL_SUFFIX = '@school';
+
+  const handleEmailPrefixChange = (value: string) => {
+    // Check if user tried to enter @ symbol
+    if (value.includes('@')) {
+      setEmailError('The @ symbol is not allowed. Only enter the name part before @school');
+      return;
+    }
+    setEmailError('');
+    setValidationError(''); // Clear validation error when user starts typing
+    setEmailPrefix(value.toLowerCase().trim());
+    setFormData({ ...formData, admin_email: value.toLowerCase().trim() + EMAIL_SUFFIX });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (emailError) return;
+    if (!emailPrefix) {
+      setEmailError('Please enter the admin email prefix');
+      return;
+    }
+    // Client-side validation: enforce minimum lengths matching backend
+    if (!formData.school_name || formData.school_name.trim().length < 2) {
+      setValidationError('School name must be at least 2 characters long');
+      return;
+    }
+    if (!formData.admin_password || formData.admin_password.length < 6) {
+      setValidationError('Admin password must be at least 6 characters long');
+      return;
+    }
+    setValidationError(''); // Clear any previous validation error
     await onSubmit(formData);
     setFormData({
       school_name: '',
@@ -358,6 +404,10 @@ const CreateSchoolModal: React.FC<{
       phone: '',
       city: '',
     });
+    setEmailPrefix('');
+    setEmailError('');
+    setValidationError('');
+    setValidationError('');
   };
 
   if (!isOpen) return null;
@@ -367,6 +417,15 @@ const CreateSchoolModal: React.FC<{
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
       <div className="relative bg-slate-800 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl">
         <h2 className="text-xl font-bold text-white mb-4">Create New School</h2>
+        
+        {validationError && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-4">
+            <p className="text-red-400 text-sm flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              {validationError}
+            </p>
+          </div>
+        )}
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -383,16 +442,32 @@ const CreateSchoolModal: React.FC<{
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Admin Email (Gmail) *</label>
-            <input
-              type="email"
-              value={formData.admin_email}
-              onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
-              className="w-full px-3 py-2 bg-slate-700 text-white rounded-lg border border-slate-600 
-                         focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-              placeholder="admin@school.com"
-              required
-            />
+            <label className="block text-sm font-medium text-slate-300 mb-1">Admin Email *</label>
+            <div className="flex items-center">
+              <input
+                type="text"
+                value={emailPrefix}
+                onChange={(e) => handleEmailPrefixChange(e.target.value)}
+                className={`flex-1 px-3 py-2 bg-slate-700 text-white rounded-l-lg border ${emailError ? 'border-red-500' : 'border-slate-600'}
+                           focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none`}
+                placeholder="schoolname"
+                required
+              />
+              <span className="px-3 py-2 bg-slate-600 text-slate-300 rounded-r-lg border border-l-0 border-slate-600 font-mono text-sm">
+                {EMAIL_SUFFIX}
+              </span>
+            </div>
+            {emailError && (
+              <p className="mt-1 text-sm text-red-400 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {emailError}
+              </p>
+            )}
+            {emailPrefix && !emailError && (
+              <p className="mt-1 text-sm text-emerald-400">
+                Preview: <span className="font-mono">{emailPrefix}{EMAIL_SUFFIX}</span>
+              </p>
+            )}
           </div>
 
           <div>
@@ -569,6 +644,338 @@ const ResetPasswordModal: React.FC<{
   );
 };
 
+// ================= Payment Settings Modal =================
+const PaymentSettingsModal: React.FC<{
+  isOpen: boolean;
+  school: SaaSSchool | null;
+  onClose: () => void;
+  onSave: (schoolId: string, settings: { payment_due_day?: number; auto_suspend_enabled?: boolean; grace_period_days?: number }) => Promise<void>;
+  onRecordPayment: (schoolId: string, amount: number, notes?: string) => Promise<void>;
+  loading: boolean;
+}> = ({ isOpen, school, onClose, onSave, onRecordPayment, loading }) => {
+  const [paymentDueDay, setPaymentDueDay] = useState<number>(1);
+  const [autoSuspend, setAutoSuspend] = useState<boolean>(false);
+  const [gracePeriod, setGracePeriod] = useState<number>(3);
+  const [paymentAmount, setPaymentAmount] = useState<string>('');
+  const [paymentNotes, setPaymentNotes] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'settings' | 'payment'>('payment');
+
+  useEffect(() => {
+    if (school) {
+      setPaymentDueDay(school.payment_due_day || 1);
+      setAutoSuspend(school.auto_suspend_enabled || false);
+      setGracePeriod(school.grace_period_days || 3);
+    }
+  }, [school]);
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!school) return;
+    await onSave(school.school_id, {
+      payment_due_day: paymentDueDay,
+      auto_suspend_enabled: autoSuspend,
+      grace_period_days: gracePeriod,
+    });
+  };
+
+  const handleRecordPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!school || !paymentAmount) return;
+    await onRecordPayment(school.school_id, parseFloat(paymentAmount), paymentNotes);
+    setPaymentAmount('');
+    setPaymentNotes('');
+  };
+
+  const formatDate = (dateStr: string | undefined): string => {
+    if (!dateStr) return 'Not set';
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  if (!isOpen || !school) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative bg-slate-800 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl">
+        <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+          <DollarSign className="w-5 h-5 text-emerald-500" />
+          Payment Management
+        </h2>
+        <p className="text-slate-400 text-sm mb-4">{school.school_name}</p>
+
+        {/* Current Status */}
+        <div className="bg-slate-900/50 rounded-lg p-3 mb-4 text-sm">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <span className="text-slate-500">Status:</span>
+              <span className={`ml-2 ${school.status === 'active' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {school.status}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-500">Next Due:</span>
+              <span className="ml-2 text-white">{formatDate(school.next_payment_due)}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Last Payment:</span>
+              <span className="ml-2 text-white">{formatDate(school.last_payment_date)}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Due Day:</span>
+              <span className="ml-2 text-white">{school.payment_due_day || 'Not set'}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-2 mb-4">
+          <button
+            onClick={() => setActiveTab('payment')}
+            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition ${
+              activeTab === 'payment'
+                ? 'bg-emerald-600 text-white'
+                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            }`}
+          >
+            Record Payment
+          </button>
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition ${
+              activeTab === 'settings'
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            }`}
+          >
+            Settings
+          </button>
+        </div>
+
+        {activeTab === 'payment' ? (
+          <form onSubmit={handleRecordPayment} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">
+                Payment Amount ($)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-700 text-white rounded-lg border border-slate-600 
+                           focus:border-blue-500 outline-none"
+                placeholder="Enter amount received"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">
+                Notes (optional)
+              </label>
+              <input
+                type="text"
+                value={paymentNotes}
+                onChange={(e) => setPaymentNotes(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-700 text-white rounded-lg border border-slate-600 
+                           focus:border-blue-500 outline-none"
+                placeholder="e.g., Bank transfer, Check #123"
+              />
+            </div>
+
+            {school.status === 'suspended' && (
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">
+                <p className="text-emerald-400 text-sm flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4" />
+                  Recording payment will reactivate this school
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading || !paymentAmount}
+                className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 
+                           disabled:opacity-50 transition flex items-center justify-center gap-2"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <DollarSign className="w-4 h-4" />}
+                Record Payment
+              </button>
+            </div>
+          </form>
+        ) : (
+          <form onSubmit={handleSaveSettings} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">
+                Payment Due Day (1-28)
+              </label>
+              <select
+                value={paymentDueDay}
+                onChange={(e) => setPaymentDueDay(parseInt(e.target.value))}
+                className="w-full px-3 py-2 bg-slate-700 text-white rounded-lg border border-slate-600 
+                           focus:border-blue-500 outline-none"
+              >
+                {Array.from({ length: 28 }, (_, i) => i + 1).map((day) => (
+                  <option key={day} value={day}>
+                    {day}{day === 1 ? 'st' : day === 2 ? 'nd' : day === 3 ? 'rd' : 'th'} of each month
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="autoSuspend"
+                checked={autoSuspend}
+                onChange={(e) => setAutoSuspend(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-600 focus:ring-blue-500"
+              />
+              <label htmlFor="autoSuspend" className="text-sm text-slate-300">
+                Auto-suspend after grace period if unpaid
+              </label>
+            </div>
+
+            {autoSuspend && (
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">
+                  Grace Period (days)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="30"
+                  value={gracePeriod}
+                  onChange={(e) => setGracePeriod(parseInt(e.target.value) || 0)}
+                  className="w-full px-3 py-2 bg-slate-700 text-white rounded-lg border border-slate-600 
+                             focus:border-blue-500 outline-none"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Days after due date before auto-suspension
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 
+                           disabled:opacity-50 transition flex items-center justify-center gap-2"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                Save Settings
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ================= Billing Day Modal (Simple) =================
+const BillingDayModal: React.FC<{
+  isOpen: boolean;
+  school: SaaSSchool | null;
+  onClose: () => void;
+  onSave: (schoolId: string, billingDay: number) => Promise<void>;
+  loading: boolean;
+}> = ({ isOpen, school, onClose, onSave, loading }) => {
+  const [billingDay, setBillingDay] = useState<number>(4);
+
+  useEffect(() => {
+    if (school && school.payment_due_day) {
+      setBillingDay(school.payment_due_day);
+    }
+  }, [school]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!school) return;
+    await onSave(school.school_id, billingDay);
+  };
+
+  if (!isOpen || !school) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative bg-slate-800 rounded-xl p-6 w-full max-w-sm mx-4 shadow-2xl">
+        <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+          <Calendar className="w-5 h-5 text-blue-500" />
+          Set Billing Day
+        </h2>
+        <p className="text-slate-400 text-sm mb-4">{school.school_name}</p>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1">
+              Monthly Billing Day
+            </label>
+            <select
+              value={billingDay}
+              onChange={(e) => setBillingDay(parseInt(e.target.value))}
+              className="w-full px-3 py-2 bg-slate-700 text-white rounded-lg border border-slate-600 
+                         focus:border-blue-500 outline-none"
+            >
+              {Array.from({ length: 28 }, (_, i) => i + 1).map((day) => (
+                <option key={day} value={day}>
+                  {day}{day === 1 ? 'st' : day === 2 ? 'nd' : day === 3 ? 'rd' : 'th'} of each month
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+            <p className="text-blue-400 text-sm">
+              If payment is not recorded by this day + grace period, the school will be automatically suspended.
+            </p>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 
+                         disabled:opacity-50 transition flex items-center justify-center gap-2"
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+              Set Billing Day
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
 // ================= Main Dashboard Component =================
 const RootAdminDashboard: React.FC = () => {
   // State
@@ -586,6 +993,25 @@ const RootAdminDashboard: React.FC = () => {
   const [resetPasswordModal, setResetPasswordModal] = useState<{ open: boolean; schoolId: string }>({
     open: false,
     schoolId: '',
+  });
+  const [paymentSettingsModal, setPaymentSettingsModal] = useState<{ open: boolean; school: SaaSSchool | null }>({
+    open: false,
+    school: null,
+  });
+  // New modals for clean action flow
+  const [suspendModal, setSuspendModal] = useState<{ open: boolean; schoolId: string; schoolName: string }>({
+    open: false,
+    schoolId: '',
+    schoolName: '',
+  });
+  const [deleteModal, setDeleteModal] = useState<{ open: boolean; schoolId: string; schoolName: string }>({
+    open: false,
+    schoolId: '',
+    schoolName: '',
+  });
+  const [billingDayModal, setBillingDayModal] = useState<{ open: boolean; school: SaaSSchool | null }>({
+    open: false,
+    school: null,
   });
 
   const user = authService.getUser();
@@ -635,14 +1061,33 @@ const RootAdminDashboard: React.FC = () => {
     loadData();
   }, [loadData]);
 
+  // State for admin credentials display after school creation
+  const [adminCredentials, setAdminCredentials] = useState<{
+    open: boolean;
+    schoolName: string;
+    email: string;
+    password: string;
+  }>({ open: false, schoolName: '', email: '', password: '' });
+
   // Create school handler
   const handleCreateSchool = async (data: SaaSSchoolCreate) => {
     setLoading(prev => ({ ...prev, action: true }));
     try {
-      await saasService.createSchool(data);
-      setMessage({ type: 'success', text: `School "${data.school_name}" created successfully!` });
+      const result = await saasService.createSchool(data);
       setCreateModalOpen(false);
       await loadData();
+      
+      // Show admin credentials modal after successful creation
+      if (result.admin_auth?.user) {
+        setAdminCredentials({
+          open: true,
+          schoolName: result.school.school_name,
+          email: result.admin_auth.user.email,
+          password: result.admin_password || 'See email or contact root admin'
+        });
+      } else {
+        setMessage({ type: 'success', text: `School "${data.school_name}" created successfully!` });
+      }
     } catch (error: any) {
       setMessage({ type: 'error', text: error.message });
     } finally {
@@ -650,16 +1095,23 @@ const RootAdminDashboard: React.FC = () => {
     }
   };
 
-  // Suspend school handler
-  const handleSuspendSchool = async (schoolId: string) => {
-    if (!window.confirm('Are you sure you want to suspend this school? Users will be blocked immediately.')) {
-      return;
-    }
-    
+  // Temporary Suspend school handler - simple confirmation
+  const handleTemporarySuspend = async (schoolId: string) => {
+    const school = schools.find(s => s.school_id === schoolId);
+    setSuspendModal({
+      open: true,
+      schoolId,
+      schoolName: school?.school_name || '',
+    });
+  };
+
+  // Confirm temporary suspension
+  const confirmTemporarySuspend = async () => {
     setLoading(prev => ({ ...prev, action: true }));
     try {
-      await saasService.suspendSchool(schoolId);
-      setMessage({ type: 'success', text: 'School suspended successfully' });
+      await saasService.temporarySuspendSchool(suspendModal.schoolId);
+      setMessage({ type: 'success', text: 'School temporarily suspended. All logins blocked.' });
+      setSuspendModal({ open: false, schoolId: '', schoolName: '' });
       await loadData();
     } catch (error: any) {
       setMessage({ type: 'error', text: error.message });
@@ -682,21 +1134,43 @@ const RootAdminDashboard: React.FC = () => {
     }
   };
 
-  // Delete school handler
-  const handleDeleteSchool = async (schoolId: string) => {
-    const hardDelete = window.confirm(
-      'Do you want to permanently delete this school and its database?\n\n' +
-      'Click OK for permanent deletion, or Cancel to soft-delete (keep data).'
-    );
-    
-    if (!window.confirm('Are you sure you want to delete this school?')) {
-      return;
-    }
-    
+  // Permanent Delete school handler - simple confirmation
+  const handlePermanentDelete = async (schoolId: string) => {
+    const school = schools.find(s => s.school_id === schoolId);
+    setDeleteModal({
+      open: true,
+      schoolId,
+      schoolName: school?.school_name || '',
+    });
+  };
+
+  // Confirm permanent deletion
+  const confirmPermanentDelete = async () => {
     setLoading(prev => ({ ...prev, action: true }));
     try {
-      await saasService.deleteSchool(schoolId, hardDelete);
-      setMessage({ type: 'success', text: 'School deleted successfully' });
+      await saasService.permanentDeleteSchool(deleteModal.schoolId);
+      setMessage({ type: 'success', text: 'School permanently deleted along with all its data.' });
+      setDeleteModal({ open: false, schoolId: '', schoolName: '' });
+      await loadData();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setLoading(prev => ({ ...prev, action: false }));
+    }
+  };
+
+  // Billing Day Settings handler
+  const handleBillingDaySettings = (school: SaaSSchool) => {
+    setBillingDayModal({ open: true, school });
+  };
+
+  // Save billing day
+  const handleSaveBillingDay = async (schoolId: string, billingDay: number) => {
+    setLoading(prev => ({ ...prev, action: true }));
+    try {
+      await saasService.setBillingDay(schoolId, billingDay);
+      setMessage({ type: 'success', text: `Billing day set to ${billingDay}. Auto-suspension enabled.` });
+      setBillingDayModal({ open: false, school: null });
       await loadData();
     } catch (error: any) {
       setMessage({ type: 'error', text: error.message });
@@ -727,6 +1201,40 @@ const RootAdminDashboard: React.FC = () => {
       await loadData();
     } catch (error: any) {
       setMessage({ type: 'error', text: error.message });
+    }
+  };
+
+  // Payment settings handler
+  const handleSavePaymentSettings = async (schoolId: string, settings: {
+    payment_due_day?: number;
+    auto_suspend_enabled?: boolean;
+    grace_period_days?: number;
+  }) => {
+    setLoading(prev => ({ ...prev, action: true }));
+    try {
+      await saasService.updatePaymentSettings(schoolId, settings);
+      setMessage({ type: 'success', text: 'Payment settings updated!' });
+      setPaymentSettingsModal({ open: false, school: null });
+      await loadData();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setLoading(prev => ({ ...prev, action: false }));
+    }
+  };
+
+  // Record payment handler
+  const handleRecordPayment = async (schoolId: string, amount: number, notes?: string) => {
+    setLoading(prev => ({ ...prev, action: true }));
+    try {
+      await saasService.recordPayment(schoolId, { amount, notes });
+      setMessage({ type: 'success', text: 'Payment recorded! School reactivated if suspended.' });
+      setPaymentSettingsModal({ open: false, school: null });
+      await loadData();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error.message });
+    } finally {
+      setLoading(prev => ({ ...prev, action: false }));
     }
   };
 
@@ -915,11 +1423,12 @@ const RootAdminDashboard: React.FC = () => {
           <SchoolTable
             schools={schools}
             loading={loading.schools}
-            onSuspend={handleSuspendSchool}
+            onTemporarySuspend={handleTemporarySuspend}
             onReactivate={handleReactivateSchool}
-            onDelete={handleDeleteSchool}
+            onPermanentDelete={handlePermanentDelete}
             onResetPassword={(id) => setResetPasswordModal({ open: true, schoolId: id })}
             onRefreshStats={handleRefreshStats}
+            onBillingDaySettings={handleBillingDaySettings}
           />
         </div>
 
@@ -938,6 +1447,163 @@ const RootAdminDashboard: React.FC = () => {
           onSubmit={handleResetPassword}
           loading={loading.action}
         />
+
+        <PaymentSettingsModal
+          isOpen={paymentSettingsModal.open}
+          school={paymentSettingsModal.school}
+          onClose={() => setPaymentSettingsModal({ open: false, school: null })}
+          onSave={handleSavePaymentSettings}
+          onRecordPayment={handleRecordPayment}
+          loading={loading.action}
+        />
+
+        {/* Temporary Suspend Confirmation Modal */}
+        {suspendModal.open && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-slate-800 rounded-xl p-6 w-full max-w-md shadow-2xl border border-slate-700">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-amber-500/20 rounded-lg">
+                  <Pause className="w-6 h-6 text-amber-400" />
+                </div>
+                <h2 className="text-xl font-bold text-white">Temporary Suspend</h2>
+              </div>
+              
+              <p className="text-slate-300 mb-4">
+                Are you sure you want to temporarily suspend <strong className="text-white">{suspendModal.schoolName}</strong>?
+              </p>
+              
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 mb-4">
+                <p className="text-amber-400 text-sm flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  This will block ALL logins for this school (admin and staff).
+                </p>
+              </div>
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setSuspendModal({ open: false, schoolId: '', schoolName: '' })}
+                  className="flex-1 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmTemporarySuspend}
+                  disabled={loading.action}
+                  className="flex-1 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {loading.action ? <Loader2 className="w-4 h-4 animate-spin" /> : <Pause className="w-4 h-4" />}
+                  Suspend School
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Permanent Delete Confirmation Modal */}
+        {deleteModal.open && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-slate-800 rounded-xl p-6 w-full max-w-md shadow-2xl border border-red-500/30">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-500/20 rounded-lg">
+                  <AlertTriangle className="w-6 h-6 text-red-400" />
+                </div>
+                <h2 className="text-xl font-bold text-white">Permanent Delete</h2>
+              </div>
+              
+              <p className="text-slate-300 mb-4">
+                This will <strong className="text-red-400">permanently delete</strong> the school <strong className="text-white">{deleteModal.schoolName}</strong> and ALL its data.
+              </p>
+              
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-4 space-y-2">
+                <p className="text-red-400 text-sm font-semibold">This action will delete:</p>
+                <ul className="text-red-300 text-sm list-disc list-inside space-y-1">
+                  <li>The entire school database</li>
+                  <li>All admin and staff accounts</li>
+                  <li>All payment records</li>
+                  <li>All usage snapshots</li>
+                  <li>All invoices</li>
+                </ul>
+                <p className="text-red-400 text-sm font-bold mt-2">⚠️ This cannot be undone!</p>
+              </div>
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteModal({ open: false, schoolId: '', schoolName: '' })}
+                  className="flex-1 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmPermanentDelete}
+                  disabled={loading.action}
+                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {loading.action ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  Delete Permanently
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Billing Day Modal */}
+        {billingDayModal.open && billingDayModal.school && (
+          <BillingDayModal
+            isOpen={billingDayModal.open}
+            school={billingDayModal.school}
+            onClose={() => setBillingDayModal({ open: false, school: null })}
+            onSave={handleSaveBillingDay}
+            loading={loading.action}
+          />
+        )}
+
+        {/* Admin Credentials Modal - Shown after school creation */}
+        {adminCredentials.open && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-slate-800 rounded-xl p-6 w-full max-w-md shadow-2xl border border-slate-700">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-emerald-500/20 rounded-lg">
+                  <CheckCircle className="w-6 h-6 text-emerald-400" />
+                </div>
+                <h2 className="text-xl font-bold text-white">School Created Successfully!</h2>
+              </div>
+              
+              <div className="bg-slate-900/50 rounded-lg p-4 mb-4 space-y-3">
+                <p className="text-slate-300">
+                  <strong>School:</strong> {adminCredentials.schoolName}
+                </p>
+                <div className="border-t border-slate-700 pt-3">
+                  <p className="text-sm text-slate-400 mb-2">Admin Login Credentials:</p>
+                  <p className="text-slate-300">
+                    <strong>Email:</strong> {adminCredentials.email}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <p className="text-slate-300">
+                      <strong>Password:</strong> 
+                      <code className="ml-2 px-2 py-1 bg-slate-800 rounded text-emerald-400 font-mono">
+                        {adminCredentials.password}
+                      </code>
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 mb-4">
+                <p className="text-amber-400 text-sm flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  Please save these credentials! The password cannot be recovered later.
+                </p>
+              </div>
+              
+              <button
+                onClick={() => setAdminCredentials({ open: false, schoolName: '', email: '', password: '' })}
+                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+              >
+                I've Saved the Credentials
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

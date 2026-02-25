@@ -18,7 +18,7 @@ class ContactInfo(BaseModel):
     emergency_contact: Optional[str] = None
 
 class StudentSchema(BaseModel):
-    school_id: str  # *** NEW: School isolation ***
+    school_id: str  # School isolation
     student_id: str
     full_name: str
     gender: str
@@ -34,9 +34,11 @@ class StudentSchema(BaseModel):
     guardian_info: Optional[GuardianInfo] = None
     contact_info: Optional[ContactInfo] = None
     academic_year: str
-    # Image fields
-    profile_image_url: Optional[str] = None
-    profile_image_public_id: Optional[str] = None
+    # Image fields - stored as base64 blob in MongoDB
+    profile_image_blob: Optional[str] = None  # Base64 encoded image
+    profile_image_type: Optional[str] = None  # MIME type (image/jpeg, image/png)
+    cnic_image_blob: Optional[str] = None  # Optional base64 encoded CNIC image
+    cnic_image_type: Optional[str] = None  # MIME type for CNIC
     image_uploaded_at: Optional[datetime] = None
     # Face embedding fields
     face_embedding: Optional[List[float]] = None
@@ -63,6 +65,8 @@ class StudentUpdate(BaseModel):
     status: Optional[str] = None
     guardian_info: Optional[GuardianInfo] = None
     contact_info: Optional[ContactInfo] = None
-    profile_image_url: Optional[str] = None
-    profile_image_public_id: Optional[str] = None
+    profile_image_blob: Optional[str] = None
+    profile_image_type: Optional[str] = None
+    cnic_image_blob: Optional[str] = None
+    cnic_image_type: Optional[str] = None
     image_uploaded_at: Optional[datetime] = None

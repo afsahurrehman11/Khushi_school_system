@@ -101,6 +101,8 @@ def create_billing_config(
         "fixed_cpu_ram_cost": config_data.fixed_cpu_ram_cost,
         "dynamic_storage_cost": config_data.dynamic_storage_cost,
         "markup_percentage": config_data.markup_percentage,
+        "global_misc_amount": config_data.global_misc_amount,
+        "global_misc_description": config_data.global_misc_description,
         "created_at": now,
         "updated_at": now,
         "created_by": created_by
@@ -163,29 +165,44 @@ def calculate_school_costs(
     """
     Calculate billing breakdown for a single school:
     - Fixed cost: Equal split of CPU/RAM among all schools
-    - Storage cost: Proportional to storage usage
+    - Storage cost: Proportional to storage usage (fair pay-as-you-go model)
     - Markup: Percentage on base costs
+    - Global misc: Configurable extra amount applied equally to all schools
+    
+    Fair Usage Distribution Algorithm:
+    - Schools with more storage pay proportionally more for storage costs
+    - Fixed infrastructure costs (CPU/RAM) are split equally
+    - This ensures a school with 70,000 students pays more than one with 700
     """
     cost = CostBreakdown()
     
-    # Fixed cost (equal split)
+    # Fixed cost (equal split) - Fair for infrastructure that doesn't scale with data
     if active_schools_count > 0:
-        cost.fixed_cost = round(billing_config.fixed_cpu_ram_cost / active_schools_count, 2)
+        cost.fixed_cost = round(billing_config.fixed_cpu_ram_cost / active_schools_count, 4)
     
-    # Storage-based cost (proportional)
+    # Storage-based cost (proportional) - Fair pay-as-you-go model
+    # Schools with more data pay more for storage costs
     if total_storage_bytes > 0:
         storage_ratio = school_storage_bytes / total_storage_bytes
-        cost.storage_cost = round(billing_config.dynamic_storage_cost * storage_ratio, 2)
+        cost.storage_cost = round(billing_config.dynamic_storage_cost * storage_ratio, 4)
     
     # Base total
-    cost.base_total = round(cost.fixed_cost + cost.storage_cost, 2)
+    cost.base_total = round(cost.fixed_cost + cost.storage_cost, 4)
     
-    # Apply markup
-    cost.markup_amount = round(cost.base_total * (billing_config.markup_percentage / 100), 2)
-    cost.subtotal = round(cost.base_total + cost.markup_amount, 2)
+    # Apply markup (your profit margin)
+    cost.markup_amount = round(cost.base_total * (billing_config.markup_percentage / 100), 4)
+    cost.subtotal = round(cost.base_total + cost.markup_amount, 4)
     
-    # Initial total (before manual adjustments)
-    cost.total = cost.subtotal
+    # Add global miscellaneous amount (applied equally to all schools)
+    # This is for custom charges like support fees, maintenance windows, etc.
+    global_misc = getattr(billing_config, 'global_misc_amount', 0) or 0
+    global_misc_desc = getattr(billing_config, 'global_misc_description', None)
+    if global_misc > 0:
+        cost.misc_charges = round(global_misc, 2)
+        cost.misc_charges_description = global_misc_desc
+    
+    # Calculate final total
+    cost.total = round(cost.subtotal + cost.misc_charges, 2)
     
     return cost
 

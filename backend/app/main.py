@@ -41,6 +41,8 @@ from app.startup import ensure_collections_exist
 from app.routers import auth, users, students, fees, classes, teachers, grades, accounting, payments, reports, root, student_import_export, chalans, fee_categories, class_fee_assignments, notifications, fee_payments, accountant, payment_methods, schools, root_admin, cash_sessions, statistics, attendance, whatsapp, face
 from app.routers import saas as saas_router
 from app.routers import billing as billing_router
+from app.routers import fee_vouchers as fee_vouchers_router
+from app.routers import analytics as analytics_router
 from app.services import face_service as _face_service_module
 from app.middleware.database_routing import database_routing_middleware
 
@@ -191,6 +193,8 @@ app.include_router(statistics, tags=["Statistics"])
 app.include_router(attendance, prefix="/api", tags=["Attendance"])
 app.include_router(whatsapp, tags=["WhatsApp"])
 app.include_router(face, tags=["Face Recognition"])
+app.include_router(fee_vouchers_router, prefix="/api/fee-vouchers", tags=["Fee Vouchers"])
+app.include_router(analytics_router, prefix="/api/analytics", tags=["Analytics"])
 
 @app.on_event("startup")
 async def startup_event():

@@ -6,7 +6,7 @@ from datetime import datetime
 from bson import ObjectId
 
 from app.database import get_db
-from app.services.cloudinary_service import CloudinaryService
+from app.services.image_service import ImageService
 from app.services.embedding_service import EmbeddingGenerator, FaceDetectionError
 
 logger = logging.getLogger(__name__)
@@ -79,15 +79,15 @@ class BackgroundEmbeddingService:
             for student in students:
                 try:
                     student_id = str(student["_id"])
-                    image_url = student.get("profile_image_url")
+                    image_blob = student.get("profile_image_blob")
                     
-                    if not image_url:
+                    if not image_blob:
                         job.failed += 1
                         job.processed += 1
                         continue
                     
-                    # Download image from Cloudinary
-                    pil_image = CloudinaryService.get_image_pil(image_url)
+                    # Get PIL image from base64 blob
+                    pil_image = ImageService.get_pil_image_from_base64(image_blob)
                     if not pil_image:
                         student_collection.update_one(
                             {"_id": ObjectId(student_id)},
@@ -193,15 +193,15 @@ class BackgroundEmbeddingService:
             for student in students:
                 try:
                     student_id = str(student["_id"])
-                    image_url = student.get("profile_image_url")
+                    image_blob = student.get("profile_image_blob")
                     
-                    if not image_url:
+                    if not image_blob:
                         job.failed += 1
                         job.processed += 1
                         continue
                     
-                    # Download image from Cloudinary
-                    pil_image = CloudinaryService.get_image_pil(image_url)
+                    # Get PIL image from base64 blob
+                    pil_image = ImageService.get_pil_image_from_base64(image_blob)
                     if not pil_image:
                         student_collection.update_one(
                             {"_id": ObjectId(student_id)},

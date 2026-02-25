@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   XCircle,
   Copy,
-  Download,
   Loader2,
   X,
   Info,
@@ -15,12 +14,11 @@ import {
 import Modal from '../../../components/Modal';
 import Button from '../../../components/Button';
 import logger from '../../../utils/logger';
-import type { ImportPreviewResponse } from '../types/importExport';
+import type { ImportPreviewResponse, ImportError } from '../types/importExport';
 import {
   uploadForPreview,
   confirmImport,
   getImportStatus,
-  downloadErrorReport,
 } from '../services/importExportApi';
 
 interface ImportModalProps {
@@ -49,6 +47,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
     successful_rows: number;
     failed_rows: number;
     import_id: string;
+    errors: ImportError[];
   } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -194,6 +193,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
                 successful_rows: status.successful_rows,
                 failed_rows: status.failed_rows,
                 import_id: preview.import_id,
+                errors: status.errors || [],
               });
               setStep('result');
               onImportComplete?.(preview.import_id);
@@ -210,6 +210,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
           successful_rows: 0,
           failed_rows: 0,
           import_id: preview.import_id,
+          errors: [],
         });
         setStep('result');
       };
@@ -220,18 +221,6 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
       setStep('preview');
     } finally {
       setConfirming(false);
-    }
-  };
-
-  // ---- Download error report ----
-  const handleDownloadErrors = async () => {
-    if (!preview && !result) return;
-    const importId = result?.import_id || preview?.import_id;
-    if (!importId) return;
-    try {
-      await downloadErrorReport(importId);
-    } catch (err: any) {
-      setError(err.message);
     }
   };
 
@@ -464,7 +453,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
                 <tbody className="divide-y divide-secondary-100">
                   {preview.preview_data.map((row, idx) => (
                     <tr key={idx} className="hover:bg-secondary-50">
-                      <td className="px-3 py-2 text-secondary-900">{row.student_id}</td>
+                      <td className="px-3 py-2 text-secondary-900">{row.registration_number}</td>
                       <td className="px-3 py-2 text-secondary-900">{row.full_name}</td>
                       <td className="px-3 py-2 text-secondary-900">{row.roll_number}</td>
                       <td className="px-3 py-2 text-secondary-900">{row.class_id}</td>
@@ -481,16 +470,10 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
         {/* Errors Table */}
         {preview.errors.length > 0 && (
           <div className="border border-danger-200 rounded-xl overflow-hidden">
-            <div className="px-4 py-3 bg-danger-50 border-b border-danger-200 flex items-center justify-between">
+            <div className="px-4 py-3 bg-danger-50 border-b border-danger-200">
               <p className="font-medium text-danger-700">
                 Errors ({preview.errors.length})
               </p>
-              <button
-                onClick={handleDownloadErrors}
-                className="text-sm text-danger-600 hover:text-danger-700 flex items-center gap-1"
-              >
-                <Download className="w-3 h-3" /> Download Report
-              </button>
             </div>
             <div className="overflow-x-auto max-h-48">
               <table className="w-full text-sm">
@@ -567,9 +550,10 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
     const isSuccess = result.status === 'completed';
     const hasErrors = result.status === 'completed_with_errors';
     const isFailed = result.status === 'failed' || result.status === 'timeout';
+    const showErrors = (hasErrors || isFailed) && result.errors && result.errors.length > 0;
 
     return (
-      <div className="flex flex-col items-center justify-center py-12 space-y-6">
+      <div className="flex flex-col items-center justify-center py-8 space-y-6">
         <div className={`w-20 h-20 rounded-full flex items-center justify-center ${
           isSuccess ? 'bg-success-100' : hasErrors ? 'bg-warning-100' : 'bg-danger-100'
         }`}>
@@ -593,15 +577,33 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
               ? `${result.successful_rows} students imported successfully.`
               : hasErrors
                 ? `${result.successful_rows} students imported successfully. ${result.failed_rows} failed.`
-                : 'The import could not be completed. Please check the error report.'}
+                : isFailed && result.errors?.length > 0
+                  ? 'The import was cancelled. No students were imported.'
+                  : 'The import could not be completed.'}
           </p>
         </div>
 
-        {(hasErrors || isFailed) && (
-          <Button variant="warning" onClick={handleDownloadErrors}>
-            <Download className="w-4 h-4" />
-            Download Error Report
-          </Button>
+        {/* Inline Error Display */}
+        {showErrors && (
+          <div className="w-full max-w-lg bg-danger-50 border border-danger-200 rounded-lg p-4">
+            <h4 className="text-sm font-semibold text-danger-800 mb-3 flex items-center gap-2">
+              <XCircle className="w-4 h-4" />
+              Errors ({result.errors.length})
+            </h4>
+            <ul className="space-y-2 max-h-48 overflow-y-auto">
+              {result.errors.slice(0, 10).map((err, index) => (
+                <li key={index} className="text-sm text-danger-700 bg-white rounded px-3 py-2 border border-danger-100">
+                  {err.row > 0 && <span className="font-medium">Row {err.row}: </span>}
+                  {err.reason}
+                </li>
+              ))}
+              {result.errors.length > 10 && (
+                <li className="text-sm text-danger-600 italic">
+                  ...and {result.errors.length - 10} more errors
+                </li>
+              )}
+            </ul>
+          </div>
         )}
 
         <Button variant="primary" onClick={handleClose}>

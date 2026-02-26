@@ -8,22 +8,20 @@ from dotenv import load_dotenv
 import pathlib
 import logging
 
-# Load environment variables: prefer backend/.env, fall back to project root .env
+# Load environment variables ONLY from backend/.env
+# This ensures consistent database connection across all environments
 logger = logging.getLogger(__name__)
 BASE_DIR = pathlib.Path(__file__).resolve().parents[1]  # backend/
 BACKEND_ENV = BASE_DIR / '.env'
-ROOT_ENV = BASE_DIR.parent / '.env'
 
 if BACKEND_ENV.exists():
     load_dotenv(dotenv_path=str(BACKEND_ENV))
-    logger.debug(f"Loaded environment from {BACKEND_ENV}")
-elif ROOT_ENV.exists():
-    # Backwards compatibility: load root .env if backend/.env not present
-    load_dotenv(dotenv_path=str(ROOT_ENV))
-    logger.warning(f"Loaded environment from project root {ROOT_ENV}; consider moving secrets to backend/.env")
+    logger.info(f"✅ Loaded environment from backend/.env: {BACKEND_ENV}")
 else:
-    # No .env file found; rely on process environment variables (e.g., Render or CI)
-    logger.debug("No .env file found for backend; using process environment variables")
+    # Show warning if backend/.env is missing but don't fall back to root .env
+    # This forces users to explicitly set environment variables
+    logger.warning(f"⚠️ backend/.env not found at {BACKEND_ENV}")
+    logger.warning("⚠️ Using system environment variables - ensure MONGO_URI is set in your deployment!")
 
 
 def _db_name_from_uri(uri: str) -> Optional[str]:
@@ -59,11 +57,9 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
 
-    # MongoDB Configuration
-    mongo_uri: str = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
-    # Allow overriding the DB name via env; if not provided, derive from the
-    # `MONGO_URI` path segment (common when the URI contains a database name),
-    # otherwise fall back to the historical default `cms_db`.
+    # MongoDB Configuration - ALWAYS from backend/.env or environment
+    # No fallback to development defaults - must be explicitly set
+    mongo_uri: str = os.environ.get("MONGO_URI", "")
     database_name: Optional[str] = None
 
     # CORS Configuration

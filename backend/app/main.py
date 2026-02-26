@@ -228,85 +228,132 @@ except Exception as e:
 
 @app.on_event("startup")
 async def startup_event():
-    """Application startup event"""
+    """Application startup event with comprehensive error handling"""
     import re
+    import traceback
+    
     logger.info("🚀 Starting Khushi ERP System API")
     logger.info("=" * 60)
     
-    # Log MONGO_URI for debugging (masked password)
-    mongo_uri = settings.mongo_uri
-    masked_uri = re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', mongo_uri)
-    logger.info(f"🔗 MONGO_URI (masked): {masked_uri}")
-    
-    # Check if URI contains encoded characters
-    if '%40' in mongo_uri or '%2A' in mongo_uri:
-        logger.info("   ✓ URI contains URL-encoded characters")
-    else:
-        logger.info("   ⚠ URI does NOT contain URL-encoded characters")
-    
-    # ============ DATABASE CONNECTION ============
-    logger.info("📊 Connecting to MongoDB...")
     db_connected = False
-    try:
-        # Attempt to get DB; this will try to connect lazily and may raise if unreachable
-        db = get_db()
-        # Test database connection
-        db.command("ping")
-        logger.info("✅ MongoDB connection: SUCCESS")
-        logger.info(f"   Database: {db.name}")
-        
-        # Log collections count
-        collections = db.list_collection_names()
-        logger.info(f"   Collections found: {len(collections)}")
-        db_connected = True
-    except Exception as e:
-        logger.error("❌ MongoDB connection: FAILED")
-        logger.error(f"   Error: {e}")
-        logger.warning("⚠️ Server will continue without database (limited functionality)")
-
-    if db_connected:
-        try:
-            result = ensure_collections_exist()
-            created = result.get("created", [])
-            if created:
-                logger.info("✅ Collections created on startup: %s", created)
-            else:
-                logger.info("✅ All required collections already exist")
-        except Exception as exc:
-            logger.error(f"❌ Collections check/creation failed: {exc}")
-        
-        # Initialize SaaS root database and indexes
-        try:
-            from app.services.saas_db import get_saas_root_db
-            saas_db = get_saas_root_db()
-            logger.info("✅ SaaS root database connection: SUCCESS")
-            
-            # Create indexes for saas_root_db
-            saas_db.schools.create_index("school_id", unique=True)
-            saas_db.schools.create_index("admin_email", unique=True)
-            saas_db.schools.create_index("database_name", unique=True)
-            saas_db.schools.create_index("status")
-            saas_db.usage_snapshots.create_index([("school_id", 1), ("date", -1)])
-            saas_db.usage_snapshots.create_index("date")
-            
-            logger.info("✅ SaaS root database indexes created")
-        except Exception as e:
-            logger.warning(f"⚠️ SaaS root database initialization: {e}")
-        
-        # Start SaaS background jobs (daily snapshots, cleanup)
-        try:
-            from app.services.saas_jobs import start_background_jobs
-            await start_background_jobs()
-            logger.info("✅ SaaS background jobs started")
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to start SaaS background jobs: {e}")
-    else:
-        logger.warning("⚠️ Skipping database initialization - DB not connected")
     
-    logger.info("=" * 60)
-    logger.info("✅ Server is now READY and accepting requests!")
-    logger.info(f"📡 Allowed origins: {settings.allowed_origins}")
-    logger.info("=" * 60)
+    try:
+        # ============ DATABASE CONNECTION ============
+        try:
+            # Log MONGO_URI for debugging (masked password)
+            mongo_uri = settings.mongo_uri
+            if mongo_uri:
+                masked_uri = re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', mongo_uri)
+                logger.info(f"🔗 MONGO_URI (masked): {masked_uri}")
+                
+                # Check if URI contains encoded characters
+                if '%40' in mongo_uri or '%2A' in mongo_uri:
+                    logger.info("   ✓ URI contains URL-encoded characters")
+                else:
+                    logger.info("   ⚠ URI does NOT contain URL-encoded characters")
+            else:
+                logger.warning("⚠️ MONGO_URI is not configured in backend/.env")
+            
+            logger.info("📊 Connecting to MongoDB...")
+            # Attempt to get DB; this will try to connect lazily
+            db = get_db()
+            if db is None:
+                raise RuntimeError("Failed to connect to MongoDB - check backend/.env MONGO_URI")
+            
+            # Test database connection
+            try:
+                db.command("ping")
+                logger.info("✅ MongoDB connection: SUCCESS")
+                logger.info(f"   Database: {db.name}")
+                
+                # Log collections count
+                try:
+                    collections = db.list_collection_names()
+                    logger.info(f"   Collections found: {len(collections)}")
+                except Exception as coll_exc:
+                    logger.warning(f"⚠️ Could not list collections: {coll_exc}")
+                
+                db_connected = True
+            except Exception as ping_exc:
+                logger.error(f"❌ Diamond connection test (ping) failed: {ping_exc}")
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+                db_connected = False
+        
+        except Exception as db_exc:
+            logger.error("❌ MongoDB connection: FAILED")
+            logger.error(f"   Error: {db_exc}")
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+            logger.warning("⚠️ Server will continue without database (limited functionality)")
+            db_connected = False
+
+        # ============ COLLECTIONS INITIALIZATION ============
+        if db_connected:
+            try:
+                logger.info("🔧 Initializing collections...")
+                result = ensure_collections_exist()
+                created = result.get("created", [])
+                if created:
+                    logger.info(f"✅ Collections created on startup: {created}")
+                else:
+                    logger.info("✅ All required collections already exist")
+            except Exception as coll_init_exc:
+                logger.error(f"❌ Collections initialization failed: {coll_init_exc}")
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+                logger.warning("⚠️ Continuing despite collection init error...")
+        
+        # ============ SAAS DATABASE INITIALIZATION ============
+        if db_connected:
+            try:
+                logger.info("🔧 Initializing SaaS root database...")
+                from app.services.saas_db import get_saas_root_db
+                saas_db = get_saas_root_db()
+                if saas_db:
+                    logger.info("✅ SaaS root database connection: SUCCESS")
+                    
+                    # Create indexes for saas_root_db
+                    try:
+                        saas_db.schools.create_index("school_id", unique=True)
+                        saas_db.schools.create_index("admin_email", unique=True)
+                        saas_db.schools.create_index("database_name", unique=True)
+                        saas_db.schools.create_index("status")
+                        saas_db.usage_snapshots.create_index([("school_id", 1), ("date", -1)])
+                        saas_db.usage_snapshots.create_index("date")
+                        logger.info("✅ SaaS root database indexes created")
+                    except Exception as idx_exc:
+                        logger.warning(f"⚠️ Failed to create indexes: {idx_exc}")
+                        logger.warning(f"   Traceback: {traceback.format_exc()}")
+                else:
+                    logger.warning("⚠️ Failed to initialize SaaS database")
+            except Exception as saas_exc:
+                logger.error(f"❌ SaaS database initialization failed: {saas_exc}")
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+                logger.warning("⚠️ Continuing despite SaaS init error...")
+        
+        # ============ BACKGROUND JOBS INITIALIZATION ============
+        if db_connected:
+            try:
+                logger.info("🔧 Starting SaaS background jobs...")
+                from app.services.saas_jobs import start_background_jobs
+                await start_background_jobs()
+                logger.info("✅ SaaS background jobs started")
+            except Exception as jobs_exc:
+                logger.error(f"❌ Failed to start background jobs: {jobs_exc}")
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+                logger.warning("⚠️ Continuing despite background jobs error...")
+        else:
+            logger.warning("⚠️ Skipping background jobs - database not connected")
+        
+        logger.info("=" * 60)
+        logger.info("✅ Server is now READY and accepting requests!")
+        logger.info(f"📡 Allowed origins: {settings.allowed_origins}")
+        logger.info("=" * 60)
+        
+    except Exception as startup_exc:
+        logger.error("💥 Critical error during startup")
+        logger.error(f"   Error: {startup_exc}")
+        logger.error(f"   Traceback: {traceback.format_exc()}")
+        logger.warning("⚠️ Server continuing in degraded mode...")
+        # Don't sys.exit() - let the server run even if startup has issues
     
     # ============ BACKGROUND ML MODEL LOADING ============
     # Start ML model loading in background AFTER server is up
@@ -328,7 +375,9 @@ async def startup_event():
         else:
             logger.info("🔕 Self-ping disabled (no SELF_PING_URL or explicitly disabled)")
     except Exception as e:
-        logger.warning(f"⚠️ Failed to start self-ping background task: {e}")
+        logger.error(f"❌ Failed to start self-ping background task: {e}")
+        logger.error(f"   Traceback: {traceback.format_exc()}")
+        logger.warning("⚠️ Continuing without self-ping...")
 
 
 # --- Background ML Model Loading Task ---------------------------------

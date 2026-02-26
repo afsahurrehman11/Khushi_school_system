@@ -24,3 +24,4 @@ psutil>=5.9.0
 # PyTorch for FaceNet (CPU build). Adjust version/index if you need CUDA builds.
 torch>=2.2.0
 torchvision>=0.17.0
+facenet-pytorch>=2.2.0

@@ -102,21 +102,24 @@ class Settings(BaseSettings):
     # Hard-coded deployed URL for self-ping. This value is used when no
     # environment variable is provided and enables the self-ping task.
     # Replace with your deployed URL if different.
-    self_ping_url: Optional[str] = "https://khushi-school-system.onrender.com"
+    self_ping_url: Optional[str] = os.environ.get("SELF_PING_URL", "https://khushi-school-system.onrender.com")
     # Interval in minutes between pings (default 57)
     self_ping_interval_minutes: int = int(os.environ.get("SELF_PING_INTERVAL_MINUTES", 57))
-    # Whether to enable the self-ping background task. Hard-coded to True
-    # so the self-ping runs by default using the above URL.
-    enable_self_ping: bool = True
+    # Whether to enable the self-ping background task. Disabled by default
+    # for production deployments on platforms like Render that handle keep-alive automatically.
+    enable_self_ping: bool = os.environ.get("ENABLE_SELF_PING", "false").lower() in ("1", "true", "yes")
 
     class Config:
         env_file = ".env"
 
 settings = Settings()
 
-# Ensure `settings.database_name` is set. Prefer explicit setting, then URI
-# path. If no database is configured, leave it unset (None) so startup
-# can opt-out of creating a single-school DB automatically.
-if not settings.database_name:
-    parsed = _db_name_from_uri(settings.mongo_uri)
-    settings.database_name = parsed or None
+# DISABLE automatic database name derivation from MONGO_URI
+# This prevents automatic creation of databases named in the URI path
+# Only use explicit DATABASE_NAME environment variable or leave unset for multi-tenant mode
+# if not settings.database_name:
+#     parsed = _db_name_from_uri(settings.mongo_uri)
+#     settings.database_name = parsed or None
+
+# Keep database_name as None unless explicitly set via DATABASE_NAME env var
+# This prevents automatic database creation from URI path segments

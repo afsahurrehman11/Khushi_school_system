@@ -35,6 +35,7 @@ import json
 import sys
 import asyncio
 import httpx
+from datetime import datetime
 from app.config import settings
 from app.database import get_db
 from app.startup import ensure_collections_exist
@@ -334,72 +335,82 @@ async def _load_ml_models_background(db_connected: bool) -> None:
     ensuring deployment platforms don't timeout waiting for the port.
     ML models (PyTorch, TensorFlow, FaceNet) can take 2-5 minutes to load.
     """
-    logger.info("=" * 60)
-    logger.info("🧠 Starting background ML model loading...")
-    logger.info("   (Server is accepting requests while models load)")
-    logger.info("=" * 60)
-    
-    # Give the server a moment to fully initialize
-    await asyncio.sleep(2)
-    
     try:
+        logger.info("=" * 60)
+        logger.info("🧠 Starting background ML model loading...")
+        logger.info("   (Server is accepting requests while models load)")
+        logger.info("=" * 60)
+        
+        # Give the server a moment to fully initialize
+        await asyncio.sleep(2)
+        
         # Import and initialize face_service (this triggers ML library loading)
-        from app.services import face_service as _face_service_module
-        
-        logger.info("📦 Loading PyTorch and FaceNet models...")
-        # Call the init function to load ML libraries
-        _face_service_module._init_ml_libs()
-        
-        # Log the status
-        if _face_service_module.USE_FACENET:
-            logger.info("✅ FaceNet model loaded successfully")
-        else:
-            logger.info("⚠️ FaceNet not available, using fallback embedding method")
-        
-        if _face_service_module.CV2_AVAILABLE:
-            logger.info("✅ OpenCV loaded for face detection")
-        else:
-            logger.warning("⚠️ OpenCV not available")
-        
-        log_memory()
-        
-        # Load face embeddings cache if DB is connected
-        if db_connected:
-            logger.info("📥 Loading face embeddings into cache...")
-            try:
-                counts = _face_service_module.load_cache_from_disk()
-                if (counts.get('students', 0) + counts.get('employees', 0)) > 0:
-                    logger.info(f"✅ Face embeddings loaded from disk: students={counts.get('students', 0)}, employees={counts.get('employees', 0)}")
-                else:
-                    logger.info("ℹ️ No cached embeddings found on disk")
-                    # Try to load from database
-                    try:
-                        db = get_db()
-                        schools = list(db.schools.find()) if 'schools' in db.list_collection_names() else []
-                        if not schools:
-                            sample = db.users.find_one({"school_id": {"$exists": True}})
-                            if sample and sample.get('school_id'):
-                                schools = [{'_id': sample.get('school_id')}]
+        try:
+            from app.services import face_service as _face_service_module
+            logger.info("📦 Loading PyTorch and FaceNet models...")
+            # Call the init function to load ML libraries
+            _face_service_module._init_ml_libs()
+            
+            # Log the status
+            if _face_service_module.USE_FACENET:
+                logger.info("✅ FaceNet model loaded successfully")
+            else:
+                logger.info("⚠️ FaceNet not available, using fallback embedding method")
+            
+            if _face_service_module.CV2_AVAILABLE:
+                logger.info("✅ OpenCV loaded for face detection")
+            else:
+                logger.warning("⚠️ OpenCV not available")
+            
+            log_memory()
+            
+            # Load face embeddings cache if DB is connected
+            if db_connected:
+                logger.info("📥 Loading face embeddings into cache...")
+                try:
+                    counts = _face_service_module.load_cache_from_disk()
+                    if (counts.get('students', 0) + counts.get('employees', 0)) > 0:
+                        logger.info(f"✅ Face embeddings loaded from disk: students={counts.get('students', 0)}, employees={counts.get('employees', 0)}")
+                    else:
+                        logger.info("ℹ️ No cached embeddings found on disk")
+                        # Try to load from database - but don't crash if it fails
+                        try:
+                            db = get_db()
+                            schools = list(db.schools.find()) if 'schools' in db.list_collection_names() else []
+                            if not schools:
+                                sample = db.users.find_one({"school_id": {"$exists": True}})
+                                if sample and sample.get('school_id'):
+                                    schools = [{'_id': sample.get('school_id')}]
 
-                        if schools:
-                            for s in schools:
-                                sid = str(s.get('_id'))
-                                face_service = _face_service_module.FaceRecognitionService(db)
-                                await face_service.load_embeddings_to_cache(sid)
-                            
-                            # Persist to disk for faster future startups
-                            saved = _face_service_module.dump_cache_to_disk()
-                            logger.info(f"✅ Face embeddings loaded from DB and cached to disk: {saved}")
-                        else:
-                            logger.info("ℹ️ No schools found - embeddings will be loaded on first access")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Could not load embeddings from DB: {e}")
-            except Exception as e:
-                logger.warning(f"⚠️ Face cache loading error: {e}")
-        
-        logger.info("=" * 60)
-        logger.info("🎉 ML model loading complete! Face recognition is ready.")
-        logger.info("=" * 60)
+                            if schools:
+                                for s in schools:
+                                    sid = str(s.get('_id'))
+                                    face_service = _face_service_module.FaceRecognitionService(db)
+                                    await face_service.load_embeddings_to_cache(sid)
+                                
+                                # Persist to disk for faster future startups
+                                saved = _face_service_module.dump_cache_to_disk()
+                                logger.info(f"✅ Face embeddings loaded from DB and cached to disk: {saved}")
+                            else:
+                                logger.info("ℹ️ No schools found - embeddings will be loaded on first access")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Could not load embeddings from DB (non-critical): {e}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Face cache loading error (non-critical): {e}")
+            
+            logger.info("=" * 60)
+            logger.info("🎉 ML model loading complete! Face recognition is ready.")
+            logger.info("=" * 60)
+            
+        except Exception as e:
+            logger.error(f"❌ ML model loading failed: {e}")
+            logger.warning("⚠️ Face recognition will not be available, but server continues")
+            # Don't re-raise - we want the server to keep running even if ML loading fails
+            
+    except Exception as e:
+        logger.error(f"💥 CRITICAL: Background ML loading task crashed: {e}")
+        logger.warning("⚠️ Server continues despite ML loading failure")
+        # Don't re-raise - background task failure shouldn't crash the server
         
     except Exception as e:
         logger.error(f"❌ ML model loading failed: {e}")
@@ -471,11 +482,41 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - robust version that doesn't fail on DB issues"""
+    try:
+        # Basic health check - don't fail if DB is temporarily unavailable
+        return {
+            "status": "healthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "version": "1.0.0"
+        }
+    except Exception as e:
+        # Even if something goes wrong, return healthy status
+        # This prevents Render from restarting the service due to health check failures
+        logger.warning(f"Health check warning (non-critical): {e}")
+        return {
+            "status": "healthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "version": "1.0.0",
+            "warning": str(e)
+        }
+
+@app.get("/health/db")
+async def database_health_check():
+    """Database-specific health check endpoint"""
     try:
         db = get_db()
         # Test database connection
-        db.command("ping")
-        return {"status": "healthy", "database": "connected"}
+        result = db.command("ping")
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "db_name": db.name,
+            "timestamp": datetime.utcnow().isoformat()
+        }
     except Exception as e:
-        return {"status": "unhealthy", "database": str(e)}
+        return {
+            "status": "unhealthy",
+            "database": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }

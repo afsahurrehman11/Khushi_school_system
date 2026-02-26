@@ -115,89 +115,146 @@ for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     lg.setLevel(log_level)
 logger = logging.getLogger(__name__)
 
-
-# --- Self-ping (keep-alive) background task ---------------------------------
-async def _self_ping_loop(url: str, interval_minutes: int, stop_event: asyncio.Event) -> None:
-    """Periodically ping the given `url` every `interval_minutes` minutes.
-
-    Runs until `stop_event` is set. Logs success (status code) or failure.
-    """
-    interval_seconds = max(1, int(interval_minutes)) * 60
-    client = httpx.AsyncClient(timeout=10.0)
+# Memory logging function
+def log_memory():
     try:
-        while not stop_event.is_set():
-            try:
-                resp = await client.get(url)
-                # Avoid passing `extra` keys that conflict with LogRecord internals
-                logger.info(f"SELF-PING: Ping {url} -> {resp.status_code}")
-                logger.debug(f"SELF-PING response headers: {resp.headers}")
-            except Exception as e:
-                # Log warning instead of full stack trace for self-ping timeouts
-                logger.warning(f"SELF-PING failed for {url}: {type(e).__name__}")
+        import psutil
+        mem = psutil.virtual_memory()
+        logger.info(f"Memory usage: {mem.percent}% used ({mem.used // (1024**2)}MB / {mem.total // (1024**2)}MB)")
+    except ImportError:
+        logger.info("psutil not installed, skipping memory log")
 
-            # Wait for the interval or until stop_event is set
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
-            except asyncio.TimeoutError:
-                # timeout expired -> continue loop
-                continue
-    finally:
-        await client.aclose()
+# Wrap entire application startup in try-except
+try:
+    logger.info("🚀 Starting Khushi ERP System API - Detailed Logging Enabled")
+    log_memory()
 
-# ----------------------------------------------------------------------------
+    # Fixed numbers for testing logs
+    fixed_number_1 = 42
+    fixed_number_2 = 7
+    logger.info(f"Fixed numbers initialized: {fixed_number_1}, {fixed_number_2}")
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="Khushi ERP System API",
-    description="School Enterprise Resource Planning System",
-    version="1.0.0"
-)
+    # Small simulation function using fixed numbers
+    def simulate_computation():
+        result = fixed_number_1 * fixed_number_2 + (fixed_number_1 // fixed_number_2)
+        logger.info(f"Simulation computation result: {result}")
+        return result
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    simulate_computation()
 
-# Add database routing middleware for multi-tenant support
-@app.middleware("http")
-async def db_routing_middleware(request, call_next):
-    return await database_routing_middleware(request, call_next)
+    # Import heavy libraries with detailed logging
+    logger.info("📦 Importing heavy ML libraries...")
 
-# Include routers
-app.include_router(auth, prefix="/api", tags=["Authentication"])
-app.include_router(saas_router, prefix="/api/saas", tags=["SaaS Management"])
-app.include_router(billing_router, prefix="/api/billing", tags=["Billing"])
-app.include_router(users, prefix="/api/admin", tags=["User Management"])
-app.include_router(students, prefix="/api", tags=["Students"])
-app.include_router(fees, prefix="/api", tags=["Fees"])
-app.include_router(classes, prefix="/api", tags=["Classes & Subjects"])
-app.include_router(teachers, prefix="/api", tags=["Teachers"])
-app.include_router(grades, prefix="/api", tags=["Grades"])
-app.include_router(accounting, prefix="/api", tags=["Accounting"])
-app.include_router(payments, tags=["Payments"])
-app.include_router(reports, prefix="/api", tags=["Reports"])
-app.include_router(root, prefix="/api/root", tags=["Root"])
-app.include_router(root_admin, prefix="/api/root", tags=["Root Admin Management"])
-app.include_router(schools, prefix="/api", tags=["Schools"])
-app.include_router(student_import_export, prefix="/api/students-import-export", tags=["Student Import/Export"])
-app.include_router(chalans, tags=["Chalans"])
-app.include_router(fee_categories, tags=["Fee Categories"])
-app.include_router(class_fee_assignments, tags=["Class Fee Assignments"])
-app.include_router(notifications, prefix="/api", tags=["Notifications"])
-app.include_router(fee_payments, tags=["Fee Payments"])
-app.include_router(accountant, tags=["Accountants"])
-app.include_router(payment_methods, tags=["Payment Methods"])
-app.include_router(cash_sessions, tags=["Cash Sessions"])
-app.include_router(statistics, tags=["Statistics"])
-app.include_router(attendance, prefix="/api", tags=["Attendance"])
-app.include_router(whatsapp, tags=["WhatsApp"])
-app.include_router(face, tags=["Face Recognition"])
-app.include_router(fee_vouchers_router, prefix="/api/fee-vouchers", tags=["Fee Vouchers"])
-app.include_router(analytics_router, prefix="/api/analytics", tags=["Analytics"])
+    try:
+        import torch
+        logger.info("✅ PyTorch imported successfully")
+        log_memory()
+    except Exception as e:
+        logger.error(f"❌ PyTorch import failed: {e}")
+        log_memory()
+
+    try:
+        import tensorflow as tf
+        logger.info("✅ TensorFlow imported successfully")
+        log_memory()
+    except Exception as e:
+        logger.error(f"❌ TensorFlow import failed: {e}")
+        log_memory()
+
+    try:
+        import deepface
+        logger.info("✅ DeepFace imported successfully")
+        log_memory()
+    except Exception as e:
+        logger.error(f"❌ DeepFace import failed: {e}")
+        log_memory()
+
+    try:
+        from facenet_pytorch import InceptionResnetV1
+        logger.info("✅ FaceNet PyTorch imported successfully")
+        log_memory()
+    except Exception as e:
+        logger.error(f"❌ FaceNet PyTorch import failed: {e}")
+        log_memory()
+
+    logger.info("✅ Heavy library imports completed")
+    log_memory()
+
+    # Initialize FastAPI app
+    logger.info("🔧 Initializing FastAPI application...")
+    app = FastAPI(
+        title="Khushi ERP System API",
+        description="School Enterprise Resource Planning System",
+        version="1.0.0"
+    )
+    logger.info("✅ FastAPI app initialized successfully")
+
+    # CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    logger.info("✅ CORS middleware added")
+
+    # Add database routing middleware for multi-tenant support
+    @app.middleware("http")
+    async def db_routing_middleware(request, call_next):
+        return await database_routing_middleware(request, call_next)
+    logger.info("✅ Database routing middleware added")
+
+    # Include routers with error handling
+    logger.info("🔗 Including API routers...")
+    try:
+        app.include_router(auth, prefix="/api", tags=["Authentication"])
+        app.include_router(saas_router, prefix="/api/saas", tags=["SaaS Management"])
+        app.include_router(billing_router, prefix="/api/billing", tags=["Billing"])
+        app.include_router(users, prefix="/api/admin", tags=["User Management"])
+        app.include_router(students, prefix="/api", tags=["Students"])
+        app.include_router(fees, prefix="/api", tags=["Fees"])
+        app.include_router(classes, prefix="/api", tags=["Classes & Subjects"])
+        app.include_router(teachers, prefix="/api", tags=["Teachers"])
+        app.include_router(grades, prefix="/api", tags=["Grades"])
+        app.include_router(accounting, prefix="/api", tags=["Accounting"])
+        app.include_router(payments, tags=["Payments"])
+        app.include_router(reports, prefix="/api", tags=["Reports"])
+        app.include_router(root, prefix="/api/root", tags=["Root"])
+        app.include_router(root_admin, prefix="/api/root", tags=["Root Admin Management"])
+        app.include_router(schools, prefix="/api", tags=["Schools"])
+        app.include_router(student_import_export, prefix="/api/students-import-export", tags=["Student Import/Export"])
+        app.include_router(chalans, tags=["Chalans"])
+        app.include_router(fee_categories, tags=["Fee Categories"])
+        app.include_router(class_fee_assignments, tags=["Class Fee Assignments"])
+        app.include_router(notifications, prefix="/api", tags=["Notifications"])
+        app.include_router(fee_payments, tags=["Fee Payments"])
+        app.include_router(accountant, tags=["Accountants"])
+        app.include_router(payment_methods, tags=["Payment Methods"])
+        app.include_router(cash_sessions, tags=["Cash Sessions"])
+        app.include_router(statistics, tags=["Statistics"])
+        app.include_router(attendance, prefix="/api", tags=["Attendance"])
+        app.include_router(whatsapp, tags=["WhatsApp"])
+        app.include_router(face, tags=["Face Recognition"])
+        app.include_router(fee_vouchers_router, prefix="/api/fee-vouchers", tags=["Fee Vouchers"])
+        app.include_router(analytics_router, prefix="/api/analytics", tags=["Analytics"])
+        logger.info("✅ All routers included successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to include routers: {e}")
+        raise
+
+    log_memory()
+    logger.info("🎉 Application initialization completed successfully")
+
+except Exception as e:
+    logger.critical(f"💥 APPLICATION CRASHED AT STARTUP: {e}")
+    logger.critical(f"💥 Error type: {type(e).__name__}")
+    import traceback
+    logger.critical(f"💥 Full traceback:\n{traceback.format_exc()}")
+    log_memory()
+    logger.critical("💥 Exiting due to startup failure")
+    sys.exit(1)
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -305,6 +362,35 @@ async def startup_event():
             logger.info("🔕 Self-ping disabled (no SELF_PING_URL or explicitly disabled)")
     except Exception as e:
         logger.warning(f"⚠️ Failed to start self-ping background task: {e}")
+
+
+# --- Self-ping (keep-alive) background task ---------------------------------
+async def _self_ping_loop(url: str, interval_minutes: int, stop_event: asyncio.Event) -> None:
+    """Periodically ping the given `url` every `interval_minutes` minutes.
+
+    Runs until `stop_event` is set. Logs success (status code) or failure.
+    """
+    interval_seconds = max(1, int(interval_minutes)) * 60
+    client = httpx.AsyncClient(timeout=10.0)
+    try:
+        while not stop_event.is_set():
+            try:
+                resp = await client.get(url)
+                # Avoid passing `extra` keys that conflict with LogRecord internals
+                logger.info(f"SELF-PING: Ping {url} -> {resp.status_code}")
+                logger.debug(f"SELF-PING response headers: {resp.headers}")
+            except Exception as e:
+                # Log warning instead of full stack trace for self-ping timeouts
+                logger.warning(f"SELF-PING failed for {url}: {type(e).__name__}")
+
+            # Wait for the interval or until stop_event is set
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+            except asyncio.TimeoutError:
+                # timeout expired -> continue loop
+                continue
+    finally:
+        await client.aclose()
 
 @app.on_event("shutdown")
 async def shutdown_event():

@@ -4,7 +4,7 @@ from typing import Optional
 from bson.objectid import ObjectId
 from io import BytesIO
 from typing import List, Tuple
-from app.utils.student_id_utils import generate_student_id, validate_student_id_uniqueness
+from app.utils.student_id_utils import generate_student_id, validate_student_id_uniqueness, generate_registration_number
 import logging
 import zipfile
 
@@ -38,6 +38,11 @@ def create_student(student_data: dict) -> Optional[dict]:
         if "student_id" not in student_data:
             student_data["student_id"] = generate_student_id(student_data["admission_year"], db.students, school_id)
             logger.info(f"[SCHOOL:{school_id}] 🆔 Generated student_id: {student_data['student_id']}")
+
+        # Generate registration_number if not provided
+        if "registration_number" not in student_data:
+            student_data["registration_number"] = generate_registration_number(student_data["admission_year"], db.students, school_id)
+            logger.info(f"[SCHOOL:{school_id}] 🔢 Generated registration_number: {student_data['registration_number']}")
 
         # Validate uniqueness within school
         if not validate_student_id_uniqueness(student_data["student_id"], db.students, school_id):
@@ -87,6 +92,7 @@ def get_all_students(filters: dict = None, school_id: str = None) -> list:
         student.setdefault('admission_date', datetime.utcnow().strftime('%Y-%m-%d'))
         student.setdefault('admission_year', datetime.utcnow().year)
         student.setdefault('roll_number', '')
+        student.setdefault('registration_number', '')  # For backwards compatibility
         student.setdefault('academic_year', f"{datetime.utcnow().year}-{datetime.utcnow().year+1}")
         student.setdefault('subjects', student.get('subjects', []))
         student.setdefault('assigned_teacher_ids', student.get('assigned_teacher_ids', []))

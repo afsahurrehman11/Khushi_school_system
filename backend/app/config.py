@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     log_format: str = os.environ.get("LOG_FORMAT", "text")
     # Whether to show HTTP access logs from Uvicorn
     access_log: bool = os.environ.get("LOG_ACCESS", "true").lower() in ("1", "true", "yes")
+    
+    # Face Recognition App Configuration
+    face_recognition_url: str = os.environ.get("FACE_RECOGNITION_URL", "http://localhost:5000")
+    face_recognition_api_key: Optional[str] = os.environ.get("FACE_RECOGNITION_API_KEY", None)
+    face_recognition_enabled: bool = os.environ.get("FACE_RECOGNITION_ENABLED", "true").lower() in ("1", "true", "yes")
 
     # Cloudinary Configuration
     cloudinary_cloud_name: str = os.environ.get("CLOUDINARY_CLOUD_NAME", "")
@@ -110,7 +115,8 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Ensure `settings.database_name` is set. Prefer explicit setting, then URI
-# path, then fall back to 'khushi_school' (the single school database).
+# path. If no database is configured, leave it unset (None) so startup
+# can opt-out of creating a single-school DB automatically.
 if not settings.database_name:
     parsed = _db_name_from_uri(settings.mongo_uri)
-    settings.database_name = parsed or "khushi_school"
+    settings.database_name = parsed or None

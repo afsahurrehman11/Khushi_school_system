@@ -395,7 +395,7 @@ async def _run_import_background(import_id: str, user_email: str, school_id: str
                                     "face_embedding": embedding,
                                     "embedding_status": "generated",
                                     "embedding_generated_at": datetime.utcnow(),
-                                    "embedding_model": "VGGFace2",
+                                    "embedding_model": "VGGFace",
                                     "embedding_version": "1.0",
                                 }
                             }

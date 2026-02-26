@@ -6,8 +6,10 @@ from bson import ObjectId
 import base64
 from io import BytesIO
 from PIL import Image
+import asyncio
 
 from app.services.image_service import ImageService
+from app.services.face_enrollment_service import FaceEnrollmentService
 from app.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -85,10 +87,90 @@ class StudentImageService:
             
             logger.info(f"🟢 [UPLOAD] Image stored for student {student_id}")
             
+            # === AUTO-ENROLLMENT: Face Recognition App & Embedding Generation ===
+            # Start both processes in parallel for efficiency
+            enrollment_task = None
+            embedding_task = None
+            
+            # Get student details for enrollment
+            student = student_collection.find_one(
+                query,
+                {"full_name": 1, "student_id": 1}
+            )
+            
+            if student:
+                student_name = student.get("full_name", "Unknown Student")
+                student_reg_id = student.get("student_id", student_id)
+                
+                # 1. Enroll in external face recognition app (non-blocking)
+                try:
+                    enrollment_result = await FaceEnrollmentService.enroll_person(
+                        person_id=student_reg_id,
+                        name=student_name,
+                        role='student',
+                        image_blob=image_blob,
+                        image_type=image_type,
+                        school_id=school_id  # Pass school_id for unique ID
+                    )
+                    
+                    if enrollment_result.get("success"):
+                        logger.info(f"✅ [FACE] Student {student_id} enrolled in face recognition system")
+                    else:
+                        logger.warning(f"⚠️ [FACE] Student {student_id} enrollment failed: {enrollment_result.get('error', 'Unknown error')}")
+                except Exception as e:
+                    logger.error(f"🔴 [FACE] Enrollment exception for {student_id}: {str(e)}")
+                
+                # 2. Generate embedding for main database (non-blocking)
+                try:
+                    embedding, emb_status = await FaceEnrollmentService.generate_embedding_for_person(
+                        image_blob=image_blob,
+                        person_id=student_reg_id,
+                        person_type='student'
+                    )
+                    
+                    if emb_status == "generated" and embedding:
+                        # Update student with embedding
+                        student_collection.update_one(
+                            {"_id": ObjectId(student_id)},
+                            {
+                                "$set": {
+                                    "face_embedding": embedding,
+                                    "embedding_model": "VGGFace",
+                                    "embedding_generated_at": datetime.utcnow(),
+                                    "embedding_status": "generated",
+                                    "updated_at": datetime.utcnow()
+                                }
+                            }
+                        )
+                        logger.info(f"✅ [EMBEDDING] Generated and stored embedding for {student_id}")
+                    else:
+                        # Update status to reflect failure
+                        student_collection.update_one(
+                            {"_id": ObjectId(student_id)},
+                            {
+                                "$set": {
+                                    "embedding_status": emb_status,
+                                    "updated_at": datetime.utcnow()
+                                }
+                            }
+                        )
+                        logger.warning(f"⚠️ [EMBEDDING] Embedding generation {emb_status} for {student_id}")
+                except Exception as e:
+                    logger.error(f"🔴 [EMBEDDING] Exception for {student_id}: {str(e)}")
+                    student_collection.update_one(
+                        {"_id": ObjectId(student_id)},
+                        {
+                            "$set": {
+                                "embedding_status": "failed",
+                                "updated_at": datetime.utcnow()
+                            }
+                        }
+                    )
+            
             return {
                 "success": True,
                 "image_type": image_type,
-                "message": "Image uploaded successfully. Face embedding pending generation."
+                "message": "Image uploaded successfully. Face registration initiated."
             }
             
         except Exception as e:
@@ -150,6 +232,10 @@ class StudentImageService:
             if school_id:
                 query["school_id"] = school_id
             
+            # Get student ID for face recognition app deletion
+            student = db.students.find_one(query, {"student_id": 1})
+            student_reg_id = student.get("student_id") if student else None
+            
             result = db.students.update_one(
                 query,
                 {
@@ -168,6 +254,14 @@ class StudentImageService:
             
             if result.modified_count == 0:
                 return {"success": False, "error": "Student not found"}
+            
+            # Delete from face recognition app (non-blocking, best effort)
+            if student_reg_id:
+                try:
+                    await FaceEnrollmentService.delete_person(student_reg_id, school_id=school_id)
+                    logger.info(f"✅ [FACE] Deleted student {student_reg_id} from face recognition app")
+                except Exception as e:
+                    logger.warning(f"⚠️ [FACE] Failed to delete {student_reg_id} from face app: {str(e)}")
             
             return {"success": True, "message": "Image deleted successfully"}
             

@@ -4,7 +4,7 @@
  * Uses centralized global_users for authentication
  */
 
-import { LoginRequest, LoginResponse, User, TokenPayload } from '../types';
+import { LoginRequest, LoginResponse, AuthUser, TokenPayload } from '../types';
 import logger from '../utils/logger';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000/api' : 'https://khushi-school-system.onrender.com/api');
@@ -104,7 +104,7 @@ class AuthService {
   /**
    * Set user
    */
-  setUser(user: User): void {
+  setUser(user: AuthUser): void {
     localStorage.setItem(this.userKey, JSON.stringify(user));
   }
 

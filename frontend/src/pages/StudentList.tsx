@@ -14,6 +14,9 @@ import ExportModal from '../features/students/components/ExportModal';
 import ImportHistoryModal from '../features/students/components/ImportHistoryModal';
 import AddStudentModal from '../features/students/components/AddStudentModal';
 import { downloadSampleTemplate } from '../features/students/services/importExportApi';
+import { classesService } from '../services/classes';
+import { Class } from '../types';
+import { entitySync, useEntitySync } from '../utils/entitySync';
 import {
   Student,
   getAllClasses,
@@ -34,6 +37,10 @@ const StudentList: React.FC = () => {
   const [exportOpen, setExportOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  // API-fetched classes
+  const [apiClasses, setApiClasses] = useState<Class[]>([]);
+  const [loadingClasses, setLoadingClasses] = useState(false);
+
   // Check if current user is Admin (import/export is Admin-only, NOT Root)
   const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => {
@@ -53,6 +60,38 @@ const StudentList: React.FC = () => {
     const interval = setInterval(checkAdmin, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Load classes from API
+  useEffect(() => {
+    const loadClasses = async () => {
+      setLoadingClasses(true);
+      try {
+        const response = await classesService.getClasses();
+        setApiClasses(response.items || []);
+      } catch (error) {
+        console.error('Error loading classes:', error);
+      } finally {
+        setLoadingClasses(false);
+      }
+    };
+    loadClasses();
+  }, []);
+
+  // Listen for class changes to refresh the class list
+  useEntitySync('class', (event) => {
+    if (event.type === 'created' || event.type === 'updated' || event.type === 'deleted') {
+      // Refresh classes when any class changes
+      const loadClasses = async () => {
+        try {
+          const response = await classesService.getClasses();
+          setApiClasses(response.items || []);
+        } catch (error) {
+          console.error('Error refreshing classes after sync:', error);
+        }
+      };
+      loadClasses();
+    }
+  });
 
   const allClasses = useMemo(() => getAllClasses(), []);
   const unassignedStudents = useMemo(() => getUnassignedStudents(), []);
@@ -78,6 +117,21 @@ const StudentList: React.FC = () => {
 
   // Calculate stats for each class
   const classStats = useMemo(() => {
+    // Use API classes if available, otherwise fall back to local classes
+    if (apiClasses.length > 0) {
+      return apiClasses.map((cls) => {
+        const className = cls.section ? `${cls.name}-${cls.section}` : cls.name;
+        const students = getStudentsByClass(className);
+        return {
+          className: cls.name,
+          section: cls.section || '',
+          fullName: className,
+          studentCount: students.length,
+        };
+      });
+    }
+    
+    // Fallback to local data if API hasn't loaded yet
     return allClasses.map((className) => {
       const students = getStudentsByClass(className);
       const [grade, section] = className.split('-');
@@ -88,7 +142,7 @@ const StudentList: React.FC = () => {
         studentCount: students.length,
       };
     });
-  }, [allClasses]);
+  }, [apiClasses, allClasses]);
 
   const handleClassClick = (className: string) => {
     setSelectedClass(className);

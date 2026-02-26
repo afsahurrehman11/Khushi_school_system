@@ -17,6 +17,9 @@ class TeacherSchema(BaseModel):
     assigned_subjects: Optional[List[str]] = None  # Subject IDs
     experience: Optional[str] = None
     # Profile image fields
+    # Profile image fields (stored as base64 blob in-document)
+    profile_image_blob: Optional[str] = None  # Base64 encoded image
+    profile_image_type: Optional[str] = None  # MIME type (image/jpeg, image/png)
     profile_image_url: Optional[str] = None
     profile_image_public_id: Optional[str] = None
     image_uploaded_at: Optional[datetime] = None
@@ -36,14 +39,20 @@ class TeacherInDB(TeacherSchema):
 
 
 class TeacherCreate(BaseModel):
-    school_id: str
+    school_id: Optional[str] = None  # Optional - will be injected by router
     name: str
+    teacher_id: Optional[str] = None
+    teacherId: Optional[str] = None  # Alias for frontend compatibility
     cnic: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
     qualification: Optional[str] = None
+    experience: Optional[str] = None
     assigned_classes: Optional[List[str]] = None
     assigned_subjects: Optional[List[str]] = None
+    subjects: Optional[List[str]] = None  # Alias for frontend compatibility
+    dateOfJoining: Optional[str] = None  # Accept but ignore
+    date_of_joining: Optional[str] = None  # Accept but ignore
 
 
 class TeacherUpdate(BaseModel):

@@ -20,6 +20,7 @@ class ContactInfo(BaseModel):
 class StudentSchema(BaseModel):
     school_id: str  # School isolation
     student_id: str
+    registration_number: Optional[str] = None  # Auto-generated REG-YYYY-#### format
     full_name: str
     gender: str
     date_of_birth: str  # YYYY-MM-DD format
@@ -57,6 +58,7 @@ class StudentUpdate(BaseModel):
     full_name: Optional[str] = None
     gender: Optional[str] = None
     admission_year: Optional[int] = None
+    registration_number: Optional[str] = None  # Allow update of registration number
     class_id: Optional[str] = None
     section: Optional[str] = None
     roll_number: Optional[str] = None

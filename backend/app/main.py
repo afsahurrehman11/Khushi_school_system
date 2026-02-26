@@ -128,9 +128,12 @@ async def _self_ping_loop(url: str, interval_minutes: int, stop_event: asyncio.E
         while not stop_event.is_set():
             try:
                 resp = await client.get(url)
-                logger.info("SELF-PING", extra={"msg": f"Ping {url} -> {resp.status_code}"})
+                # Avoid passing `extra` keys that conflict with LogRecord internals
+                logger.info(f"SELF-PING: Ping {url} -> {resp.status_code}")
+                logger.debug(f"SELF-PING response headers: {resp.headers}")
             except Exception as e:
-                logger.warning(f"SELF-PING failed for {url}: {e}")
+                # Log warning instead of full stack trace for self-ping timeouts
+                logger.warning(f"SELF-PING failed for {url}: {type(e).__name__}")
 
             # Wait for the interval or until stop_event is set
             try:
@@ -250,38 +253,42 @@ async def startup_event():
     else:
         logger.warning("⚠️ Skipping collection creation because the database is not connected.")
 
-    # Face recognition model & embedding cache: try disk cache first, else load from DB and persist
-    try:
-        # Attempt to load embeddings from disk cache
+    # Face recognition model & embedding cache: Skip in multi-tenant mode, load in single-tenant mode
+    # In multi-tenant, face embeddings are loaded per-school on-demand
+    if db_connected and getattr(settings, "database_name", None):
         try:
-            counts = _face_service_module.load_cache_from_disk()
-            if (counts.get('students', 0) + counts.get('employees', 0)) > 0:
-                logger.info(f"✅ Face embeddings loaded from disk cache: {counts}")
-            else:
-                # Load from DB per-school and then persist
-                try:
-                    db = get_db()
-                    schools = list(db.schools.find()) if 'schools' in db.list_collection_names() else []
-                    if not schools:
-                        sample = db.users.find_one({"school_id": {"$exists": True}})
-                        if sample and sample.get('school_id'):
-                            schools = [{'_id': sample.get('school_id')}]
+            # Single-tenant mode: try disk cache first, else load from DB and persist
+            try:
+                counts = _face_service_module.load_cache_from_disk()
+                if (counts.get('students', 0) + counts.get('employees', 0)) > 0:
+                    logger.info(f"✅ Face embeddings loaded from disk cache: {counts}")
+                else:
+                    # Load from DB per-school and then persist
+                    try:
+                        db = get_db()
+                        schools = list(db.schools.find()) if 'schools' in db.list_collection_names() else []
+                        if not schools:
+                            sample = db.users.find_one({"school_id": {"$exists": True}})
+                            if sample and sample.get('school_id'):
+                                schools = [{'_id': sample.get('school_id')}]
 
-                    for s in schools:
-                        sid = str(s.get('_id'))
-                        face_service = _face_service_module.FaceRecognitionService(db)
-                        await face_service.load_embeddings_to_cache(sid)
+                        for s in schools:
+                            sid = str(s.get('_id'))
+                            face_service = _face_service_module.FaceRecognitionService(db)
+                            await face_service.load_embeddings_to_cache(sid)
 
-                    # Persist to disk for faster future startups
-                    saved = _face_service_module.dump_cache_to_disk()
-                    logger.info(f"✅ Face embeddings cached to disk: {saved}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to load embeddings from DB or persist cache: {e}")
+                        # Persist to disk for faster future startups
+                        saved = _face_service_module.dump_cache_to_disk()
+                        logger.info(f"✅ Face embeddings cached to disk: {saved}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to load embeddings from DB or persist cache: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️ Face cache disk load error: {e}")
         except Exception as e:
-            logger.warning(f"⚠️ Face cache disk load error: {e}")
-    except Exception as e:
-        # Importing or loading face services may fail if dependencies are missing; log and continue.
-        logger.warning(f"⚠️ Skipping face cache load on startup: {e}")
+            # Importing or loading face services may fail if dependencies are missing; log and continue.
+            logger.warning(f"⚠️ Skipping face cache load on startup: {e}")
+    else:
+        logger.info("ℹ️ Multi-tenant mode: Skipping face cache preload (loaded on-demand per school)")
 
     logger.info("✅ All routers registered successfully")
     logger.info(f"📡 API running on configured origins: {settings.allowed_origins}")

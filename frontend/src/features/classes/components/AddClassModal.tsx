@@ -4,6 +4,7 @@ import Button from '../../../components/Button';
 import { Loader2 } from 'lucide-react';
 import { createClass, updateClass, getClasses } from '../services/classesApi';
 import { getSubjects } from '../../subjects/services/subjectsApi';
+import { entitySync } from '../../../utils/entitySync';
 import api from '../../../utils/api';
 import logger from '../../../utils/logger';
 
@@ -156,9 +157,9 @@ const AddClassModal: React.FC<Props> = ({ isOpen, onClose, cls, onSaved }) => {
   const validateClassMeta = () => {
     const errs: { name?: string; section?: string } = {};
     if (!isNonEmptyString(name)) errs.name = 'Enter class name';
-    if (!isNonEmptyString(section)) errs.section = 'Enter section';
 
-    if (!errs.section && isNonEmptyString(section)) {
+    // section is optional now; if supplied, validate uniqueness
+    if (isNonEmptyString(section)) {
       const key = normalizeInput(name);
       const secNorm = normalizeInput(section);
       const existingSecs = classSectionsMap[key] || [];
@@ -193,8 +194,10 @@ const AddClassModal: React.FC<Props> = ({ isOpen, onClose, cls, onSaved }) => {
       if (cls && (cls.id || cls._id)) {
         const id = cls.id || cls._id;
         await updateClass(id, payload);
+        entitySync.emitClassUpdated(id, payload);
       } else {
-        await createClass(payload);
+        const response = await createClass(payload);
+        entitySync.emitClassCreated(response.id || response._id, response);
       }
       onSaved?.(); onClose();
     } catch (err) {
@@ -213,7 +216,7 @@ const AddClassModal: React.FC<Props> = ({ isOpen, onClose, cls, onSaved }) => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+        <div className="grid grid-cols-1 gap-4 items-start">
           <div>
             <label className="block text-sm font-medium invisible">Class</label>
             <div className="mt-2">
@@ -238,19 +241,19 @@ const AddClassModal: React.FC<Props> = ({ isOpen, onClose, cls, onSaved }) => {
               )}
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium">Section</label>
-            <div className="mt-2">
-              <>
-                <input
-                  value={section}
-                  onChange={(e) => { setSection(e.target.value); if (classErrors.section) setClassErrors(prev => { const c = { ...prev }; delete c.section; return c; }); }}
-                  className={`w-full max-w-md h-10 px-3 border rounded ${classErrors.section ? 'border-red-500' : ''}`}
-                />
-                <div className="h-4 text-xs mt-1">{classErrors.section ? <span className="text-red-600">{classErrors.section}</span> : <span className="text-transparent">placeholder</span>}</div>
-              </>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">Section names are unique within a class (e.g. A, B, 1).</p>
+        </div>
+
+        {/* Section Input */}
+        <div>
+          <label className="block text-sm font-medium">Section</label>
+          <div className="mt-2">
+            <input
+              placeholder="e.g. A, B, C"
+              value={section}
+              onChange={(e) => { setSection(e.target.value); if (classErrors.section) setClassErrors(prev => { const c = { ...prev }; delete c.section; return c; }); }}
+              className={`w-full max-w-md h-10 px-3 border rounded ${classErrors.section ? 'border-red-500' : ''}`}
+            />
+            <div className="h-4 text-xs mt-1">{classErrors.section ? <span className="text-red-600">{classErrors.section}</span> : <span className="text-transparent">placeholder</span>}</div>
           </div>
         </div>
 

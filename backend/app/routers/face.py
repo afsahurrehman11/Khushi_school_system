@@ -331,7 +331,7 @@ async def get_employees_for_face(
             "profile_image_url": teacher.get("profile_image_url"),
             "embedding_status": teacher.get("embedding_status", "pending"),
             "embedding_generated_at": teacher.get("embedding_generated_at"),
-            "has_image": teacher.get("profile_image_url") is not None
+            "has_image": (teacher.get("profile_image_url") is not None) or (teacher.get("profile_image_blob") is not None)
         })
     
     return {"employees": employees}

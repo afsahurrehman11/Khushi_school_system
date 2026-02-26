@@ -111,7 +111,11 @@ def ensure_client_connected(retries: int = 3, delay: float = 2.0):
     return None
 
 def get_db():
-    """Get database instance. Will attempt to connect lazily and raise if it cannot."""
+    """Get database instance. Will attempt to connect lazily and raise if it cannot.
+    
+    In multi-tenant mode (no DATABASE_NAME), returns saas_root_db as fallback.
+    School-specific databases are accessed via middleware context.
+    """
     c = ensure_client_connected()
     if c is None:
         raise RuntimeError("Database is not connected. Check MONGO_URI or FALLBACK_MONGO_URI and network/DNS settings.")
@@ -126,6 +130,13 @@ def get_db():
         # If context is not available or middleware not loaded, fall back to default
         pass
     
+    # Multi-tenant mode: Return saas_root_db when no DATABASE_NAME configured
+    # This allows startup code to work without requiring a default school database
+    if not getattr(settings, "database_name", None):
+        logger.debug("Multi-tenant mode: Using saas_root_db as fallback database")
+        from app.services.saas_db import SAAS_ROOT_DB_NAME
+        return c[SAAS_ROOT_DB_NAME]
+
     return c[settings.database_name]
 
 def close_db():

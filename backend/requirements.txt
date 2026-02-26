@@ -19,3 +19,7 @@ tf-keras
 httpx>=0.24.0
 reportlab>=4.0.0
 matplotlib>=3.8.0
+
+# PyTorch for FaceNet (CPU build). Adjust version/index if you need CUDA builds.
+torch>=2.2.0
+torchvision>=0.17.0

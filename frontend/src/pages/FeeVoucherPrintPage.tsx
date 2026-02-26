@@ -11,7 +11,6 @@ import {
   FileText
 } from 'lucide-react';
 import { feeVouchersService, ClassWithFees, StudentForVoucher } from '../services/feeVouchers';
-import { authService } from '../services/auth';
 
 type ViewMode = 'classes' | 'students';
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Plus, Trash2, Eye, EyeOff, AlertCircle, CheckCircle, Users, 
-  Building2, HardDrive, RefreshCw, Power, PowerOff, Pause,
+  Building2, HardDrive, RefreshCw, Power, Pause,
   Search, Key, BarChart3, Database, Loader2, Receipt,
   LogOut, Calendar, DollarSign, AlertTriangle
 } from 'lucide-react';
@@ -108,6 +108,69 @@ const StorageChart: React.FC<{ history: SchoolStorageHistory[] }> = ({ history }
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+};
+
+// ================= Pie Preview Component (small right-side preview) =================
+const PiePreview: React.FC<{ history: SchoolStorageHistory[] }> = ({ history }) => {
+  // Compute latest storage per school
+  const latest = history.map((s, idx) => {
+    const v = s.history && s.history.length ? s.history[s.history.length - 1].storage_bytes : 0;
+    return { name: s.school_name, value: v, color: ['#374151','#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6'][idx % 6] };
+  });
+  const total = latest.reduce((a, b) => a + b.value, 0);
+
+  if (!latest.length || total === 0) {
+    return (
+      <div className="bg-slate-800/50 rounded-xl p-4 flex flex-col items-end">
+        <h4 className="text-sm font-semibold text-white">Storage Preview</h4>
+        <p className="text-slate-400 text-xs">No storage data</p>
+      </div>
+    );
+  }
+
+  // Build conic-gradient stops
+  let acc = 0;
+  const stops = latest.map((d) => {
+    const pct = (d.value / total) * 100;
+    const start = acc;
+    acc += pct;
+    return `${d.color} ${start}% ${acc}%`;
+  }).join(', ');
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024; const sizes = ['B','KB','MB','GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  return (
+    <div className="bg-slate-800/50 rounded-xl p-4 flex flex-col items-end">
+      <div style={{ width: 120 }} className="flex items-center gap-3">
+        <div
+          className="rounded-full"
+          style={{
+            width: 72,
+            height: 72,
+            background: `conic-gradient(${stops})`
+          }}
+        />
+        <div className="text-right">
+          <div className="text-sm font-semibold text-white">{formatBytes(total)}</div>
+          <div className="text-xs text-slate-400">Total Storage</div>
+        </div>
+      </div>
+      <div className="mt-3 w-full space-y-1">
+        {latest.slice(0,4).map((d) => (
+          <div key={d.name} className="flex items-center justify-end gap-2">
+            <div className="w-3 h-3 rounded-full" style={{ background: d.color }} />
+            <div className="text-xs text-slate-300 w-28 truncate text-right">{d.name}</div>
+            <div className="text-xs text-slate-400">{formatBytes(d.value)}</div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -225,9 +288,7 @@ const SchoolTable: React.FC<{
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase tracking-wider">
                 Status
               </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                Plan
-              </th>
+              {/* Plan column removed intentionally - single plan type only */}
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase tracking-wider">
                 Stats
               </th>
@@ -254,9 +315,7 @@ const SchoolTable: React.FC<{
                 <td className="px-4 py-4">
                   {getStatusBadge(school.status)}
                 </td>
-                <td className="px-4 py-4">
-                  {getPlanBadge(school.plan)}
-                </td>
+                {/* Plan column removed - no longer displayed */}
                 <td className="px-4 py-4">
                   <div className="text-sm">
                     <p className="text-slate-300">
@@ -1346,51 +1405,20 @@ const RootAdminDashboard: React.FC = () => {
           )}
         </div>
 
-        {/* Charts Row */}
+        {/* Charts Row (Storage left, small pie preview right) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          {/* Plan Distribution */}
-          <div className="bg-slate-800/50 rounded-xl p-6">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-blue-500" />
-              Plan Distribution
-            </h3>
-            {loading.stats ? (
-              <LoadingSpinner text="Loading..." />
-            ) : (
-              <div className="space-y-3">
-                {[
-                  { name: 'Trial', count: stats?.trial_schools || 0, color: 'bg-slate-500' },
-                  { name: 'Basic', count: stats?.basic_schools || 0, color: 'bg-blue-500' },
-                  { name: 'Standard', count: stats?.standard_schools || 0, color: 'bg-indigo-500' },
-                  { name: 'Premium', count: stats?.premium_schools || 0, color: 'bg-purple-500' },
-                  { name: 'Enterprise', count: stats?.enterprise_schools || 0, color: 'bg-amber-500' },
-                ].map((plan) => (
-                  <div key={plan.name} className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full ${plan.color}`} />
-                    <span className="text-slate-300 w-24">{plan.name}</span>
-                    <div className="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full ${plan.color} rounded-full transition-all duration-500`}
-                        style={{ 
-                          width: `${stats?.total_schools ? (plan.count / stats.total_schools) * 100 : 0}%` 
-                        }}
-                      />
-                    </div>
-                    <span className="text-slate-400 text-sm w-8 text-right">{plan.count}</span>
-                  </div>
-                ))}
+          <div>
+            {loading.storage ? (
+              <div className="bg-slate-800/50 rounded-xl p-6">
+                <LoadingSpinner text="Loading storage data..." />
               </div>
+            ) : (
+              <StorageChart history={storageHistory} />
             )}
           </div>
-
-          {/* Storage Chart */}
-          {loading.storage ? (
-            <div className="bg-slate-800/50 rounded-xl p-6">
-              <LoadingSpinner text="Loading storage data..." />
-            </div>
-          ) : (
-            <StorageChart history={storageHistory} />
-          )}
+          <div className="flex items-start justify-end">
+            <PiePreview history={storageHistory} />
+          </div>
         </div>
 
         {/* Schools Table Section */}

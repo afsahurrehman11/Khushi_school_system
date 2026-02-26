@@ -55,21 +55,21 @@ const FeePage: React.FC = () => {
     setLoading(true);
     try {
       // Fetch classes with fee assignments and student counts
-      const classesData = await api.get('/api/classes');
+      const classesData = await api.get('/classes');
 
       // Enrich with fee categories and student counts
       const enrichedClasses = await Promise.all(
         classesData.map(async (cls: any) => {
           // Parallel fetch fee assignment and students
           const [feeData, studentsData] = await Promise.allSettled([
-            api.get(`/api/class-fee-assignments/classes/${cls.id}/active`).catch(() => null),
-            api.get(`/api/students?class_id=${cls.id}`).catch(() => []),
+            api.get(`/class-fee-assignments/classes/${cls.id}/active`).catch(() => null),
+            api.get(`/students?class_id=${cls.id}`).catch(() => []),
           ]);
 
           let feeCategory = null;
           if (feeData.status === 'fulfilled' && feeData.value?.category_id) {
             try {
-                  const catData = await api.get(`/api/fee-categories/${feeData.value.category_id}`);
+                  const catData = await api.get(`/fee-categories/${feeData.value.category_id}`);
                     // compute total amount from components if not directly provided
                     let totalAmount = 0;
                     if (typeof catData.total_amount === 'number') totalAmount = catData.total_amount;
@@ -95,7 +95,7 @@ const FeePage: React.FC = () => {
 
             // Parallel fetch payment summaries for all students
             const summaryPromises = students.map((student: any) =>
-              api.get(`/api/fee-payments/student/${student.id}/summary`).catch(() => ({ status: 'unpaid' }))
+              api.get(`/fee-payments/student/${student.id}/summary`).catch(() => ({ status: 'unpaid' }))
             );
             const summaries = await Promise.allSettled(summaryPromises);
 
@@ -146,7 +146,7 @@ const FeePage: React.FC = () => {
             status: 'unpaid' as const,
           };
           try {
-            summary = await api.get(`/api/fee-payments/student/${student.id}/summary`);
+            summary = await api.get(`/fee-payments/student/${student.id}/summary`);
           } catch (e) {
             // Keep default
           }
@@ -168,7 +168,7 @@ const FeePage: React.FC = () => {
       setSelectedClass(classData);
       // Load saved payment method names for later use
       try {
-        const methods = await api.get('/api/payment-methods');
+        const methods = await api.get('/payment-methods');
         setSavedPaymentMethods(methods.map((m: any) => m.name));
       } catch (err) {
         // non-critical
@@ -218,7 +218,7 @@ const FeePage: React.FC = () => {
 
     setSubmittingPayment(true);
     try {
-      await api.post('/api/fee-payments', {
+      await api.post('/fee-payments', {
         student_id: selectedStudent.id,
         class_id: selectedClass.id,
         amount_paid: amount,
@@ -240,7 +240,7 @@ const FeePage: React.FC = () => {
 
       // Refresh current student data
       try {
-        const summary = await api.get(`/api/fee-payments/student/${selectedStudent.id}/summary`);
+        const summary = await api.get(`/fee-payments/student/${selectedStudent.id}/summary`);
         setSelectedStudent(prev => prev ? {
           ...prev,
           fee_status: summary.status as 'paid' | 'partial' | 'unpaid',

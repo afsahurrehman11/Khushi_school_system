@@ -60,13 +60,13 @@ export interface LoginRequest {
 export interface LoginResponse {
   access_token: string;
   token_type: string;
-  user: User;
+  user: AuthUser;
 }
 
 /**
- * User Type (from auth response)
+ * Auth User Type (from auth response)
  */
-export interface User {
+export interface AuthUser {
   id: string;
   email: string;
   name: string;
@@ -481,7 +481,7 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   token: string;
-  user: User;
+  user: AuthUser;
 }
 
 export interface TokenPayload {

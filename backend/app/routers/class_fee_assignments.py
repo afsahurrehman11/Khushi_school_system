@@ -23,7 +23,7 @@ async def list_fee_assignments(
     logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Listing fee assignments")
     
     try:
-        assignments = get_all_fee_assignments(school_id=school_id)
+        assignments = get_all_fee_assignments()
         logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(assignments)} fee assignments")
         return assignments
     except Exception as e:
@@ -41,7 +41,7 @@ async def get_class_active_category(
     logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching active category for class {class_id}")
     
     try:
-        assignment = get_active_category_for_class(class_id, school_id=school_id)
+        assignment = get_active_category_for_class(class_id)
         if not assignment:
             logger.info(f"[SCHOOL:{school_id}] No active fee category for class {class_id}")
             return {"class_id": class_id, "category_id": None, "message": "No active fee category assigned"}
@@ -63,7 +63,7 @@ async def get_assignment_history(
     logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching assignment history for class {class_id}")
     
     try:
-        history = get_class_fee_assignment_history(class_id, school_id=school_id)
+        history = get_class_fee_assignment_history(class_id)
         logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(history)} historical assignments")
         return history
     except Exception as e:
@@ -81,7 +81,7 @@ async def get_category_usage(
     logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching classes using category {category_id}")
     
     try:
-        classes = get_classes_using_category(category_id, school_id=school_id)
+        classes = get_classes_using_category(category_id)
         logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(classes)} classes")
         return classes
     except Exception as e:
@@ -103,7 +103,6 @@ async def assign_category_to_class(
             class_id=assignment.class_id,
             category_id=assignment.category_id,
             assigned_by=current_user.get("id"),
-            school_id=school_id,
             apply_to_existing=assignment.apply_to_existing if hasattr(assignment, 'apply_to_existing') else False
         )
         
@@ -138,8 +137,7 @@ async def update_category_assignment(
         result = update_class_fee_assignment(
             assignment_id=assignment_id,
             category_id=update_data.category_id,
-            assigned_by=current_user.get("id"),
-            school_id=school_id
+            assigned_by=current_user.get("id")
         )
         
         if not result:
@@ -165,7 +163,7 @@ async def remove_category_from_class(
     logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Removing fee category from class {class_id}")
     
     try:
-        success = remove_fee_category_from_class(class_id, school_id=school_id)
+        success = remove_fee_category_from_class(class_id)
         if not success:
             logger.error(f"[SCHOOL:{school_id}] ❌ No active assignment found for class")
             raise HTTPException(status_code=404, detail="No active assignment found")

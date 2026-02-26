@@ -10,8 +10,7 @@ import {
   SchoolStorageHistory,
   SchoolPlan,
   SchoolStatus,
-  SchoolCreatedResponse,
-  LoginResponse
+  SchoolCreatedResponse
 } from '../types';
 import { authService } from './auth';
 import logger from '../utils/logger';

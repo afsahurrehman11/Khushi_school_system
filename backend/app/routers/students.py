@@ -9,12 +9,15 @@ from app.services.student import import_students_from_workbook_bytes, export_stu
 from app.services.student_image_service import StudentImageService
 from app.services.image_service import ImageService
 from app.services.embedding_job import BackgroundEmbeddingService
-from fastapi import UploadFile, File, Form
+from fastapi import UploadFile, File, Form, Response
 from fastapi.responses import StreamingResponse
 from app.dependencies.auth import check_permission
 from datetime import datetime
 import logging
 import json
+import asyncio
+from app.database import get_db
+from bson import ObjectId
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +177,7 @@ async def create_student_with_image(
         # Process image first if provided - store as base64 blob
         image_blob = None
         image_type = None
+        image_warning = None
         
         if image and image.filename:
             logger.info(f"🔵 [UPLOAD] Processing image: {image.filename}")
@@ -181,21 +185,22 @@ async def create_student_with_image(
             # Read and validate image
             image_content = await image.read()
             if not image_content:
-                logger.error("🔴 [UPLOAD] Empty image file")
-                raise HTTPException(status_code=400, detail="Empty image file")
-            
-            # Process and convert to base64 blob
-            image_blob, image_type, error = ImageService.process_and_store(
-                image_content,
-                max_dimension=800,
-                quality=85
-            )
-            
-            if error:
-                logger.error(f"🔴 [UPLOAD] Image processing failed: {error}")
-                raise HTTPException(status_code=400, detail=error)
-            
-            logger.info(f"🟢 [UPLOAD] Image processed: {image.filename}")
+                logger.warning("🔴 [UPLOAD] Empty image file - continuing without image")
+                image_warning = "Empty image file; registration completed without image."
+            else:
+                # Process and convert to base64 blob
+                image_blob, image_type, error = ImageService.process_and_store(
+                    image_content,
+                    max_dimension=800,
+                    quality=85
+                )
+                
+                if error:
+                    # Do NOT abort creation; log and continue without image
+                    logger.warning(f"🔴 [UPLOAD] Image processing failed: {error} - continuing without image")
+                    image_warning = "Student image could not be uploaded. Registration completed without the image."
+                else:
+                    logger.info(f"🟢 [UPLOAD] Image processed: {image.filename}")
         
         # Normalize keys
         if 'name' in data and 'full_name' not in data:
@@ -238,6 +243,35 @@ async def create_student_with_image(
             raise HTTPException(status_code=400, detail="Failed to create student. Student ID may already exist.")
         
         logger.info(f"🟢 [STUDENT] Created: {student['student_id']}")
+
+        # If image processing succeeded earlier, attach image fields to the created student document
+        if image_blob and student.get('id'):
+            try:
+                db = get_db()
+                db.students.update_one(
+                    {"_id": ObjectId(student['id'])},
+                    {"$set": {
+                        'profile_image_blob': image_blob,
+                        'profile_image_type': image_type,
+                        'image_uploaded_at': datetime.utcnow(),
+                        'embedding_status': 'pending'
+                    }}
+                )
+                
+                # Trigger face embedding generation in background
+                asyncio.create_task(BackgroundEmbeddingService.generate_embedding_for_student(student['id']))
+                logger.info(f"🟢 [EMBEDDING] Triggered face embedding generation for student {student['student_id']}")
+                
+            except Exception as e:
+                logger.error(f"🔴 [STUDENT] Failed to attach image after creation: {str(e)}")
+                image_warning = image_warning or "Student created but image attachment failed."
+
+        # If there was an image warning, expose it via a response header so frontend can show a friendly message
+        if image_warning:
+            # Truncate header length to reasonable size
+            resp_headers = {"X-Image-Warning": image_warning[:240]}
+            return Response(content=json.dumps(student, default=str), media_type="application/json", headers=resp_headers)
+
         return student
         
     except HTTPException:

@@ -228,6 +228,7 @@ async def update_school(
         return SaaSSchoolResponse(
             id=school.id,
             school_id=school.school_id,
+            school_slug=school.school_slug,
             school_name=school.school_name,
             database_name=school.database_name,
             admin_email=school.admin_email,
@@ -268,6 +269,7 @@ async def suspend_school(
         return SaaSSchoolResponse(
             id=school.id,
             school_id=school.school_id,
+            school_slug=school.school_slug,
             school_name=school.school_name,
             database_name=school.database_name,
             admin_email=school.admin_email,
@@ -306,6 +308,7 @@ async def reactivate_school(
         return SaaSSchoolResponse(
             id=school.id,
             school_id=school.school_id,
+            school_slug=school.school_slug,
             school_name=school.school_name,
             database_name=school.database_name,
             admin_email=school.admin_email,

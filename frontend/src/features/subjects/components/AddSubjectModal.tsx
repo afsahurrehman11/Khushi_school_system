@@ -4,10 +4,11 @@ import Button from '../../../components/Button';
 import { Loader2 } from 'lucide-react';
 import { createSubject, updateSubject } from '../services/subjectsApi';
 import { getClasses, createClass } from '../../classes/services/classesApi';
+import { entitySync } from '../../../utils/entitySync';
 import api from '../../../utils/api';
 import logger from '../../../utils/logger';
 
-interface Assignment { class_name?: string; section?: string; teacher_id?: string; time?: string }
+interface Assignment { class_id?: string; class_name?: string; section?: string; teacher_id?: string }
 interface Props { isOpen: boolean; onClose: () => void; subject?: any; onSaved?: () => void; }
 
 const AddSubjectModal: React.FC<Props> = ({ isOpen, onClose, subject, onSaved }) => {
@@ -23,7 +24,7 @@ const AddSubjectModal: React.FC<Props> = ({ isOpen, onClose, subject, onSaved })
     if (subject) {
       setName(subject.subject_name || subject.name || '');
       setCode(subject.subject_code || subject.code || '');
-      setAssignments(Array.isArray(subject.assigned_classes) ? subject.assigned_classes.map((a:any) => ({ class_name: a.class_name || a.class, section: a.section || '', teacher_id: a.teacher_id || a.teacher, time: a.time || '' })) : []);
+      setAssignments(Array.isArray(subject.assigned_classes) ? subject.assigned_classes.map((a:any) => ({ class_id: a.class_id || '', class_name: a.class_name || a.class, section: a.section || '', teacher_id: a.teacher_id || a.teacher })) : []);
     } else {
       setName(''); setCode(''); setAssignments([]);
     }
@@ -37,16 +38,27 @@ const AddSubjectModal: React.FC<Props> = ({ isOpen, onClose, subject, onSaved })
       } catch {
         setClasses([]);
       }
-      try { const t = await api.get('/api/teachers'); setTeachers(Array.isArray(t) ? t : []); } catch { setTeachers([]); }
+      try {
+        // fetch teachers fresh for the current school context
+        const t = await api.get('/api/teachers');
+        setTeachers(Array.isArray(t) ? t : []);
+      } catch {
+        setTeachers([]);
+      }
     })();
   }, [isOpen]);
 
-  // fixed Grade 1..Grade 10 options
-  const classOptions = Array.from({ length: 10 }, (_, i) => `Grade ${i + 1}`);
+  // derive options from fetched classes (class + section combined)
+  const classOptions = _classes.map((c:any) => ({
+    id: c.id || c._id,
+    label: `${(c.class_name||c.name||'').trim()}${c.section ? ` - ${c.section}` : ''}`,
+    class_name: c.class_name || c.name || '',
+    section: c.section || ''
+  }));
 
   if (!isOpen) return null;
 
-  const addAssignment = () => setAssignments((s) => [...s, { class_name: '', section: '', teacher_id: '', time: '' }]);
+  const addAssignment = () => setAssignments((s) => [...s, { class_id: '', class_name: '', section: '', teacher_id: '' }]);
   const removeAssignment = (i:number) => setAssignments((s) => s.filter((_,idx)=>idx!==i));
   const setAssignment = (i:number, field:keyof Assignment, value:any) => setAssignments(s => s.map((a,idx)=> idx===i ? { ...a, [field]: value } : a));
 
@@ -56,12 +68,14 @@ const AddSubjectModal: React.FC<Props> = ({ isOpen, onClose, subject, onSaved })
     if (!name.trim()) return setError('Name required');
     setSaving(true);
     try {
-      const payload:any = { subject_name: name.trim(), subject_code: code.trim() || undefined, assigned_classes: assignments.map(a => ({ class_name: a.class_name, section: a.section, teacher_id: a.teacher_id, time: a.time })) };
+      const payload:any = { subject_name: name.trim(), subject_code: code.trim() || undefined, assigned_classes: assignments.map(a => ({ class_name: a.class_name, section: a.section, teacher_id: a.teacher_id })) };
       if (subject && (subject.id || subject._id)) {
         const id = subject.id || subject._id;
         await updateSubject(id, payload);
+        entitySync.emitSubjectUpdated(id, payload);
       } else {
-        await createSubject(payload);
+        const response = await createSubject(payload);
+        entitySync.emitSubjectCreated(response.id || response._id, response);
       }
       // ensure classes exist in DB for each assignment (create if missing)
       try {
@@ -86,36 +100,49 @@ const AddSubjectModal: React.FC<Props> = ({ isOpen, onClose, subject, onSaved })
     <Modal isOpen={isOpen} onClose={onClose} title={subject ? 'Edit Subject' : 'Add Subject'} size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && <div className="text-sm text-danger-700">{error}</div>}
-        <div>
-          <label className="block text-sm font-medium">Subject Name</label>
-          <input value={name} onChange={(e)=>setName(e.target.value)} className="w-full px-3 py-2 border rounded" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium">Code (optional)</label>
-          <input value={code} onChange={(e)=>setCode(e.target.value)} className="w-full px-3 py-2 border rounded" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium">Subject Name</label>
+            <input value={name} onChange={(e)=>setName(e.target.value)} className="w-full px-3 py-2 border rounded" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium">Code (optional)</label>
+            <input value={code} onChange={(e)=>setCode(e.target.value)} className="w-full px-3 py-2 border rounded" />
+          </div>
         </div>
 
         <div>
           <div className="flex items-center justify-between">
-            <h3 className="font-medium">Assignments (class / section / teacher / time)</h3>
+            <h3 className="font-medium">Assignments (Class - Section / Teacher)</h3>
             <Button variant="secondary" size="sm" onClick={(e:any)=>{ e.preventDefault(); addAssignment(); }}>Add Assignment</Button>
           </div>
-          <div className="mt-3 space-y-2">
+          <div className="mt-2 p-3 border rounded bg-white shadow-sm">
+          <div className="mt-3 space-y-3">
             {assignments.map((a, idx) => (
               <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                <select className="col-span-3 p-2 border rounded" value={a.class_name || ''} onChange={(e)=>setAssignment(idx,'class_name', e.target.value)}>
-                  <option value="">Select class</option>
-                  {classOptions.map((cn:any, i:number) => <option key={cn + String(i)} value={cn}>{cn}</option>)}
+                <select
+                  className="col-span-5 p-2 border rounded"
+                  value={a.class_id || ''}
+                  onChange={(e)=>{
+                    const sel = classOptions.find(co => String(co.id) === String(e.target.value));
+                    if (sel) setAssignment(idx, 'class_id', sel.id);
+                    setAssignment(idx, 'class_name', sel ? sel.class_name : '');
+                    setAssignment(idx, 'section', sel ? sel.section : '');
+                  }}
+                >
+                  <option value="">Select class - section</option>
+                  {classOptions.map((cn:any) => <option key={cn.id} value={cn.id}>{cn.label}</option>)}
                 </select>
-                <input className="col-span-2 p-2 border rounded" placeholder="Section" value={a.section||''} onChange={(e)=>setAssignment(idx,'section', e.target.value)} />
-                <select className="col-span-4 p-2 border rounded" value={a.teacher_id||''} onChange={(e)=>setAssignment(idx,'teacher_id', e.target.value)}>
+
+                <select className="col-span-5 p-2 border rounded" value={a.teacher_id||''} onChange={(e)=>setAssignment(idx,'teacher_id', e.target.value)}>
                   <option value="">Select teacher</option>
                   {teachers.map((t:any)=> <option key={t.id || t._id} value={t.id || t._id}>{t.name || t.fullName || t.teacherId || t.id}</option>)}
                 </select>
-                <input className="col-span-2 p-2 border rounded" placeholder="Time" value={a.time||''} onChange={(e)=>setAssignment(idx,'time', e.target.value)} />
-                <div className="col-span-1 text-right"><Button variant="danger" size="sm" onClick={(e:any)=>{ e.preventDefault(); removeAssignment(idx); }}>Remove</Button></div>
+
+                <div className="col-span-2 text-right"><Button variant="danger" size="sm" onClick={(e:any)=>{ e.preventDefault(); removeAssignment(idx); }}>Remove</Button></div>
               </div>
             ))}
+          </div>
           </div>
         </div>
 

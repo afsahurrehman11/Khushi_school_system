@@ -9,6 +9,46 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def generate_registration_number(admission_year: int, db_collection: Collection, school_id: str = None) -> str:
+    """
+    Generate a new registration number with schoolId isolation.
+    Format: REG-<admission_year>-<incremental_id_padded_4_digits>
+    Example: REG-2026-0001
+    Resets yearly per school.
+    """
+    try:
+        # Build match query with schoolId if provided
+        match_query = {"admission_year": admission_year, "registration_number": {"$regex": f"^REG-{admission_year}-"}}
+        if school_id:
+            match_query["school_id"] = school_id
+            
+        # Find the highest incremental ID for this year (within school)
+        pipeline = [
+            {"$match": match_query},
+            {"$project": {
+                "reg_num": {
+                    "$toInt": {
+                        "$arrayElemAt": [{"$split": ["$registration_number", "-"]}, 2]
+                    }
+                }
+            }},
+            {"$sort": {"reg_num": -1}},
+            {"$limit": 1}
+        ]
+
+        result = list(db_collection.aggregate(pipeline))
+        if result:
+            next_num = result[0]["reg_num"] + 1
+        else:
+            next_num = 1
+
+        registration_number = f"REG-{admission_year}-{next_num:04d}"
+        logger.debug(f"🔢 Generated registration number: {registration_number} for school {school_id or 'N/A'}")
+        return registration_number
+    except Exception as e:
+        logger.error(f"❌ Failed to generate registration number: {str(e)}")
+        raise
+
 def generate_student_id(admission_year: int, db_collection: Collection, school_id: str = None) -> str:
     """
     Generate a new student ID for manual creation with schoolId isolation.

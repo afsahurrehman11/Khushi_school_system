@@ -4,6 +4,7 @@ import Button from '../../../components/Button';
 import ClassCard from '../components/ClassCard';
 import AddClassModal from '../components/AddClassModal';
 import { getClasses, deleteClass } from '../services/classesApi';
+import { entitySync, useEntitySync } from '../../../utils/entitySync';
 
 const ClassList: React.FC = () => {
   const [classes, setClasses] = useState<any[]>([]);
@@ -44,11 +45,21 @@ const ClassList: React.FC = () => {
 
   useEffect(() => { load(); }, []);
 
+  // Entity synchronization
+  useEntitySync('class', (event) => {
+    if (event.type === 'created' || event.type === 'updated' || event.type === 'deleted') {
+      load(); // Reload classes when classes change
+    }
+  });
+
   return (
-    <div className="min-h-screen p-8 bg-secondary-50">
-      <div className="max-w-6xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold">Classes</h1>
+    <div className="min-h-screen p-8 bg-gradient-to-br from-blue-50 via-purple-50 to-white">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Classes</h1>
+            <p className="text-sm text-gray-600 mt-1">Manage your school classes and sections</p>
+          </div>
           <Button variant="primary" onClick={() => { setEditClass(null); setAddOpen(true); }}>
             <UserPlus className="w-4 h-4 mr-2" /> Add Class
           </Button>
@@ -62,9 +73,9 @@ const ClassList: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {classes.length === 0 ? (
-              <div className="col-span-1 md:col-span-3 bg-white rounded-xl shadow-soft p-8 text-center">
+              <div className="col-span-1 md:col-span-2 xl:col-span-3 bg-white rounded-xl shadow-soft p-8 text-center border border-blue-100">
                 <p className="text-secondary-600">No classes found. Add a class to get started.</p>
               </div>
             ) : (
@@ -73,7 +84,7 @@ const ClassList: React.FC = () => {
                   key={c.id || c._id || `${c.class_name || ''}::${c.section || ''}`}
                   {...c}
                   onEdit={() => { setEditClass(c); setAddOpen(true); }}
-                  onDelete={c.id ? async () => { await deleteClass(c.id); load(); } : undefined}
+                  onDelete={c.id ? async () => { await deleteClass(c.id); entitySync.emitClassDeleted(c.id); load(); } : undefined}
                 />
               ))
             )}

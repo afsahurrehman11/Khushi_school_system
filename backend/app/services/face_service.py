@@ -40,7 +40,8 @@ try:
     USE_FACENET = True
     logger.info(f"FaceNet loaded on {DEVICE}")
 except Exception as e:
-    logger.warning(f"FaceNet not available, using fallback: {e}")
+    # FaceNet is optional; fall back silently but note at INFO level.
+    logger.info(f"FaceNet not available, using fallback: {e}")
     USE_FACENET = False
 
 # Try OpenCV for face detection

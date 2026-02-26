@@ -38,7 +38,7 @@ async def create_fee_payment(
     try:
         from app.services.fee_payment_service import get_fee_payment_summary_for_student
         
-        summary = get_fee_payment_summary_for_student(payment_data.student_id, school_id=school_id)
+        summary = get_fee_payment_summary_for_student(payment_data.student_id)
         if payment_data.amount_paid > summary["remaining_amount"]:
             logger.error(f"[SCHOOL:{school_id}] ❌ Payment exceeds remaining due")
             raise HTTPException(
@@ -102,7 +102,7 @@ async def get_fee_payment(
     logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching payment {payment_id}")
     
     try:
-        payment = get_fee_payment_by_id(payment_id, school_id=school_id)
+        payment = get_fee_payment_by_id(payment_id)
         if not payment:
             logger.error(f"[SCHOOL:{school_id}] ❌ Payment {payment_id} not found")
             raise HTTPException(status_code=404, detail="Payment not found")
@@ -126,7 +126,7 @@ async def get_student_fee_payments(
     logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching payments for student {student_id}")
     
     try:
-        payments = get_fee_payments_for_student(student_id, school_id=school_id)
+        payments = get_fee_payments_for_student(student_id)
         logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(payments)} payments for student")
         return [convert_objectids(payment) for payment in payments]
     except Exception as e:
@@ -144,7 +144,7 @@ async def get_class_fee_payments(
     logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching payments for class {class_id}")
     
     try:
-        payments = get_fee_payments_for_class(class_id, school_id=school_id)
+        payments = get_fee_payments_for_class(class_id)
         logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(payments)} payments for class")
         return [convert_objectids(payment) for payment in payments]
     except Exception as e:
@@ -162,7 +162,7 @@ async def get_student_fee_summary(
     logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching payment summary for student")
     
     try:
-        summary = get_fee_payment_summary_for_student(student_id, school_id=school_id)
+        summary = get_fee_payment_summary_for_student(student_id)
         logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved payment summary")
         return summary
     except Exception as e:
@@ -181,7 +181,7 @@ async def update_fee_payment_record(
     logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Updating payment {payment_id}")
     
     try:
-        updated = update_fee_payment(payment_id, update_data.dict(exclude_unset=True), school_id=school_id)
+        updated = update_fee_payment(payment_id, update_data.dict(exclude_unset=True))
         if not updated:
             logger.error(f"[SCHOOL:{school_id}] ❌ Payment {payment_id} not found")
             raise HTTPException(status_code=404, detail="Payment not found or update failed")
@@ -205,7 +205,7 @@ async def delete_fee_payment_record(
     logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Deleting payment {payment_id}")
     
     try:
-        success = delete_fee_payment(payment_id, school_id=school_id)
+        success = delete_fee_payment(payment_id)
         if not success:
             logger.error(f"[SCHOOL:{school_id}] ❌ Payment {payment_id} not found")
             raise HTTPException(status_code=404, detail="Payment not found")

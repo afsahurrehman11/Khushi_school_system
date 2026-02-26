@@ -14,12 +14,14 @@ import tempfile
 import shutil
 import zipfile
 import logging
+import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 
 from app.database import get_db
 from app.services.image_service import ImageService
-from app.services.excel_service import build_student_doc
+from app.services.excel_service import execute_import_transaction
+from app.services.face_enrollment_service import FaceEnrollmentService
 from app.utils.student_id_utils import generate_imported_student_id
 
 logger = logging.getLogger(__name__)
@@ -339,88 +341,54 @@ def execute_import_with_images(
                     "reason": f"Failed to create class \"{class_doc['class_name']}\". Import cancelled."
                 }]
         
-        # --- STAGE 4: Create students ---
-        logger.info(f"[BULK] Stage 4: Creating {len(rows_to_insert)} students")
+        # --- STAGE 4: Create students using TRANSACTION ---
+        logger.info(f"[BULK] Stage 4: Creating {len(rows_to_insert)} students with transaction")
         
+        # Add school_id and process images for all rows
         for row in rows_to_insert:
-            row_num = row.get("row_num", 0)
-            student_name = row.get("full_name", "Unknown")
+            row["school_id"] = school_id
             
-            try:
-                # Build student document
-                doc = build_student_doc(row)
-                doc["school_id"] = school_id
-                
-                # Process image if available
-                image_blob, image_type = _process_student_image(
-                    row, image_map, student_name
-                )
-                
-                if image_blob:
-                    doc["profile_image_blob"] = image_blob
-                    doc["profile_image_type"] = image_type
-                    doc["image_uploaded_at"] = datetime.utcnow()
-                    doc["embedding_status"] = "pending"
-                
-                # Insert student
-                result = db.students.insert_one(doc)
-                
-                if result.inserted_id:
-                    created_student_ids.append(str(result.inserted_id))
-                    logger.info(f"[BULK] Created student: {doc.get('student_id')} - {student_name}")
-                else:
-                    raise Exception("Insert returned no ID")
-                    
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"[BULK] Student creation failed: {student_name} - {error_msg}")
-                
-                # Create user-friendly error message
-                friendly_msg = _get_friendly_error_message(error_msg, student_name, row)
-                
-                # ROLLBACK EVERYTHING
-                logger.info(f"[BULK] Rolling back: {len(created_student_ids)} students, {len(created_class_ids)} classes")
-                _rollback_students(db, created_student_ids)
-                _rollback_classes(db, created_class_ids)
-                
-                return 0, len(rows_to_insert), [{
-                    "row": row_num,
-                    "column": "Student",
-                    "value": student_name,
-                    "reason": friendly_msg
-                }]
+            # Process image if available
+            image_blob, image_type = _process_student_image(
+                row, image_map, row.get("full_name", "Unknown")
+            )
+            
+            if image_blob:
+                row["profile_image_blob"] = image_blob
+                row["profile_image_type"] = image_type
+                row["image_uploaded_at"] = datetime.utcnow()
+                row["embedding_status"] = "pending"
         
-        # --- STAGE 5: Handle updates (if duplicate_action == 'update') ---
-        update_count = 0
-        if duplicate_action == "update" and rows_to_update:
-            logger.info(f"[BULK] Stage 5: Updating {len(rows_to_update)} existing students")
-            
-            from bson import ObjectId
-            
-            for row in rows_to_update:
-                try:
-                    existing_id = row.get("_existing_id")
-                    if not existing_id:
-                        continue
-                    
-                    doc = build_student_doc(row)
-                    doc.pop("created_at", None)
-                    doc["updated_at"] = datetime.utcnow()
-                    
-                    db.students.update_one(
-                        {"_id": ObjectId(existing_id)},
-                        {"$set": doc}
-                    )
-                    update_count += 1
-                    logger.info(f"[BULK] Updated student: {row.get('full_name')}")
-                    
-                except Exception as e:
-                    logger.error(f"[BULK] Update failed: {row.get('full_name')} - {str(e)}")
-                    # Updates don't trigger full rollback, just skip
+        # Use transaction-based import
+        success_count, fail_count, errors = execute_import_transaction(
+            rows_to_insert, rows_to_update, duplicate_action, db
+        )
+        
+        if fail_count > 0:
+            # Transaction failed - rollback classes we created
+            logger.error(f"[BULK] Transaction failed, rolling back {len(created_class_ids)} classes")
+            _rollback_classes(db, created_class_ids)
+            return 0, len(rows_to_insert) + len(rows_to_update), errors
+        
+        # Track created student IDs for face enrollment
+        created_student_ids = []
+        if success_count > 0:
+            # Find the inserted students to get their IDs
+            for row in rows_to_insert:
+                student_id = generate_imported_student_id(row.get("registration_number", ""))
+                student_doc = db.students.find_one({"student_id": student_id, "school_id": school_id})
+                if student_doc:
+                    created_student_ids.append(str(student_doc["_id"]))
+        
+        # --- STAGE 5: Handle updates (already done in transaction) ---
+        update_count = len(rows_to_update) if duplicate_action == "update" else 0
         
         # SUCCESS!
         total_success = len(created_student_ids) + update_count
         logger.info(f"[BULK] Import completed: {len(created_student_ids)} created, {update_count} updated")
+        
+        # Trigger face enrollment for students with images (non-blocking)
+        _trigger_bulk_face_enrollment(db, created_student_ids, school_id)
         
         return total_success, 0, []
         
@@ -569,6 +537,87 @@ def _get_friendly_error_message(error_msg: str, student_name: str, row: Dict) ->
     
     # Generic fallback - do NOT expose technical details
     return f"Student \"{student_name}\" could not be imported. Please check the data and try again."
+
+
+def _trigger_bulk_face_enrollment(db, student_ids: List[str], school_id: str):
+    """
+    Trigger face enrollment for all newly imported students with images.
+    Runs asynchronously in background - does not block import process.
+    """
+    if not student_ids:
+        return
+    
+    try:
+        from bson import ObjectId
+        
+        # Find all students with images
+        students_with_images = list(db.students.find({
+            "_id": {"$in": [ObjectId(sid) for sid in student_ids]},
+            "profile_image_blob": {"$exists": True, "$ne": None}
+        }, {
+            "_id": 1,
+            "student_id": 1,
+            "full_name": 1,
+            "profile_image_blob": 1,
+            "profile_image_type": 1
+        }))
+        
+        if not students_with_images:
+            logger.info("[BULK] No students with images to enroll")
+            return
+        
+        logger.info(f"[BULK] Triggering face enrollment for {len(students_with_images)} students")
+        
+        # Process each student in background
+        enrollment_service = FaceEnrollmentService()
+        success_count = 0
+        failed_count = 0
+        
+        for student in students_with_images:
+            try:
+                student_id = student.get("student_id")
+                full_name = student.get("full_name", "Unknown")
+                image_blob = student.get("profile_image_blob")
+                image_type = student.get("profile_image_type", "image/jpeg")
+                
+                if not student_id or not image_blob:
+                    continue
+                
+                # Enroll to external face recognition app
+                enrollment_service.enroll_person(
+                    person_id=student_id,
+                    name=full_name,
+                    role="student",
+                    image_blob=image_blob,
+                    image_type=image_type,
+                    school_id=school_id  # Pass school_id for unique ID
+                )
+                
+                # Generate internal embedding
+                asyncio.create_task(
+                    enrollment_service.generate_embedding_for_person(
+                        person_id=student_id,
+                        name=full_name,
+                        role="student",
+                        image_base64=image_blob,
+                        image_type=image_type,
+                        db=db
+                    )
+                )
+                
+                success_count += 1
+                logger.info(f"[BULK] Face enrolled: {student_id} - {full_name}")
+                
+            except Exception as e:
+                failed_count += 1
+                logger.warning(f"[BULK] Face enrollment failed for {student.get('student_id')}: {str(e)}")
+                # Continue with other students - don't fail the entire batch
+        
+        logger.info(f"[BULK] Face enrollment completed: {success_count} success, {failed_count} failed")
+        
+    except Exception as e:
+        logger.exception(f"[BULK] Error during bulk face enrollment: {str(e)}")
+        # Don't raise - this is background processing
 
 
 # ---------------------------------------------------------------------------

@@ -65,8 +65,12 @@ class BackgroundEmbeddingService:
             student_collection = db["students"]
             
             # Get all students with images but no embedding
+            # Find students that have either a profile_image_url (legacy) or a profile_image_blob (new)
             students = list(student_collection.find({
-                "profile_image_url": {"$exists": True, "$ne": None}
+                "$or": [
+                    {"profile_image_url": {"$exists": True, "$ne": None}},
+                    {"profile_image_blob": {"$exists": True, "$ne": None}}
+                ]
             }))
             
             job.total = len(students)
@@ -112,7 +116,7 @@ class BackgroundEmbeddingService:
                             {
                                 "$set": {
                                     "face_embedding": embedding,
-                                    "embedding_model": "VGGFace2",
+                                    "embedding_model": "VGGFace",
                                     "embedding_generated_at": datetime.utcnow(),
                                     "embedding_status": "generated",
                                     "updated_at": datetime.utcnow()
@@ -176,7 +180,10 @@ class BackgroundEmbeddingService:
             
             # Get students with images but no embedding
             students = list(student_collection.find({
-                "profile_image_url": {"$exists": True, "$ne": None},
+                "$or": [
+                    {"profile_image_url": {"$exists": True, "$ne": None}},
+                    {"profile_image_blob": {"$exists": True, "$ne": None}}
+                ],
                 "$or": [
                     {"face_embedding": {"$exists": False}},
                     {"face_embedding": None}
@@ -226,7 +233,7 @@ class BackgroundEmbeddingService:
                             {
                                 "$set": {
                                     "face_embedding": embedding,
-                                    "embedding_model": "VGGFace2",
+                                    "embedding_model": "VGGFace",
                                     "embedding_generated_at": datetime.utcnow(),
                                     "embedding_status": "generated",
                                     "updated_at": datetime.utcnow()
@@ -333,3 +340,81 @@ class BackgroundEmbeddingService:
         for job_id in to_delete:
             del embedding_jobs[job_id]
             logger.info(f"Cleaned up job {job_id}")
+
+    @staticmethod
+    async def generate_embedding_for_student(student_id: str) -> bool:
+        """
+        Generate face embedding for a single student asynchronously
+        
+        Args:
+            student_id: MongoDB ObjectId of the student
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            db = get_db()
+            student_collection = db["students"]
+            
+            # Find student by ID
+            student = student_collection.find_one({"_id": ObjectId(student_id)})
+            if not student:
+                logger.error(f"Student {student_id} not found")
+                return False
+            
+            image_blob = student.get("profile_image_blob")
+            if not image_blob:
+                logger.warning(f"Student {student_id} has no image blob")
+                return False
+            
+            # Get PIL image from base64 blob
+            pil_image = ImageService.get_pil_image_from_base64(image_blob)
+            if not pil_image:
+                logger.error(f"Failed to decode image for student {student_id}")
+                student_collection.update_one(
+                    {"_id": ObjectId(student_id)},
+                    {
+                        "$set": {
+                            "embedding_status": "failed",
+                            "updated_at": datetime.utcnow()
+                        }
+                    }
+                )
+                return False
+            
+            # Generate embedding
+            embedding, status = EmbeddingGenerator.generate_embedding_from_image(pil_image)
+            
+            if status == "generated" and embedding:
+                # Update student with embedding
+                student_collection.update_one(
+                    {"_id": ObjectId(student_id)},
+                    {
+                        "$set": {
+                            "face_embedding": embedding,
+                            "embedding_model": "VGGFace",
+                            "embedding_generated_at": datetime.utcnow(),
+                            "embedding_status": "generated",
+                            "updated_at": datetime.utcnow()
+                        }
+                    }
+                )
+                logger.info(f"✅ Generated embedding for student {student_id}")
+                return True
+            else:
+                # Update with failed status
+                student_collection.update_one(
+                    {"_id": ObjectId(student_id)},
+                    {
+                        "$set": {
+                            "embedding_status": "failed",
+                            "updated_at": datetime.utcnow()
+                        }
+                    }
+                )
+                logger.warning(f"Failed to generate embedding for student {student_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error generating embedding for student {student_id}: {str(e)}")
+            return False

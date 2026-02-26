@@ -8,6 +8,7 @@ import { feesService } from '../services/fees';
 import { paymentsService } from '../services/payments';
 import { authService } from '../services/auth';
 import logger from '../utils/logger';
+import { entitySync } from '../utils/entitySync';
 
 type TabType = 'students' | 'teachers' | 'classes' | 'fees' | 'payments';
 
@@ -131,11 +132,19 @@ const AdminDashboard: React.FC = () => {
   const handleCreateTeacher = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await teachersService.createTeacher(newTeacher);
+      // Transform frontend format to backend format
+      const teacherData = {
+        name: `${newTeacher.firstName} ${newTeacher.lastName}`.trim(),
+        email: newTeacher.email,
+        phone: newTeacher.phone,
+        assigned_subjects: newTeacher.subject ? [newTeacher.subject] : []
+      };
+      
+      await teachersService.createTeacher(teacherData);
       setNewTeacher({ firstName: '', lastName: '', email: '', phone: '', subject: '' });
       setFormOpen(false);
       loadTeachers();
-      setMessage({ type: 'success', text: `Teacher "${newTeacher.firstName}" created successfully` });
+      setMessage({ type: 'success', text: `Teacher "${teacherData.name}" created successfully` });
     } catch (error: any) {
       setMessage({ type: 'error', text: `Error creating teacher: ${error.message}` });
     }
@@ -150,7 +159,8 @@ const AdminDashboard: React.FC = () => {
       setFormOpen(false);
       loadClasses();
       setMessage({ type: 'success', text: `Class "${newClass.name}" created successfully` });
-    } catch (error: any) {
+      // Emit synchronization event
+      entitySync.emitClassCreated(newClass.id, newClass);    } catch (error: any) {
       setMessage({ type: 'error', text: `Error creating class: ${error.message}` });
     }
   };

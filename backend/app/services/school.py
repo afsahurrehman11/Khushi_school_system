@@ -1,4 +1,4 @@
-from app.database import get_db
+from app.services.saas_db import get_saas_root_db
 from app.models.school import SchoolSchema, SchoolInDB, SchoolUpdate, SchoolResponse
 from bson import ObjectId
 from datetime import datetime
@@ -6,7 +6,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-db = get_db()
+# Use the SaaS root database for school registry operations. The
+# `schools` collection lives in the SaaS root DB (saas_root_db). Using
+# `get_saas_root_db()` prevents import-time attempts to open a
+# school-specific DB via `get_db()` which raises when no default
+# school database is configured (multi-tenant mode).
+db = get_saas_root_db()
 
 def create_school(school: SchoolSchema) -> SchoolInDB:
     """Create a new school with normalized names"""

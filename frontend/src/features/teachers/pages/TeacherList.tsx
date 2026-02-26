@@ -11,6 +11,7 @@ import ViewToggle from '../../../components/ViewToggle';
 import TeacherCard from '../../../components/TeacherCard';
 import GroupByToggle from '../../../components/GroupByToggle';
 import { apiCallJSON, getAuthHeaders } from '../../../utils/api';
+import { entitySync, useEntitySync } from '../../../utils/entitySync';
 import logger from '../../../utils/logger';
 import AddTeacherModal from '../components/AddTeacherModal';
 
@@ -91,6 +92,19 @@ const TeacherList: React.FC = () => {
 
   React.useEffect(() => { loadTeachers(); }, []);
 
+  // Entity synchronization
+  useEntitySync('teacher', (event) => {
+    if (event.type === 'created' || event.type === 'updated' || event.type === 'deleted') {
+      loadTeachers(); // Reload teachers when teachers change
+    }
+  });
+
+  useEntitySync('class', (event) => {
+    if (event.type === 'created' || event.type === 'updated' || event.type === 'deleted') {
+      loadTeachers(); // Reload teachers when classes change (assignments may be affected)
+    }
+  });
+
   const openAddModal = () => {
     setAddModalOpen(true);
   };
@@ -98,6 +112,7 @@ const TeacherList: React.FC = () => {
   const deleteTeacher = async (id: string) => {
     try {
       await apiCallJSON(`/api/teachers/${id}`, { method: 'DELETE', headers: { ...getAuthHeaders() } });
+      entitySync.emitTeacherDeleted(id);
       loadTeachers();
       setSelectedTeacher(null);
     } catch (err) {

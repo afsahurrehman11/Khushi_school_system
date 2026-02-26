@@ -22,19 +22,28 @@ USE_MTCNN = False
 MTCNN_MODEL = None
 TORCH = None
 Image = None
+
+# Try to load FaceNet model with proper error handling
 try:
     import torch as _torch  # type: ignore[reportMissingImports]
     TORCH = _torch
     from facenet_pytorch import InceptionResnetV1, MTCNN  # type: ignore[reportMissingImports]
     from PIL import Image as _Image  # type: ignore[reportMissingImports]
     Image = _Image
-    # initialize FaceNet model (cpu by default); move to available device later
+
+    # Initialize FaceNet model (cpu by default); move to available device later
     FACENET_MODEL = InceptionResnetV1(pretrained='vggface2').eval()
     USE_FACENET = True
-    # MTCNN will be instantiated later once device is determined
     USE_MTCNN = True
-except Exception:
-    # facenet / mtcnn not available; will fall back to lightweight demo embedding
+    print("✅ FaceNet model loaded successfully")
+except ImportError as e:
+    print(f"⚠️  FaceNet not available: {e}")
+    USE_FACENET = False
+    FACENET_MODEL = None
+    USE_MTCNN = False
+    MTCNN_MODEL = None
+except Exception as e:
+    print(f"❌ Error loading FaceNet model: {e}")
     USE_FACENET = False
     FACENET_MODEL = None
     USE_MTCNN = False

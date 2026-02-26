@@ -70,11 +70,29 @@ def ensure_global_users_collection():
 def ensure_collections_exist():
     """Ensure required collections exist in the configured database.
 
-    - Creates missing collections using `create_collection` (idempotent if exists).
+    - In multi-tenant mode, only initializes saas_root_db
+    - In single-tenant mode, creates school collections
     - Executes `backend/scripts/create_indexes.py` if present to create indexes.
     Returns a dict with lists of created and existing collections.
     Raises on unexpected errors so startup can fail loudly.
     """
+    from app.config import settings
+
+    # Multi-tenant mode: Initialize saas_root_db only
+    if not getattr(settings, "database_name", None):
+        logger.info("✅ Multi-tenant mode detected - initializing saas_root_db only")
+        try:
+            ensure_global_users_collection()
+        except Exception as e:
+            logger.warning(f"⚠️ ensure_global_users_collection failed: {e}")
+        try:
+            check_root_user_exists()
+        except Exception as e:
+            logger.warning(f"⚠️ check_root_user_exists failed: {e}")
+        return {"created": [], "existing": []}
+
+    # Single-tenant mode: Initialize school database
+
     db = get_db()
     existing = db.list_collection_names()
     created = []
@@ -287,18 +305,49 @@ def check_root_user_exists():
         
         ROOT_EMAIL = "root@edu"
         
+        # Lookup existing users with this email (case-insensitive stored as lowercase normally)
         root_user = root_db.global_users.find_one({"email": ROOT_EMAIL})
-        
+
         if root_user:
+            # If multiple root users exist for some reason, just warn but do not modify
+            count = root_db.global_users.count_documents({"email": ROOT_EMAIL})
+            if count > 1:
+                logger.warning(f"⚠️ Multiple root users found for {ROOT_EMAIL} (count={count}).")
             logger.info(f"✅ Root user exists: {ROOT_EMAIL}")
             return True
-        else:
-            logger.warning("=" * 60)
-            logger.warning("⚠️  WARNING: Root user does not exist in saas_root_db")
-            logger.warning(f"⚠️  Expected email: {ROOT_EMAIL}")
-            logger.warning("⚠️  Please run the setup script to create the root user:")
-            logger.warning("⚠️  python scripts/setup_root_user.py")
-            logger.warning("=" * 60)
+
+        # Root user not found -> create default root user with provided credentials
+        try:
+            import hashlib
+            from datetime import datetime
+
+            default_password = "111"
+            password_hash = hashlib.sha256(default_password.encode()).hexdigest()
+
+            now = datetime.utcnow()
+            root_doc = {
+                "name": "Root Administrator",
+                "email": ROOT_EMAIL,
+                "password_hash": password_hash,
+                "role": "root",
+                "school_id": None,
+                "school_slug": None,
+                "database_name": None,
+                "is_active": True,
+                "created_at": now,
+                "updated_at": now,
+            }
+
+            # Ensure collection exists and required indexes
+            if "global_users" not in root_db.list_collection_names():
+                root_db.create_collection("global_users")
+            root_db.global_users.create_index("email", unique=True, background=True)
+
+            res = root_db.global_users.insert_one(root_doc)
+            logger.info(f"✅ Created default root user {ROOT_EMAIL} (id={res.inserted_id}) with default password")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to create default root user {ROOT_EMAIL}: {e}")
             return False
             
     except Exception as e:

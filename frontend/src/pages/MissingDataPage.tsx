@@ -1,15 +1,10 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { 
   AlertTriangle, 
   User, 
-  Image, 
   Phone, 
   Mail, 
-  Edit2, 
-  Save, 
-  X,
   Search,
-  Filter,
   Loader2,
   CheckCircle,
   AlertCircle,
@@ -18,119 +13,94 @@ import {
 } from 'lucide-react';
 import { analyticsService, MissingDataStudent } from '../services/analytics';
 import { studentsService } from '../services/students';
-import { authService } from '../services/auth';
+import ImageUpload from '../features/students/components/ImageUpload';
 
-interface EditingState {
-  [studentId: string]: {
-    [field: string]: string;
-  };
-}
+const missingFieldLabels: Record<string, string> = {
+  phone: 'Phone Number',
+  guardian_phone: 'Guardian Phone',
+  emergency_contact: 'Emergency Contact',
+  email: 'Email Address',
+  profile_image: 'Profile Photo',
+  cnic_image: 'CNIC Image',
+  date_of_birth: 'Date of Birth',
+  address: 'Address',
+  father_name: 'Father Name',
+  father_cnic: 'Father CNIC',
+  parent_contact: 'Parent Contact',
+};
 
 const MissingDataPage: React.FC = () => {
   const [students, setStudents] = useState<MissingDataStudent[]>([]);
-  const [filteredStudents, setFilteredStudents] = useState<MissingDataStudent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  
-  // Filters
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterField, setFilterField] = useState<string>('all');
-  
-  // Editing
+  const [selectedClassCard, setSelectedClassCard] = useState<string | null>(null);
   const [editingStudent, setEditingStudent] = useState<string | null>(null);
-  const [editValues, setEditValues] = useState<EditingState>({});
+  const [editValues, setEditValues] = useState<Record<string, Record<string, string>>>({});
+  const [saving, setSaving] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const missingFieldLabels: { [key: string]: string } = {
-    'phone': 'Phone Number',
-    'email': 'Email',
-    'guardian_phone': 'Guardian Phone',
-    'father_name': 'Father Name',
-    'mother_name': 'Mother Name',
-    'address': 'Address',
-    'date_of_birth': 'Date of Birth',
-    'blood_group': 'Blood Group',
-    'cnic': 'CNIC/B-Form',
-    'profile_image': 'Profile Photo',
-    'cnic_image': 'CNIC/B-Form Photo',
-    'emergency_contact': 'Emergency Contact'
-  };
-
+  // Load missing data on component mount
   useEffect(() => {
     loadMissingData();
   }, []);
 
-  useEffect(() => {
-    filterStudents();
-  }, [students, searchTerm, filterField]);
-
-  async function loadMissingData() {
+  const loadMissingData = async () => {
     setLoading(true);
-    setError(null);
     try {
       const data = await analyticsService.getMissingData();
       setStudents(data);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load missing data');
+    } catch (err) {
+      console.error('Failed to load missing data:', err);
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  function filterStudents() {
-    let filtered = [...students];
-    
-    // Search filter
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(s => 
-        s.first_name.toLowerCase().includes(term) ||
-        s.last_name.toLowerCase().includes(term) ||
-        s.roll_number.toLowerCase().includes(term) ||
-        s.class_name.toLowerCase().includes(term)
-      );
+  const classesGrouped = students.reduce((acc, student) => {
+    const key = `${student.class_name}||${student.section || ''}`;
+    const existing = acc.find(c => c.key === key);
+    if (existing) {
+      existing.count++;
+    } else {
+      acc.push({
+        key,
+        class_name: student.class_name,
+        section: student.section,
+        count: 1
+      });
     }
-    
-    // Field filter
-    if (filterField !== 'all') {
-      filtered = filtered.filter(s => s.missing_fields.includes(filterField));
+    return acc;
+  }, [] as Array<{key: string, class_name: string, section?: string, count: number}>);
+
+  const filteredStudents = students.filter(student => {
+    if (searchTerm.trim() === '') {
+      return selectedClassCard ? `${student.class_name}||${student.section || ''}` === selectedClassCard : true;
     }
-    
-    setFilteredStudents(filtered);
-  }
+    const fullName = `${student.first_name} ${student.last_name}`.trim();
+    return fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+           student.student_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+           student.class_name.toLowerCase().includes(searchTerm.toLowerCase());
+  });
 
-  function getAllMissingFields(): string[] {
-    const fields = new Set<string>();
-    students.forEach(s => s.missing_fields.forEach(f => fields.add(f)));
-    return Array.from(fields);
-  }
-
-  function startEditing(studentId: string) {
-    const student = students.find(s => s.student_id === studentId);
-    if (!student) return;
-    
-    // Initialize edit values with empty strings for missing fields
-    const initialValues: { [field: string]: string } = {};
-    student.missing_fields.forEach(field => {
-      if (!['profile_image', 'cnic_image'].includes(field)) {
-        initialValues[field] = '';
-      }
-    });
-    
+  const startEditing = (studentId: string) => {
+    setEditingStudent(studentId);
     setEditValues(prev => ({
       ...prev,
-      [studentId]: initialValues
+      [studentId]: {}
     }));
-    setEditingStudent(studentId);
-  }
+  };
 
-  function cancelEditing() {
+  const cancelEditing = () => {
     setEditingStudent(null);
-    setEditValues({});
-  }
+    setEditValues(prev => {
+      const newValues = { ...prev };
+      delete newValues[editingStudent!];
+      return newValues;
+    });
+  };
 
-  function updateEditValue(studentId: string, field: string, value: string) {
+  const updateEditValue = (studentId: string, field: string, value: string) => {
     setEditValues(prev => ({
       ...prev,
       [studentId]: {
@@ -138,16 +108,10 @@ const MissingDataPage: React.FC = () => {
         [field]: value
       }
     }));
-  }
+  };
 
-  async function saveStudentData(studentId: string) {
-    const values = editValues[studentId];
-    if (!values || Object.keys(values).length === 0) {
-      cancelEditing();
-      return;
-    }
-
-    // Filter out empty values
+  const saveStudentData = async (studentId: string) => {
+    const values = editValues[studentId] || {};
     const updates: { [key: string]: string } = {};
     Object.entries(values).forEach(([key, value]) => {
       if (value.trim()) {
@@ -178,7 +142,7 @@ const MissingDataPage: React.FC = () => {
     } finally {
       setSaving(null);
     }
-  }
+  };
 
   function getMissingFieldIcon(field: string) {
     switch (field) {
@@ -221,128 +185,47 @@ const MissingDataPage: React.FC = () => {
             <h1 className="text-2xl font-bold text-gray-900">Missing Student Data</h1>
           </div>
           <p className="text-gray-600">
-            Review and complete missing information for students. Click on a student row to edit.
+            Complete missing information for {students.length} student{students.length !== 1 ? 's' : ''}
           </p>
         </div>
 
-        {/* Alerts */}
-        {error && (
-          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 text-red-600" />
-            <span className="text-red-700">{error}</span>
-            <button onClick={() => setError(null)} className="ml-auto p-1 hover:bg-red-100 rounded">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-        
-        {success && (
-          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2">
-            <CheckCircle className="w-5 h-5 text-green-600" />
-            <span className="text-green-700">{success}</span>
-          </div>
-        )}
-
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-amber-100 rounded-lg">
-                <AlertTriangle className="w-5 h-5 text-amber-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-gray-900">{students.length}</p>
-                <p className="text-sm text-gray-500">Students with missing data</p>
+        {/* Search and Filters */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex-1">
+              <div className="relative">
+                <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search students by name, ID, or class..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                />
               </div>
             </div>
-          </div>
-          
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-red-100 rounded-lg">
-                <Camera className="w-5 h-5 text-red-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-gray-900">
-                  {students.filter(s => !s.has_profile_image).length}
-                </p>
-                <p className="text-sm text-gray-500">Missing profile photos</p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <FileText className="w-5 h-5 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-gray-900">
-                  {students.filter(s => !s.has_cnic_image).length}
-                </p>
-                <p className="text-sm text-gray-500">Missing CNIC photos</p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-purple-100 rounded-lg">
-                <Phone className="w-5 h-5 text-purple-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-gray-900">
-                  {students.filter(s => s.missing_fields.includes('phone') || s.missing_fields.includes('guardian_phone')).length}
-                </p>
-                <p className="text-sm text-gray-500">Missing phone numbers</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Filters */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
-          <div className="flex flex-wrap items-center gap-4">
-            {/* Search */}
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search by name, roll number, or class..."
-                className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-            </div>
-            
-            {/* Field Filter */}
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-gray-400" />
-              <select
-                value={filterField}
-                onChange={(e) => setFilterField(e.target.value)}
-                className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              >
-                <option value="all">All Missing Fields</option>
-                {getAllMissingFields().map(field => (
-                  <option key={field} value={field}>
-                    {missingFieldLabels[field] || field}
-                  </option>
-                ))}
-              </select>
-            </div>
-            
-            {/* Refresh */}
             <button
-              onClick={loadMissingData}
-              disabled={loading}
-              className="px-4 py-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-2"
+              onClick={() => setSelectedClassCard(null)}
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition"
             >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              Refresh
+              Clear Filters
             </button>
           </div>
         </div>
+
+        {/* Success/Error Messages */}
+        {success && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6 flex items-center">
+            <CheckCircle className="w-5 h-5 text-green-500 mr-2" />
+            <span className="text-green-800">{success}</span>
+          </div>
+        )}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-center">
+            <AlertCircle className="w-5 h-5 text-red-500 mr-2" />
+            <span className="text-red-800">{error}</span>
+          </div>
+        )}
 
         {/* Content */}
         {loading ? (
@@ -350,158 +233,150 @@ const MissingDataPage: React.FC = () => {
             <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
             <span className="ml-2 text-gray-600">Loading...</span>
           </div>
-        ) : filteredStudents.length === 0 ? (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-            <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">
-              {students.length === 0 ? 'All Data Complete!' : 'No Results Found'}
-            </h3>
-            <p className="text-gray-600">
-              {students.length === 0 
-                ? 'All students have complete information.'
-                : 'Try adjusting your search or filter criteria.'
-              }
-            </p>
-          </div>
+        ) : searchTerm.trim() === '' ? (
+          // Show class-card view when search is empty
+          students.length === 0 ? (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+              <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">All Data Complete!</h3>
+              <p className="text-gray-600">All students have complete information.</p>
+            </div>
+          ) : (
+            <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 mb-6">
+                {classesGrouped.map((cls) => (
+                  <button
+                    key={cls.key}
+                    onClick={() => setSelectedClassCard(cls.key === selectedClassCard ? null : cls.key)}
+                    className={`text-left bg-white rounded-2xl p-6 shadow-sm border transition transform hover:-translate-y-1 hover:shadow-md ${selectedClassCard === cls.key ? 'ring-2 ring-indigo-200 border-indigo-200' : 'border-gray-200'}`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-lg font-semibold text-secondary-900 break-words">{cls.class_name}</h3>
+                        <p className="text-sm text-secondary-500 mt-1">Section {cls.section || 'â€”'}</p>
+                      </div>
+                      <div className="w-14 h-14 bg-gradient-to-br from-rose-400 to-yellow-400 text-white rounded-lg flex items-center justify-center shadow-md ml-4">
+                        <div className="text-lg font-bold">{cls.count}</div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
         ) : (
+          // Show table view when searching
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Student</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Class</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Missing Fields</th>
-                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Photos</th>
-                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {filteredStudents.map((student) => (
-                  <React.Fragment key={student.student_id}>
-                    <tr 
-                      className={`hover:bg-gray-50 ${editingStudent === student.student_id ? 'bg-indigo-50' : ''}`}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${student.has_profile_image ? 'bg-green-100' : 'bg-gray-200'}`}>
-                            {student.has_profile_image 
-                              ? <CheckCircle className="w-5 h-5 text-green-600" />
-                              : <User className="w-5 h-5 text-gray-400" />
-                            }
-                          </div>
-                          <div>
-                            <p className="font-medium text-gray-900">
-                              {student.first_name} {student.last_name}
-                            </p>
-                            <p className="text-sm text-gray-500">Roll: {student.roll_number}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600">
-                        {student.class_name} - {student.section}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-1">
-                          {student.missing_fields.slice(0, 4).map((field) => (
-                            <span
-                              key={field}
-                              className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-700 text-xs rounded-full"
-                            >
-                              {getMissingFieldIcon(field)}
-                              {missingFieldLabels[field] || field}
-                            </span>
-                          ))}
-                          {student.missing_fields.length > 4 && (
-                            <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
-                              +{student.missing_fields.length - 4} more
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex justify-center gap-2">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${student.has_profile_image ? 'bg-green-100' : 'bg-red-100'}`}>
-                            <Camera className={`w-4 h-4 ${student.has_profile_image ? 'text-green-600' : 'text-red-600'}`} />
-                          </div>
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${student.has_cnic_image ? 'bg-green-100' : 'bg-red-100'}`}>
-                            <Image className={`w-4 h-4 ${student.has_cnic_image ? 'text-green-600' : 'text-red-600'}`} />
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {editingStudent === student.student_id ? (
-                          <div className="flex justify-center gap-1">
-                            <button
-                              onClick={() => saveStudentData(student.student_id)}
-                              disabled={saving === student.student_id}
-                              className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                              title="Save"
-                            >
-                              {saving === student.student_id 
-                                ? <Loader2 className="w-4 h-4 animate-spin" />
-                                : <Save className="w-4 h-4" />
-                              }
-                            </button>
-                            <button
-                              onClick={cancelEditing}
-                              className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                              title="Cancel"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => startEditing(student.student_id)}
-                            className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                            title="Edit"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                    
-                    {/* Inline Edit Row */}
-                    {editingStudent === student.student_id && (
-                      <tr className="bg-indigo-50">
-                        <td colSpan={5} className="px-4 py-4">
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {student.missing_fields
-                              .filter(f => !['profile_image', 'cnic_image'].includes(f))
-                              .map((field) => (
-                                <div key={field}>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    {missingFieldLabels[field] || field}
-                                  </label>
-                                  <input
-                                    type={getFieldInputType(field)}
-                                    value={editValues[student.student_id]?.[field] || ''}
-                                    onChange={(e) => updateEditValue(student.student_id, field, e.target.value)}
-                                    placeholder={`Enter ${missingFieldLabels[field] || field}`}
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                  />
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Search Results ({filteredStudents.length} student{filteredStudents.length !== 1 ? 's' : ''})
+              </h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Student</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Missing Fields</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredStudents.map((student) => (
+                    <React.Fragment key={student.student_id}>
+                      <tr className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0 h-10 w-10">
+                              {student.has_profile_image ? (
+                                <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
+                                  <Camera className="w-5 h-5 text-green-600" />
                                 </div>
-                              ))
-                            }
-                          </div>
-                          
-                          {/* Image Upload Note */}
-                          {(student.missing_fields.includes('profile_image') || student.missing_fields.includes('cnic_image')) && (
-                            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                              <p className="text-sm text-amber-700">
-                                <AlertTriangle className="w-4 h-4 inline mr-1" />
-                                To upload photos, please go to the student's detail page or use the face recognition module.
-                              </p>
+                              ) : (
+                                <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
+                                  <User className="w-5 h-5 text-gray-600" />
+                                </div>
+                              )}
                             </div>
-                          )}
+                            <div className="ml-4">
+                              <div className="text-sm font-medium text-gray-900">{`${student.first_name} ${student.last_name}`}</div>
+                              <div className="text-sm text-gray-500">{student.student_id}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">{student.class_name}</div>
+                          <div className="text-sm text-gray-500">Section {student.section || 'â€”'}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-wrap gap-1">
+                            {student.missing_fields.map((field) => (
+                              <span key={field} className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-amber-100 text-amber-800">
+                                {getMissingFieldIcon(field)}
+                                <span className="ml-1 capitalize">{field.replace('_', ' ')}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <div className="flex space-x-2">
+                            {editingStudent === student.student_id ? (
+                              <>
+                                <button onClick={() => saveStudentData(student.student_id)} disabled={!!saving} className="px-4 py-2 bg-indigo-600 text-white rounded">{saving === student.student_id ? 'Saving...' : 'Save'}</button>
+                                <button onClick={cancelEditing} className="px-4 py-2 bg-gray-300 text-gray-700 rounded">Cancel</button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => startEditing(student.student_id)}
+                                  className="px-3 py-1 text-indigo-600 border border-indigo-100 rounded-lg text-sm"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingStudent(null);
+                                  }}
+                                  className="px-3 py-1 text-gray-600 border border-gray-100 rounded-lg text-sm"
+                                >
+                                  Details
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
-                    )}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
+                      {editingStudent === student.student_id && (
+                        <tr className="bg-indigo-50">
+                          <td colSpan={4} className="p-4">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              {student.missing_fields.filter(f => !['profile_image','cnic_image'].includes(f)).map((field) => (
+                                <div key={field}>
+                                  <label className="text-xs text-secondary-700 font-medium">{missingFieldLabels[field] || field}</label>
+                                  <input
+                                    type={getFieldInputType(field)}
+                                    value={(editValues[student.student_id] || {})[field] || ''}
+                                    onChange={(e) => updateEditValue(student.student_id, field, e.target.value)}
+                                    className="w-full px-3 py-2 border rounded-lg mt-1"
+                                  />
+                                </div>
+                              ))}
+                              {(student.missing_fields.includes('profile_image') || student.missing_fields.includes('cnic_image')) && (
+                                <div>
+                                  <label className="text-xs text-secondary-700 font-medium">Photos</label>
+                                  <ImageUpload studentId={student.student_id} onImageUploaded={() => { loadMissingData(); }} />
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

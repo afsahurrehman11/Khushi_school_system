@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Button from '../../../components/Button';
-import { Edit2, Trash2, DollarSign } from 'lucide-react';
+import { Edit2, Trash2, DollarSign, BookOpen } from 'lucide-react';
 import Modal from '../../../components/Modal';
 import { classAssignmentsApi, feeCategoriesApi } from '../../accountant/services/feeApi';
 import logger from '../../../utils/logger';
@@ -88,48 +88,77 @@ const ClassCard: React.FC<Props> = ({
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        whileHover={{ scale: 1.02, y: -6 }}
-        transition={{ duration: 0.25 }}
+        whileHover={{ scale: 1.01, y: -4 }}
+        transition={{ duration: 0.3 }}
         onClick={handleCardClick}
-        className="group bg-white rounded-lg p-4 shadow-lg border border-transparent hover:border-secondary-200 cursor-pointer"
+        className="group bg-gradient-to-br from-blue-50 via-white to-purple-50 rounded-xl p-6 shadow-sm border-2 border-blue-100 hover:border-blue-300 hover:shadow-lg cursor-pointer transition-all"
       >
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <h4 className="font-semibold text-primary-800">{title}</h4>
-            <p className="text-sm text-secondary-500">{code ? `${code} • ` : ''}</p>
-
-            {assignments && assignments.length > 0 && (
-              <div className="mt-3 space-y-2">
-                {assignments.map((a, i) => (
-                  <div key={i} className="flex items-center gap-3 text-sm text-secondary-700">
-                    <div className="w-8 h-8 rounded-full bg-primary-50 text-primary-700 flex items-center justify-center text-xs font-semibold">{(a.teacher||a.subject||'').split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase()}</div>
-                    <div className="truncate">
-                      <div className="font-medium">{a.subject || '—'}</div>
-                      <div className="text-sm text-secondary-500">{a.teacher || '—'}{a.time ? ` • ${a.time}` : ''}</div>
-                    </div>
-                  </div>
-                ))}
+        {/* Header */}
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-12 h-12 rounded-xl bg-primary-50 flex items-center justify-center shadow-sm">
+                {/* class/book icon */}
+                <BookOpen className="w-6 h-6 text-primary-600" />
               </div>
-            )}
+              <div className="flex-1 min-w-0">
+                {/* sanitize title to remove excessive em-dashes and normalize spacing */}
+                <h4 className="font-bold text-xl text-blue-900 truncate">{(title || '').replace(/\u2014|\u2013|—|–/g, ' - ').trim()}</h4>
+                {code && <p className="text-sm text-blue-600 font-medium">{code}</p>}
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
             <Button 
               variant="success" 
               size="sm" 
               onClick={(e) => { e.stopPropagation(); setShowFeeModal(true); }}
               title="Assign Fee Category"
+              className="!p-2 !bg-green-50 !text-green-700 hover:!bg-green-100"
             >
               <DollarSign className="w-4 h-4" />
             </Button>
-            <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onEdit?.(); }}>
+            <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); onEdit?.(); }} className="!p-2 !bg-white/80 !text-gray-700 hover:!bg-gray-100">
               <Edit2 className="w-4 h-4" />
             </Button>
-            <Button variant="danger" size="sm" onClick={(e) => { e.stopPropagation(); onDelete?.(); }} disabled={!id}>
+            <Button variant="danger" size="sm" onClick={(e) => { e.stopPropagation(); onDelete?.(); }} disabled={!id} className="!p-2 !bg-red-50 !text-red-700 hover:!bg-red-100">
               <Trash2 className="w-4 h-4" />
             </Button>
           </div>
         </div>
+
+        {/* Subject Assignments */}
+        {assignments && assignments.length > 0 && (
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-px flex-1 bg-gradient-to-r from-blue-200 via-purple-200 to-transparent"></div>
+              <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Assigned Subjects</span>
+              <div className="h-px flex-1 bg-gradient-to-l from-blue-200 via-purple-200 to-transparent"></div>
+            </div>
+            {assignments.slice(0, 3).map((a, i) => (
+              <div key={i} className="flex items-center gap-3 p-3 bg-white/70 rounded-lg border border-blue-100 hover:border-blue-300 transition-colors">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-100 to-purple-200 text-purple-700 flex items-center justify-center text-xs font-bold shadow-sm">
+                  {(a.subject||'').split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-sm text-gray-800 truncate">{a.subject || 'No subject'}</div>
+                  <div className="text-xs text-gray-600 truncate">{a.teacher || 'No teacher'}{a.time ? ` • ${a.time}` : ''}</div>
+                </div>
+              </div>
+            ))}
+            {assignments.length > 3 && (
+              <p className="text-xs text-center text-blue-600 font-medium pt-1">+{assignments.length - 3} more subjects</p>
+            )}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {(!assignments || assignments.length === 0) && (
+          <div className="pt-2 pb-1">
+            <p className="text-sm text-gray-500 text-center italic">No subjects assigned yet</p>
+          </div>
+        )}
       </motion.div>
 
       {showFeeModal && (

@@ -13,6 +13,7 @@ import AddStudentModal from '../components/AddStudentModal';
 import MissingPhotosSection from '../components/MissingPhotosSection';
 import BulkImportWithImagesModal from '../components/BulkImportWithImagesModal';
 import { apiCallJSON, getAuthHeaders } from '../../../utils/api';
+import { entitySync, useEntitySync } from '../../../utils/entitySync';
 import { Student } from '../studentsData';
 
 const StudentList: React.FC = () => {
@@ -29,6 +30,7 @@ const StudentList: React.FC = () => {
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   // Classes for forms
   const [classesForForm, setClassesForForm] = useState<any[]>([]);
+  const [classesList, setClassesList] = useState<any[]>([]);
 
   // Runtime student data
   const [students, setStudents] = useState<Student[]>([]);
@@ -45,6 +47,7 @@ const StudentList: React.FC = () => {
         id: Number(s.id || s.student_id || s.studentId || 0),
         name: s.full_name || s.name || '',
         rollNo: String(s.roll_number || s.roll || ''),
+        registrationNumber: s.registration_number || '',
         class: s.class_id || s.class || null,
         assignedClasses: s.subjects || s.assigned_subjects || [],
         email: s.contact_info?.email || s.email || '',
@@ -54,6 +57,8 @@ const StudentList: React.FC = () => {
         guardianName: s.guardian_info?.father_name || s.guardian_info?.mother_name || s.guardian_name || '',
         guardianPhone: s.guardian_info?.guardian_contact || s.guardian_info?.guardian_phone || s.guardian_contact || '',
         parentCnic: s.guardian_info?.parent_cnic || s.parent_cnic || '',
+        profileImageBlob: s.profile_image_blob || null,
+        profileImageType: s.profile_image_type || 'image/jpeg',
       }));
       setStudents(mapped);
     } catch (err) {
@@ -61,19 +66,50 @@ const StudentList: React.FC = () => {
     }
   };
 
+  // Fetch classes for display (id -> class_name, section)
+  useEffect(() => {
+    let mounted = true;
+    const fetchClasses = async () => {
+      try {
+        const cls = await apiCallJSON('/api/classes');
+        if (!mounted) return;
+        setClassesList((cls || []).map((c: any) => ({ id: c.id || c._id || c._id?.toString?.() || '', class_name: c.class_name || c.name, section: c.section })));
+      } catch (_e) {
+        if (!mounted) return;
+        setClassesList([]);
+      }
+    };
+    fetchClasses();
+    return () => { mounted = false; };
+  }, []);
+
   useEffect(() => { loadStudents(); }, []);
 
-  const allClasses = useMemo(() => {
-    const classes = students.map((st) => st.class).filter((c): c is string => !!c);
-    return Array.from(new Set(classes)).sort();
-  }, [students]);
+  // Entity synchronization
+  useEntitySync('class', (event) => {
+    if (event.type === 'created' || event.type === 'updated' || event.type === 'deleted') {
+      loadStudents(); // Reload students when classes change
+    }
+  });
 
+  useEntitySync('student', (event) => {
+    if (event.type === 'created' || event.type === 'updated' || event.type === 'deleted') {
+      loadStudents(); // Reload students when students change
+    }
+  });
+
+  // derive class lists and mappings using fetched classesList
   const unassignedStudents = useMemo(() => students.filter((s) => !s.class), [students]);
 
   const classStudents = useMemo(() => {
     if (!selectedClass) return [];
-    return students.filter((s) => s.class === selectedClass);
-  }, [selectedClass, students]);
+    // selectedClass stores fullName (e.g. "GradeName-section")
+    return students.filter((s) => {
+      const cls = classesList.find(c => c.id === s.class);
+      const full = cls ? `${cls.class_name}-${cls.section || ''}` : s.class;
+      return full === selectedClass;
+    });
+  }, [selectedClass, students, classesList]);
 
   const filteredStudents = useMemo(() => {
     const list = showUnassigned ? unassignedStudents : classStudents;
@@ -86,17 +122,15 @@ const StudentList: React.FC = () => {
   }, [classStudents, unassignedStudents, searchQuery, showUnassigned]);
 
   const classStats = useMemo(() => {
-    return allClasses.map((className: string) => {
-      const studentsInClass = students.filter((s) => s.class === className);
-      const [grade, section] = className.split('-');
-      return {
-        className: grade,
-        section,
-        fullName: className,
-        studentCount: studentsInClass.length,
-      };
+    // Show ALL classes from database, not just those with students
+    return classesList.map((cls) => {
+      const className = cls.class_name || cls.id;
+      const section = cls.section || '';
+      const fullName = `${className}-${section}`;
+      const studentsInClass = students.filter((s) => s.class === cls.id);
+      return { className, section, fullName, studentCount: studentsInClass.length };
     });
-  }, [allClasses, students]);
+  }, [students, classesList]);
 
   const handleClassClick = (className: string) => {
     setSelectedClass(className);
@@ -142,6 +176,8 @@ const StudentList: React.FC = () => {
     if (ids.length === 0) return;
     try {
       await Promise.all(ids.map((id) => apiCallJSON(`/api/students/${String(id)}`, { method: 'DELETE', headers: getAuthHeaders() })));
+      // Emit delete events for synchronization
+      ids.forEach(id => entitySync.emitStudentDeleted(String(id)));
       setStudents((prev) => prev.filter((s) => !selectedIds.has(s.id)));
       clearSelection();
     } catch (err) {
@@ -169,6 +205,7 @@ const StudentList: React.FC = () => {
 
   const columns = [
     { key: 'rollNo', label: 'Roll No' },
+    { key: 'registrationNumber', label: 'Reg. No.' },
     { key: 'name', label: 'Name' },
     { key: 'parentCnic', label: 'Parent CNIC' },
     { key: 'email', label: 'Email' },
@@ -285,17 +322,21 @@ const StudentList: React.FC = () => {
 
         {viewMode === 'grid' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredStudents.map((student: Student) => (
-              <StudentCard
-                key={student.id}
-                {...student}
-                class={student.class || 'Unassigned'}
-                onClick={() => handleStudentClick(student)}
-                selectable={true}
-                checked={selectedIds.has(String(student.id))}
-                onToggleSelect={() => toggleSelect(String(student.id))}
-              />
-            ))}
+            {filteredStudents.map((student: Student) => {
+              const cls = classesList.find(c => c.id === student.class);
+              const displayClass = cls ? `${cls.class_name}${cls.section ? ` — ${cls.section}` : ''}` : (student.class || 'Unassigned');
+              return (
+                <StudentCard
+                  key={student.id}
+                  {...student}
+                  class={displayClass}
+                  onClick={() => handleStudentClick(student)}
+                  selectable={true}
+                  checked={selectedIds.has(String(student.id))}
+                  onToggleSelect={() => toggleSelect(String(student.id))}
+                />
+              );
+            })}
           </div>
         ) : (
           <div className="bg-white rounded-xl shadow-soft overflow-hidden">
@@ -313,10 +354,17 @@ const StudentList: React.FC = () => {
           <Modal isOpen={!!selectedStudent} onClose={() => setSelectedStudent(null)} title="Student Profile" size="lg">
             <div className="space-y-6">
               <div className="flex items-center gap-4 pb-6 border-b border-secondary-200">
-                <div className="w-20 h-20 bg-primary-100 rounded-full flex items-center justify-center"><span className="text-3xl font-bold text-primary-700">{selectedStudent.name.charAt(0)}</span></div>
+                {selectedStudent.profileImageBlob ? (
+                  <div className="w-20 h-20 rounded-full overflow-hidden flex-shrink-0 border-2 border-primary-200">
+                    <img src={`data:${selectedStudent.profileImageType || 'image/jpeg'};base64,${selectedStudent.profileImageBlob}`} alt={selectedStudent.name} className="w-full h-full object-cover" />
+                  </div>
+                ) : (
+                  <div className="w-20 h-20 bg-primary-100 rounded-full flex items-center justify-center"><span className="text-3xl font-bold text-primary-700">{selectedStudent.name.charAt(0)}</span></div>
+                )}
                 <div>
                   <h2 className="text-2xl font-bold text-secondary-900">{selectedStudent.name}</h2>
                   <p className="text-secondary-600">Roll No: {selectedStudent.rollNo}</p>
+                  {selectedStudent.registrationNumber && <p className="text-sm text-primary-600 font-medium">Reg: {selectedStudent.registrationNumber}</p>}
                   <Badge label={selectedStudent.class || 'Unassigned'} color="primary" />
                 </div>
               </div>

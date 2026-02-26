@@ -2,6 +2,7 @@ export interface Student {
   id: number;
   name: string;
   rollNo: string;
+  registrationNumber?: string;
   class: string | null; // null for unassigned students
   assignedClasses: string[];
   email: string;
@@ -11,6 +12,8 @@ export interface Student {
   guardianName: string;
   guardianPhone: string;
   parentCnic?: string;
+  profileImageBlob?: string | null;
+  profileImageType?: string;
 }
 
 export const studentsData: Student[] = [];

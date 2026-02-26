@@ -148,7 +148,8 @@ async def create_new_student(
             db = get_db()
             school = db.schools.find_one({"_id": ObjectId(school_id)})
             if school:
-                student["school_name"] = school.get("school_name") or school.get("display_name") or "School"
+                # Schools collection uses 'display_name' field
+                student["school_name"] = school.get("display_name") or school.get("name") or "School"
             else:
                 student["school_name"] = "School"
         except Exception as e:
@@ -285,7 +286,8 @@ async def create_student_with_image(
                 db = get_db()
                 school = db.schools.find_one({"_id": ObjectId(school_id)})
                 if school:
-                    student["school_name"] = school.get("school_name") or school.get("display_name") or "School"
+                    # Schools collection uses 'display_name' field
+                    student["school_name"] = school.get("display_name") or school.get("name") or "School"
                 else:
                     student["school_name"] = "School"
             except Exception as e:
@@ -301,7 +303,8 @@ async def create_student_with_image(
             db = get_db()
             school = db.schools.find_one({"_id": ObjectId(school_id)})
             if school:
-                student["school_name"] = school.get("school_name") or school.get("display_name") or "School"
+                # Schools collection uses 'display_name' field
+                student["school_name"] = school.get("display_name") or school.get("name") or "School"
             else:
                 student["school_name"] = "School"
         except Exception as e:

@@ -89,7 +89,7 @@ def get_all_students(filters: dict = None, school_id: str = None) -> list:
         try:
             school = db.schools.find_one({"_id": ObjectId(school_id)})
             if school:
-                school_names[school_id] = school.get("school_name") or school.get("display_name") or "School"
+                school_names[school_id] = school.get("display_name") or school.get("name") or "School"
         except Exception as e:
             logger.warning(f"⚠️ Could not fetch school name for {school_id}: {str(e)}")
     else:
@@ -100,7 +100,7 @@ def get_all_students(filters: dict = None, school_id: str = None) -> list:
                 try:
                     school = db.schools.find_one({"_id": ObjectId(sid)})
                     if school:
-                        school_names[sid] = school.get("school_name") or school.get("display_name") or "School"
+                        school_names[sid] = school.get("display_name") or school.get("name") or "School"
                 except:
                     pass
         except Exception as e:
@@ -152,7 +152,7 @@ def get_student_by_id(student_id: str, school_id: str = None) -> Optional[dict]:
                 if sid:
                     school = db.schools.find_one({"_id": ObjectId(sid)})
                     if school:
-                        student["school_name"] = school.get("school_name") or school.get("display_name") or "School"
+                        student["school_name"] = school.get("display_name") or school.get("name") or "School"
                     else:
                         student["school_name"] = "School"
             except Exception as e:
@@ -179,7 +179,7 @@ def get_student_by_student_id(student_id: str, school_id: str = None) -> Optiona
             if sid:
                 school = db.schools.find_one({"_id": ObjectId(sid)})
                 if school:
-                    student["school_name"] = school.get("school_name") or school.get("display_name") or "School"
+                    student["school_name"] = school.get("display_name") or school.get("name") or "School"
                 else:
                     student["school_name"] = "School"
         except Exception as e:

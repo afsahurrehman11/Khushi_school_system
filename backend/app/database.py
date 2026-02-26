@@ -4,47 +4,12 @@ import logging
 import time
 import os
 from app.config import settings
-from urllib.parse import urlparse, urlunparse, quote_plus
+from app.utils.mongo_uri_patch import patch_mongo_uri, test_mongo_connection
 
 logger = logging.getLogger(__name__)
 
 # Lazy client initialization to avoid hard crashes on import when DNS/SRV fails.
 client = None
-
-def _escape_mongo_uri(uri: str) -> str:
-    """Escape username and password in MongoDB URI according to RFC 3986"""
-    try:
-        parsed = urlparse(uri)
-        if parsed.username or parsed.password:
-            # Escape username and password
-            username = quote_plus(parsed.username) if parsed.username else None
-            password = quote_plus(parsed.password) if parsed.password else None
-            
-            # Reconstruct netloc with escaped credentials
-            netloc = ""
-            if username:
-                netloc += username
-                if password:
-                    netloc += f":{password}"
-                netloc += "@"
-            netloc += parsed.hostname
-            if parsed.port:
-                netloc += f":{parsed.port}"
-            
-            # Reconstruct URI
-            return urlunparse((
-                parsed.scheme,
-                netloc,
-                parsed.path,
-                parsed.params,
-                parsed.query,
-                parsed.fragment
-            ))
-        return uri
-    except Exception as e:
-        logger.warning(f"Failed to escape MongoDB URI: {e}, using original URI")
-        return uri
-
 
 def _create_client(uri: str) -> MongoClient:
     # Decide TLS usage from the URI:
@@ -104,8 +69,9 @@ def ensure_client_connected(retries: int = 3, delay: float = 2.0):
     while attempts < retries:
         try:
             logger.info("Attempting to create MongoClient (attempt %d) for URI: %s", attempts + 1, uri)
-            escaped_uri = _escape_mongo_uri(uri)
-            client = _create_client(escaped_uri)
+            # Auto-patch URI if it contains unescaped credentials
+            patched_uri = patch_mongo_uri(uri)
+            client = _create_client(patched_uri)
             # Trigger server selection to verify connectivity
             client.admin.command("ping")
             logger.info("✅ MongoClient connected successfully")
@@ -136,8 +102,8 @@ def ensure_client_connected(retries: int = 3, delay: float = 2.0):
     try:
         if client is None:
             logger.info("Final attempt to create MongoClient for URI: %s", uri)
-            escaped_uri = _escape_mongo_uri(uri)
-            client = _create_client(escaped_uri)
+            patched_uri = patch_mongo_uri(uri)
+            client = _create_client(patched_uri)
             client.admin.command("ping")
             logger.info("✅ MongoClient connected successfully (final attempt)")
             return client

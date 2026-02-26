@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     face_recognition_url: str = os.environ.get("FACE_RECOGNITION_URL", "http://localhost:5000")
     face_recognition_api_key: Optional[str] = os.environ.get("FACE_RECOGNITION_API_KEY", None)
     face_recognition_enabled: bool = os.environ.get("FACE_RECOGNITION_ENABLED", "true").lower() in ("1", "true", "yes")
+    # Skip ML model loading on startup - models will load lazily on first use
+    # Set to 'true' in production to avoid blocking server startup
+    skip_ml_on_startup: bool = os.environ.get("SKIP_ML_ON_STARTUP", "true").lower() in ("1", "true", "yes")
 
     # Cloudinary Configuration
     cloudinary_cloud_name: str = os.environ.get("CLOUDINARY_CLOUD_NAME", "")

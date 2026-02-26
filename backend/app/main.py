@@ -311,7 +311,11 @@ async def startup_event():
     # ============ BACKGROUND ML MODEL LOADING ============
     # Start ML model loading in background AFTER server is up
     # This ensures the server binds to port immediately while models load in background
-    asyncio.create_task(_load_ml_models_background(db_connected))
+    if getattr(settings, "skip_ml_on_startup", True):
+        logger.info("🔕 ML model loading skipped on startup (SKIP_ML_ON_STARTUP=true)")
+        logger.info("   Face recognition models will load lazily on first use")
+    else:
+        asyncio.create_task(_load_ml_models_background(db_connected))
 
     # Start self-ping background task if enabled and URL provided
     try:
@@ -348,8 +352,9 @@ async def _load_ml_models_background(db_connected: bool) -> None:
         try:
             from app.services import face_service as _face_service_module
             logger.info("📦 Loading PyTorch and FaceNet models...")
-            # Call the init function to load ML libraries
-            _face_service_module._init_ml_libs()
+            # Run ML init in thread pool to avoid blocking the event loop
+            # This allows the server to handle requests while models load
+            await asyncio.to_thread(_face_service_module._init_ml_libs)
             
             # Log the status
             if _face_service_module.USE_FACENET:

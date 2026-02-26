@@ -6,15 +6,26 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Use the SaaS root database for school registry operations. The
-# `schools` collection lives in the SaaS root DB (saas_root_db). Using
-# `get_saas_root_db()` prevents import-time attempts to open a
-# school-specific DB via `get_db()` which raises when no default
-# school database is configured (multi-tenant mode).
-db = get_saas_root_db()
+# Lazy database initialization to prevent import-time connection attempts
+# which can fail during module loading if MongoDB is not reachable
+_db = None
+
+
+def _get_db():
+    """Get the SaaS root database with lazy initialization.
+    
+    This prevents import-time database connections that can fail during
+    module loading and cause deployment failures.
+    """
+    global _db
+    if _db is None:
+        _db = get_saas_root_db()
+    return _db
+
 
 def create_school(school: SchoolSchema) -> SchoolInDB:
     """Create a new school with normalized names"""
+    db = _get_db()
     # Check for duplicates (case-insensitive)
     existing = db.schools.find_one({"name": school.name.lower()})
     if existing:
@@ -47,6 +58,7 @@ def create_school(school: SchoolSchema) -> SchoolInDB:
 
 def get_school(school_id: str) -> SchoolInDB:
     """Get school by ID"""
+    db = _get_db()
     school_doc = db.schools.find_one({"_id": ObjectId(school_id)})
     if not school_doc:
         logger.warning(f"[SCHOOL:{school_id}] School not found")
@@ -59,6 +71,7 @@ def get_school(school_id: str) -> SchoolInDB:
 
 def get_all_schools(is_active: bool = None) -> list:
     """Get all schools with optional filters"""
+    db = _get_db()
     query = {}
     if is_active is not None:
         query["is_active"] = is_active
@@ -74,6 +87,7 @@ def get_all_schools(is_active: bool = None) -> list:
 
 def get_school_by_name(name: str) -> SchoolInDB:
     """Get school by name (normalized)"""
+    db = _get_db()
     school_doc = db.schools.find_one({"name": name.lower()})
     if not school_doc:
         logger.warning(f"[SCHOOL] School '{name}' not found")
@@ -86,6 +100,7 @@ def get_school_by_name(name: str) -> SchoolInDB:
 
 def update_school(school_id: str, school_update: SchoolUpdate) -> SchoolInDB:
     """Update school information"""
+    db = _get_db()
     update_data = school_update.dict(exclude_unset=True)
     
     # Normalize name if updating
@@ -121,6 +136,7 @@ def update_school(school_id: str, school_update: SchoolUpdate) -> SchoolInDB:
 
 def delete_school(school_id: str) -> bool:
     """Soft delete school (deactivate)"""
+    db = _get_db()
     result = db.schools.update_one(
         {"_id": ObjectId(school_id)},
         {"$set": {"is_active": False, "updated_at": datetime.utcnow()}}

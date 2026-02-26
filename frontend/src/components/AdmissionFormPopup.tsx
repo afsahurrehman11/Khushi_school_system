@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import Button from './Button';
 import Modal from './Modal';
-import { Check, Printer, Download } from 'lucide-react';
+import { Printer, Download } from 'lucide-react';
 import logger from '../utils/logger';
 
 interface AdmissionFormPopupProps {

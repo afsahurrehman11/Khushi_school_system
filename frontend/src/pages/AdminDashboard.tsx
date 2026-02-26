@@ -160,7 +160,8 @@ const AdminDashboard: React.FC = () => {
       loadClasses();
       setMessage({ type: 'success', text: `Class "${newClass.name}" created successfully` });
       // Emit synchronization event
-      entitySync.emitClassCreated(newClass.id, newClass);    } catch (error: any) {
+      entitySync.emitClassCreated((newClass as any).id, newClass);
+    } catch (error: any) {
       setMessage({ type: 'error', text: `Error creating class: ${error.message}` });
     }
   };

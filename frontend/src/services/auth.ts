@@ -96,7 +96,7 @@ class AuthService {
   /**
    * Get current user
    */
-  getUser(): User | null {
+  getUser(): AuthUser | null {
     const userStr = localStorage.getItem(this.userKey);
     return userStr ? JSON.parse(userStr) : null;
   }

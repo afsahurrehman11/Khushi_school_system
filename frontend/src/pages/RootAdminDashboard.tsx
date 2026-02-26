@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Plus, Trash2, Eye, EyeOff, AlertCircle, CheckCircle, Users, 
   Building2, HardDrive, RefreshCw, Power, Pause,
-  Search, Key, BarChart3, Database, Loader2, Receipt,
+  Search, Key, Database, Loader2, Receipt,
   LogOut, Calendar, DollarSign, AlertTriangle
 } from 'lucide-react';
 import { 
@@ -221,20 +221,7 @@ const SchoolTable: React.FC<{
     );
   };
 
-  const getPlanBadge = (plan: SchoolPlan) => {
-    const styles = {
-      trial: 'bg-slate-500/20 text-slate-400',
-      basic: 'bg-blue-500/20 text-blue-400',
-      standard: 'bg-indigo-500/20 text-indigo-400',
-      premium: 'bg-purple-500/20 text-purple-400',
-      enterprise: 'bg-amber-500/20 text-amber-400',
-    };
-    return (
-      <span className={`px-2 py-1 text-xs font-medium rounded-full ${styles[plan]}`}>
-        {plan.charAt(0).toUpperCase() + plan.slice(1)}
-      </span>
-    );
-  };
+  
 
   // Filter and sort schools
   const filteredSchools = schools

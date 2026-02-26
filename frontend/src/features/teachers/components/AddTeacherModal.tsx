@@ -37,7 +37,7 @@ const AddTeacherModal: React.FC<AddTeacherModalProps> = ({ isOpen, onClose, onTe
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [availableClasses, setAvailableClasses] = useState<any[]>([]);
+  const [, setAvailableClasses] = useState<any[]>([]);
   const [availableSubjects, setAvailableSubjects] = useState<any[]>([]);
   const [newTeacherId, setNewTeacherId] = useState<string | null>(null);
   const [showImageUpload, setShowImageUpload] = useState(false);
@@ -74,7 +74,6 @@ const AddTeacherModal: React.FC<AddTeacherModalProps> = ({ isOpen, onClose, onTe
 
       // Parse existing assignments
       const classes = teacher.assigned_classes || [];
-      const subjects = teacher.assigned_subjects || [];
       
       // Group by class
       const assignmentsMap: { [key: string]: ClassAssignment } = {};

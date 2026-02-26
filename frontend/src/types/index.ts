@@ -33,50 +33,6 @@ export interface GlobalUser {
   created_at: string;
 }
 
-/**
- * JWT Token Payload
- */
-export interface TokenPayload {
-  sub: string;
-  user_id: string;
-  role: string;
-  database_name?: string;
-  school_slug?: string;
-  school_id?: string;
-  exp: number;
-}
-
-/**
- * Login Request
- */
-export interface LoginRequest {
-  email: string;
-  password: string;
-}
-
-/**
- * Login Response
- */
-export interface LoginResponse {
-  access_token: string;
-  token_type: string;
-  user: AuthUser;
-}
-
-/**
- * Auth User Type (from auth response)
- */
-export interface AuthUser {
-  id: string;
-  email: string;
-  name: string;
-  role: string;
-  school_id?: string;
-  school_slug?: string;
-  database_name?: string;
-  created_at: string;
-  is_active: boolean;
-}
 
 /**
  * SaaS School Type - For root admin management
@@ -479,8 +435,22 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole | string;
+  school_id?: string;
+  school_slug?: string;
+  database_name?: string;
+  created_at?: string;
+  is_active?: boolean;
+}
+
 export interface LoginResponse {
-  token: string;
+  access_token?: string;
+  token?: string;
+  token_type?: string;
   user: AuthUser;
 }
 
@@ -489,6 +459,8 @@ export interface TokenPayload {
   email: string;
   role: UserRole;
   school_id?: string;
+  school_slug?: string;
+  database_name?: string;
   iat: number;
   exp: number;
 }

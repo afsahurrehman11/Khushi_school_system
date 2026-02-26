@@ -16,7 +16,7 @@ import AddStudentModal from '../features/students/components/AddStudentModal';
 import { downloadSampleTemplate } from '../features/students/services/importExportApi';
 import { classesService } from '../services/classes';
 import { Class } from '../types';
-import { entitySync, useEntitySync } from '../utils/entitySync';
+import { useEntitySync } from '../utils/entitySync';
 import {
   Student,
   getAllClasses,
@@ -39,7 +39,7 @@ const StudentList: React.FC = () => {
 
   // API-fetched classes
   const [apiClasses, setApiClasses] = useState<Class[]>([]);
-  const [loadingClasses, setLoadingClasses] = useState(false);
+  const [, setLoadingClasses] = useState(false);
 
   // Check if current user is Admin (import/export is Admin-only, NOT Root)
   const [isAdmin, setIsAdmin] = useState(false);

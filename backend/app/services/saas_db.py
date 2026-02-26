@@ -13,6 +13,7 @@ import re
 from datetime import datetime
 from bson import ObjectId
 from app.config import settings
+from urllib.parse import urlparse, urlunparse, quote_plus
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,41 @@ def _create_client(uri: str) -> MongoClient:
     return MongoClient(uri, **kwargs)
 
 
+def _escape_mongo_uri(uri: str) -> str:
+    """Escape username and password in MongoDB URI according to RFC 3986"""
+    try:
+        parsed = urlparse(uri)
+        if parsed.username or parsed.password:
+            # Escape username and password
+            username = quote_plus(parsed.username) if parsed.username else None
+            password = quote_plus(parsed.password) if parsed.password else None
+            
+            # Reconstruct netloc with escaped credentials
+            netloc = ""
+            if username:
+                netloc += username
+                if password:
+                    netloc += f":{password}"
+                netloc += "@"
+            netloc += parsed.hostname
+            if parsed.port:
+                netloc += f":{parsed.port}"
+            
+            # Reconstruct URI
+            return urlunparse((
+                parsed.scheme,
+                netloc,
+                parsed.path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment
+            ))
+        return uri
+    except Exception as e:
+        logger.warning(f"Failed to escape MongoDB URI: {e}, using original URI")
+        return uri
+
+
 def get_mongo_client() -> MongoClient:
     """Get or create the MongoDB client"""
     global _client
@@ -65,7 +101,9 @@ def get_mongo_client() -> MongoClient:
     if _client is None:
         uri = settings.mongo_uri
         try:
-            _client = _create_client(uri)
+            # Escape username and password in URI
+            escaped_uri = _escape_mongo_uri(uri)
+            _client = _create_client(escaped_uri)
             _client.admin.command("ping")
             logger.info("✅ SaaS MongoDB client connected")
         except Exception as e:

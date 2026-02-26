@@ -10,7 +10,8 @@ import type {
   IncompleteStudentsResponse,
 } from '../types/importExport';
 
-const BASE = '/api/students-import-export';
+// Note: config.API_BASE_URL already includes /api suffix
+const BASE = '/students-import-export';
 
 /**
  * Download the sample Excel template.

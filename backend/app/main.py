@@ -228,8 +228,20 @@ except Exception as e:
 @app.on_event("startup")
 async def startup_event():
     """Application startup event"""
+    import re
     logger.info("🚀 Starting Khushi ERP System API")
     logger.info("=" * 60)
+    
+    # Log MONGO_URI for debugging (masked password)
+    mongo_uri = settings.mongo_uri
+    masked_uri = re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', mongo_uri)
+    logger.info(f"🔗 MONGO_URI (masked): {masked_uri}")
+    
+    # Check if URI contains encoded characters
+    if '%40' in mongo_uri or '%2A' in mongo_uri:
+        logger.info("   ✓ URI contains URL-encoded characters")
+    else:
+        logger.info("   ⚠ URI does NOT contain URL-encoded characters")
     
     # ============ DATABASE CONNECTION ============
     logger.info("📊 Connecting to MongoDB...")

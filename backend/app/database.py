@@ -3,6 +3,7 @@ from pymongo.errors import ConfigurationError
 import logging
 import time
 import os
+import re
 from app.config import settings
 from app.utils.mongo_uri_patch import patch_mongo_uri, test_mongo_connection
 
@@ -10,6 +11,10 @@ logger = logging.getLogger(__name__)
 
 # Lazy client initialization to avoid hard crashes on import when DNS/SRV fails.
 client = None
+
+def _mask_uri(uri: str) -> str:
+    """Mask password in URI for logging"""
+    return re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', uri)
 
 def _create_client(uri: str) -> MongoClient:
     # Decide TLS usage from the URI:

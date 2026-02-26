@@ -64,8 +64,22 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Verify password
-    if not verify_password(password, user.get("password_hash", "")):
+    # Verify password - support both hashed and plain passwords for now
+    stored_password_hash = user.get("password_hash")
+    stored_password_plain = user.get("password")
+    
+    password_valid = False
+    
+    if stored_password_hash:
+        # Use hashed password verification
+        password_valid = verify_password(password, stored_password_hash)
+    elif stored_password_plain:
+        # Use plain password comparison (temporary)
+        password_valid = password == stored_password_plain
+    else:
+        logger.warning(f"❌ Login failed: No password field found for user - {email}")
+    
+    if not password_valid:
         logger.warning(f"❌ Login failed: Invalid password - {email}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

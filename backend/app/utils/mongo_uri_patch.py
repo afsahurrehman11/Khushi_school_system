@@ -115,11 +115,17 @@ def patch_mongo_uri(uri: str) -> str:
         Patched URI with encoded credentials, or original URI if no patching needed
     """
     try:
+        # TEMPORARILY DISABLED - URI should already be properly encoded
+        # If the URI is already encoded (contains %XX patterns), don't re-encode
+        if '%40' in uri or '%2A' in uri or '%2a' in uri:
+            logger.info("✅ MongoDB URI already contains encoded characters - skipping patch")
+            return uri
+        
         # Parse the URI
         username, password, base_uri = parse_mongo_uri(uri)
 
         # Check if encoding is needed
-        if not username or not needs_encoding(username) and not (password and needs_encoding(password)):
+        if not username or (not needs_encoding(username) and not (password and needs_encoding(password))):
             logger.debug("MongoDB URI does not need encoding")
             return uri
 

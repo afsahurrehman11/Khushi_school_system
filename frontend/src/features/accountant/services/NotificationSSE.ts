@@ -3,6 +3,7 @@ import { InAppNotificationService } from './InAppNotificationService';
 import { config } from '../../../config';
 import logger from '../../../utils/logger';
 
+// API_BASE already includes /api suffix, so don't duplicate it
 const API_BASE = config.API_BASE_URL;
 
 function handlePayload(raw: string) {
@@ -20,7 +21,7 @@ function handlePayload(raw: string) {
 
 export function startNotificationSSE(): () => void {
   const token = localStorage.getItem('token');
-  const url = `${API_BASE}/api/notifications/stream`;
+  const url = `${API_BASE}/notifications/stream`;
 
   const controller = new AbortController();
   let stopped = false;

@@ -105,31 +105,61 @@ function App() {
   React.useEffect(() => {
     // Backend health check
     const checkBackend = async () => {
+      const isDev = import.meta.env.DEV;
+      
+      // Log environment mode
+      console.log(`%c[ENVIRONMENT] Running in ${isDev ? 'DEVELOPMENT' : 'PRODUCTION'} mode`, 
+        isDev ? 'color: orange; font-weight: bold' : 'color: green; font-weight: bold');
+      console.log(`%c[BACKEND] Initial API URL: ${config.API_BASE_URL}`, 'color: cyan');
+      
+      // In production build, only use Render backend
+      if (!isDev) {
+        try {
+          const response = await fetch('https://khushi-school-system.onrender.com/health', { method: 'GET' });
+          if (response.ok) {
+            logger.info('BACKEND', 'Health check passed - connected to PRODUCTION backend (Render)');
+            config.API_BASE_URL = 'https://khushi-school-system.onrender.com/api';
+            console.log('%c[BACKEND] ✅ Connected to: https://khushi-school-system.onrender.com/api', 'color: lime; font-weight: bold');
+          } else {
+            logger.warn('BACKEND', 'Health check failed - Render backend not responding');
+            console.log('%c[BACKEND] ⚠️ Render backend not responding', 'color: yellow; font-weight: bold');
+          }
+        } catch (error) {
+          logger.error('BACKEND', `Health check error - Render backend unreachable: ${String(error)}`);
+          console.log('%c[BACKEND] ❌ Failed to connect to Render backend', 'color: red; font-weight: bold');
+        }
+        return;
+      }
+      
+      // In development, try localhost ports first
       const ports = [8000, 8001, 8002, 8003, 8004];
       for (const port of ports) {
         try {
           const response = await fetch(`http://localhost:${port}/health`, { method: 'GET' });
           if (response.ok) {
             logger.info('BACKEND', `Health check passed - backend is running on port ${port}`);
-            // Update the API_BASE_URL to the correct port
-            config.API_BASE_URL = `http://localhost:${port}`;
+            config.API_BASE_URL = `http://localhost:${port}/api`;
+            console.log(`%c[BACKEND] ✅ Connected to: http://localhost:${port}/api (DEVELOPMENT)`, 'color: lime; font-weight: bold');
             return;
           }
         } catch (error) {
           // Continue to next port
         }
       }
-      // If no local port works, try production
+      // If no local port works in dev, try production as fallback
       try {
         const response = await fetch('https://khushi-school-system.onrender.com/health', { method: 'GET' });
         if (response.ok) {
-          logger.info('BACKEND', 'Health check passed - backend is running on Render');
-          config.API_BASE_URL = 'https://khushi-school-system.onrender.com';
+          logger.info('BACKEND', 'Health check passed - falling back to Render backend');
+          config.API_BASE_URL = 'https://khushi-school-system.onrender.com/api';
+          console.log('%c[BACKEND] ✅ Fallback to: https://khushi-school-system.onrender.com/api', 'color: lime; font-weight: bold');
         } else {
           logger.warn('BACKEND', 'Health check failed - no backend available');
+          console.log('%c[BACKEND] ⚠️ No backend available', 'color: yellow; font-weight: bold');
         }
       } catch (error) {
         logger.error('BACKEND', `Health check error - no backend available: ${String(error)}`);
+        console.log('%c[BACKEND] ❌ No backend available', 'color: red; font-weight: bold');
       }
     };
     checkBackend();

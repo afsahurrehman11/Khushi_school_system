@@ -43,7 +43,7 @@ from app.routers import saas as saas_router
 from app.routers import billing as billing_router
 from app.routers import fee_vouchers as fee_vouchers_router
 from app.routers import analytics as analytics_router
-from app.services import face_service as _face_service_module
+# NOTE: face_service is imported lazily in startup_event to avoid loading heavy ML libraries at module import time
 from app.middleware.database_routing import database_routing_middleware
 
 # Configure logging (level configurable via LOG_LEVEL env var / settings.log_level)
@@ -142,42 +142,11 @@ try:
 
     simulate_computation()
 
-    # Import heavy libraries with detailed logging
-    logger.info("📦 Importing heavy ML libraries...")
+    # NOTE: Heavy ML libraries (TensorFlow, PyTorch, DeepFace) are now loaded 
+    # LAZILY in a background task AFTER the server starts to avoid deployment timeouts.
+    # See the startup_event() function for deferred loading.
 
-    try:
-        import torch
-        logger.info("✅ PyTorch imported successfully")
-        log_memory()
-    except Exception as e:
-        logger.error(f"❌ PyTorch import failed: {e}")
-        log_memory()
-
-    try:
-        import tensorflow as tf
-        logger.info("✅ TensorFlow imported successfully")
-        log_memory()
-    except Exception as e:
-        logger.error(f"❌ TensorFlow import failed: {e}")
-        log_memory()
-
-    try:
-        import deepface
-        logger.info("✅ DeepFace imported successfully")
-        log_memory()
-    except Exception as e:
-        logger.error(f"❌ DeepFace import failed: {e}")
-        log_memory()
-
-    try:
-        from facenet_pytorch import InceptionResnetV1
-        logger.info("✅ FaceNet PyTorch imported successfully")
-        log_memory()
-    except Exception as e:
-        logger.error(f"❌ FaceNet PyTorch import failed: {e}")
-        log_memory()
-
-    logger.info("✅ Heavy library imports completed")
+    logger.info("✅ Skipping heavy ML imports at startup (will load lazily on demand)")
     log_memory()
 
     # Initialize FastAPI app
@@ -260,16 +229,27 @@ except Exception as e:
 async def startup_event():
     """Application startup event"""
     logger.info("🚀 Starting Khushi ERP System API")
+    logger.info("=" * 60)
+    
+    # ============ DATABASE CONNECTION ============
+    logger.info("📊 Connecting to MongoDB...")
     db_connected = False
     try:
         # Attempt to get DB; this will try to connect lazily and may raise if unreachable
         db = get_db()
         # Test database connection
         db.command("ping")
-        logger.info("✅ Database connection established")
+        logger.info("✅ MongoDB connection: SUCCESS")
+        logger.info(f"   Database: {db.name}")
+        
+        # Log collections count
+        collections = db.list_collection_names()
+        logger.info(f"   Collections found: {len(collections)}")
         db_connected = True
     except Exception as e:
-        logger.error(f"❌ Database connection failed (will continue without DB): {e}")
+        logger.error("❌ MongoDB connection: FAILED")
+        logger.error(f"   Error: {e}")
+        logger.warning("⚠️ Server will continue without database (limited functionality)")
 
     if db_connected:
         try:
@@ -286,6 +266,7 @@ async def startup_event():
         try:
             from app.services.saas_db import get_saas_root_db
             saas_db = get_saas_root_db()
+            logger.info("✅ SaaS root database connection: SUCCESS")
             
             # Create indexes for saas_root_db
             saas_db.schools.create_index("school_id", unique=True)
@@ -295,7 +276,7 @@ async def startup_event():
             saas_db.usage_snapshots.create_index([("school_id", 1), ("date", -1)])
             saas_db.usage_snapshots.create_index("date")
             
-            logger.info("✅ SaaS root database initialized with indexes")
+            logger.info("✅ SaaS root database indexes created")
         except Exception as e:
             logger.warning(f"⚠️ SaaS root database initialization: {e}")
         
@@ -306,49 +287,18 @@ async def startup_event():
             logger.info("✅ SaaS background jobs started")
         except Exception as e:
             logger.warning(f"⚠️ Failed to start SaaS background jobs: {e}")
-            
     else:
-        logger.warning("⚠️ Skipping collection creation because the database is not connected.")
-
-    # Face recognition model & embedding cache: Skip in multi-tenant mode, load in single-tenant mode
-    # In multi-tenant, face embeddings are loaded per-school on-demand
-    if db_connected and getattr(settings, "database_name", None):
-        try:
-            # Single-tenant mode: try disk cache first, else load from DB and persist
-            try:
-                counts = _face_service_module.load_cache_from_disk()
-                if (counts.get('students', 0) + counts.get('employees', 0)) > 0:
-                    logger.info(f"✅ Face embeddings loaded from disk cache: {counts}")
-                else:
-                    # Load from DB per-school and then persist
-                    try:
-                        db = get_db()
-                        schools = list(db.schools.find()) if 'schools' in db.list_collection_names() else []
-                        if not schools:
-                            sample = db.users.find_one({"school_id": {"$exists": True}})
-                            if sample and sample.get('school_id'):
-                                schools = [{'_id': sample.get('school_id')}]
-
-                        for s in schools:
-                            sid = str(s.get('_id'))
-                            face_service = _face_service_module.FaceRecognitionService(db)
-                            await face_service.load_embeddings_to_cache(sid)
-
-                        # Persist to disk for faster future startups
-                        saved = _face_service_module.dump_cache_to_disk()
-                        logger.info(f"✅ Face embeddings cached to disk: {saved}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Failed to load embeddings from DB or persist cache: {e}")
-            except Exception as e:
-                logger.warning(f"⚠️ Face cache disk load error: {e}")
-        except Exception as e:
-            # Importing or loading face services may fail if dependencies are missing; log and continue.
-            logger.warning(f"⚠️ Skipping face cache load on startup: {e}")
-    else:
-        logger.info("ℹ️ Multi-tenant mode: Skipping face cache preload (loaded on-demand per school)")
-
-    logger.info("✅ All routers registered successfully")
-    logger.info(f"📡 API running on configured origins: {settings.allowed_origins}")
+        logger.warning("⚠️ Skipping database initialization - DB not connected")
+    
+    logger.info("=" * 60)
+    logger.info("✅ Server is now READY and accepting requests!")
+    logger.info(f"📡 Allowed origins: {settings.allowed_origins}")
+    logger.info("=" * 60)
+    
+    # ============ BACKGROUND ML MODEL LOADING ============
+    # Start ML model loading in background AFTER server is up
+    # This ensures the server binds to port immediately while models load in background
+    asyncio.create_task(_load_ml_models_background(db_connected))
 
     # Start self-ping background task if enabled and URL provided
     try:
@@ -362,6 +312,88 @@ async def startup_event():
             logger.info("🔕 Self-ping disabled (no SELF_PING_URL or explicitly disabled)")
     except Exception as e:
         logger.warning(f"⚠️ Failed to start self-ping background task: {e}")
+
+
+# --- Background ML Model Loading Task ---------------------------------
+async def _load_ml_models_background(db_connected: bool) -> None:
+    """Load heavy ML models in background after server is up.
+    
+    This runs AFTER the server has started and bound to a port,
+    ensuring deployment platforms don't timeout waiting for the port.
+    ML models (PyTorch, TensorFlow, FaceNet) can take 2-5 minutes to load.
+    """
+    logger.info("=" * 60)
+    logger.info("🧠 Starting background ML model loading...")
+    logger.info("   (Server is accepting requests while models load)")
+    logger.info("=" * 60)
+    
+    # Give the server a moment to fully initialize
+    await asyncio.sleep(2)
+    
+    try:
+        # Import and initialize face_service (this triggers ML library loading)
+        from app.services import face_service as _face_service_module
+        
+        logger.info("📦 Loading PyTorch and FaceNet models...")
+        # Call the init function to load ML libraries
+        _face_service_module._init_ml_libs()
+        
+        # Log the status
+        if _face_service_module.USE_FACENET:
+            logger.info("✅ FaceNet model loaded successfully")
+        else:
+            logger.info("⚠️ FaceNet not available, using fallback embedding method")
+        
+        if _face_service_module.CV2_AVAILABLE:
+            logger.info("✅ OpenCV loaded for face detection")
+        else:
+            logger.warning("⚠️ OpenCV not available")
+        
+        log_memory()
+        
+        # Load face embeddings cache if DB is connected
+        if db_connected:
+            logger.info("📥 Loading face embeddings into cache...")
+            try:
+                counts = _face_service_module.load_cache_from_disk()
+                if (counts.get('students', 0) + counts.get('employees', 0)) > 0:
+                    logger.info(f"✅ Face embeddings loaded from disk: students={counts.get('students', 0)}, employees={counts.get('employees', 0)}")
+                else:
+                    logger.info("ℹ️ No cached embeddings found on disk")
+                    # Try to load from database
+                    try:
+                        db = get_db()
+                        schools = list(db.schools.find()) if 'schools' in db.list_collection_names() else []
+                        if not schools:
+                            sample = db.users.find_one({"school_id": {"$exists": True}})
+                            if sample and sample.get('school_id'):
+                                schools = [{'_id': sample.get('school_id')}]
+
+                        if schools:
+                            for s in schools:
+                                sid = str(s.get('_id'))
+                                face_service = _face_service_module.FaceRecognitionService(db)
+                                await face_service.load_embeddings_to_cache(sid)
+                            
+                            # Persist to disk for faster future startups
+                            saved = _face_service_module.dump_cache_to_disk()
+                            logger.info(f"✅ Face embeddings loaded from DB and cached to disk: {saved}")
+                        else:
+                            logger.info("ℹ️ No schools found - embeddings will be loaded on first access")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not load embeddings from DB: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️ Face cache loading error: {e}")
+        
+        logger.info("=" * 60)
+        logger.info("🎉 ML model loading complete! Face recognition is ready.")
+        logger.info("=" * 60)
+        
+    except Exception as e:
+        logger.error(f"❌ ML model loading failed: {e}")
+        logger.warning("⚠️ Face recognition features may not work properly")
+        import traceback
+        logger.debug(f"ML loading traceback: {traceback.format_exc()}")
 
 
 # --- Self-ping (keep-alive) background task ---------------------------------

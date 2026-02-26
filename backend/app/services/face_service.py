@@ -21,39 +21,61 @@ handler.setFormatter(logging.Formatter('[FACE][%(levelname)s] %(message)s'))
 if not logger.handlers:
     logger.addHandler(handler)
 
-# Optional FaceNet integration
+# Lazy loading flags for heavy ML libraries
+# These will be initialized on first use to avoid slow startup
+_ml_libs_initialized = False
 USE_FACENET = False
 FACENET_MODEL = None
 DEVICE = None
 TORCH = None
 Image = None
+CV2_AVAILABLE = False
+cv2 = None
 
-try:
-    import torch as _torch
-    TORCH = _torch
-    from facenet_pytorch import InceptionResnetV1  # type: ignore
-    from PIL import Image as _Image
-    Image = _Image
-    FACENET_MODEL = InceptionResnetV1(pretrained='vggface2').eval()
-    DEVICE = TORCH.device('cuda' if TORCH.cuda.is_available() else 'cpu')
-    FACENET_MODEL = FACENET_MODEL.to(DEVICE)
-    USE_FACENET = True
-    logger.info(f"FaceNet loaded on {DEVICE}")
-except Exception as e:
-    # FaceNet is optional; fall back silently but note at INFO level.
-    logger.info(f"FaceNet not available, using fallback: {e}")
-    USE_FACENET = False
+def _init_ml_libs():
+    """Lazily initialize heavy ML libraries (PyTorch, FaceNet, OpenCV).
+    
+    Only called when actually needed for face recognition operations,
+    not at module import time to avoid slow server startup.
+    """
+    global _ml_libs_initialized, USE_FACENET, FACENET_MODEL, DEVICE, TORCH, Image, CV2_AVAILABLE, cv2
+    
+    if _ml_libs_initialized:
+        return
+    
+    _ml_libs_initialized = True
+    logger.info("📦 Initializing ML libraries for face recognition...")
+    
+    # Try to load FaceNet/PyTorch
+    try:
+        import torch as _torch
+        TORCH = _torch
+        from facenet_pytorch import InceptionResnetV1  # type: ignore
+        from PIL import Image as _Image
+        Image = _Image
+        FACENET_MODEL = InceptionResnetV1(pretrained='vggface2').eval()
+        DEVICE = TORCH.device('cuda' if TORCH.cuda.is_available() else 'cpu')
+        FACENET_MODEL = FACENET_MODEL.to(DEVICE)
+        USE_FACENET = True
+        logger.info(f"✅ FaceNet loaded on {DEVICE}")
+    except Exception as e:
+        logger.info(f"FaceNet not available, using fallback: {e}")
+        USE_FACENET = False
 
-# Try OpenCV for face detection
-try:
-    import cv2
-    CV2_AVAILABLE = True
-except ImportError:
-    CV2_AVAILABLE = False
-    logger.warning("OpenCV not available for face detection")
+    # Try OpenCV for face detection
+    try:
+        import cv2 as _cv2
+        cv2 = _cv2
+        CV2_AVAILABLE = True
+        logger.info("✅ OpenCV loaded")
+    except ImportError:
+        CV2_AVAILABLE = False
+        logger.warning("OpenCV not available for face detection")
 
-# Embedding version
-EMBEDDING_VERSION = "facenet_v1" if USE_FACENET else "fallback_v1"
+def _get_embedding_version():
+    """Get embedding version based on available libraries."""
+    _init_ml_libs()
+    return "facenet_v1" if USE_FACENET else "fallback_v1"
 
 # In-memory embedding cache
 _embedding_cache: Dict[str, Dict[str, Any]] = {
@@ -297,6 +319,8 @@ class FaceRecognitionService:
     
     def _image_bytes_to_embedding(self, data: bytes) -> Optional[np.ndarray]:
         """Convert image bytes to normalized embedding vector"""
+        # Lazily initialize ML libraries when first needed
+        _init_ml_libs()
         
         if USE_FACENET and FACENET_MODEL is not None and Image is not None:
             try:
@@ -855,7 +879,7 @@ class EmbeddingGenerationService:
                             "embedding_status": "generated",
                             "embedding_generated_at": datetime.utcnow(),
                             "embedding_model": "facenet" if USE_FACENET else "fallback",
-                            "embedding_version": EMBEDDING_VERSION
+                            "embedding_version": _get_embedding_version()
                         }
                     }
                 )
@@ -976,7 +1000,7 @@ class EmbeddingGenerationService:
                         "embedding_status": "generated",
                         "embedding_generated_at": datetime.utcnow(),
                         "embedding_model": "facenet" if USE_FACENET else "fallback",
-                        "embedding_version": EMBEDDING_VERSION
+                        "embedding_version": _get_embedding_version()
                     }
                 }
             )

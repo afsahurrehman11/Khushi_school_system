@@ -143,6 +143,18 @@ async def create_new_student(
             logger.error("❌ Failed to create student - possible duplicate ID")
             raise HTTPException(status_code=400, detail="Failed to create student. Student ID may already exist.")
         
+        # Fetch and include school_name in response for PDF/form generation
+        try:
+            db = get_db()
+            school = db.schools.find_one({"_id": ObjectId(school_id)})
+            if school:
+                student["school_name"] = school.get("school_name") or school.get("display_name") or "School"
+            else:
+                student["school_name"] = "School"
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch school name: {str(e)}")
+            student["school_name"] = "School"
+        
         logger.info(f"✅ Student created successfully: {student['student_id']}")
         return student
     except HTTPException:
@@ -268,9 +280,33 @@ async def create_student_with_image(
 
         # If there was an image warning, expose it via a response header so frontend can show a friendly message
         if image_warning:
+            # Fetch and include school_name in response
+            try:
+                db = get_db()
+                school = db.schools.find_one({"_id": ObjectId(school_id)})
+                if school:
+                    student["school_name"] = school.get("school_name") or school.get("display_name") or "School"
+                else:
+                    student["school_name"] = "School"
+            except Exception as e:
+                logger.warning(f"⚠️ Could not fetch school name: {str(e)}")
+                student["school_name"] = "School"
+            
             # Truncate header length to reasonable size
             resp_headers = {"X-Image-Warning": image_warning[:240]}
             return Response(content=json.dumps(student, default=str), media_type="application/json", headers=resp_headers)
+
+        # Fetch and include school_name in response
+        try:
+            db = get_db()
+            school = db.schools.find_one({"_id": ObjectId(school_id)})
+            if school:
+                student["school_name"] = school.get("school_name") or school.get("display_name") or "School"
+            else:
+                student["school_name"] = "School"
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch school name: {str(e)}")
+            student["school_name"] = "School"
 
         return student
         

@@ -19,6 +19,7 @@ class ContactInfo(BaseModel):
 
 class StudentSchema(BaseModel):
     school_id: str  # School isolation
+    school_name: Optional[str] = None  # School name for display in forms
     student_id: str
     registration_number: Optional[str] = None  # Auto-generated REG-YYYY-#### format
     full_name: str

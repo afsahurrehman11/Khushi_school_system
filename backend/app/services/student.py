@@ -82,6 +82,30 @@ def get_all_students(filters: dict = None, school_id: str = None) -> list:
         logger.info(f"[SCHOOL:{school_id}] 📋 Fetching students")
     
     students = list(db.students.find(query))
+    
+    # Fetch school name mapping if filtering by school_id
+    school_names = {}
+    if school_id:
+        try:
+            school = db.schools.find_one({"_id": ObjectId(school_id)})
+            if school:
+                school_names[school_id] = school.get("school_name") or school.get("display_name") or "School"
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch school name for {school_id}: {str(e)}")
+    else:
+        # If Root is fetching all schools, build a school name mapping
+        try:
+            school_ids = set(s.get("school_id") for s in students if s.get("school_id"))
+            for sid in school_ids:
+                try:
+                    school = db.schools.find_one({"_id": ObjectId(sid)})
+                    if school:
+                        school_names[sid] = school.get("school_name") or school.get("display_name") or "School"
+                except:
+                    pass
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch school names: {str(e)}")
+    
     for student in students:
         # ensure id string
         student["id"] = str(student["_id"])
@@ -101,6 +125,12 @@ def get_all_students(filters: dict = None, school_id: str = None) -> list:
             student['created_at'] = datetime.utcnow()
         if 'updated_at' not in student:
             student['updated_at'] = datetime.utcnow()
+        # Add school_name if available
+        sid = student.get('school_id')
+        if sid and sid in school_names:
+            student['school_name'] = school_names[sid]
+        elif not student.get('school_name'):
+            student['school_name'] = 'School'
     
     logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(students)} students") if school_id else None
     return students
@@ -116,6 +146,18 @@ def get_student_by_id(student_id: str, school_id: str = None) -> Optional[dict]:
         student = db.students.find_one(query)
         if student:
             student["id"] = str(student["_id"])
+            # Fetch school_name for display in forms
+            try:
+                sid = student.get("school_id")
+                if sid:
+                    school = db.schools.find_one({"_id": ObjectId(sid)})
+                    if school:
+                        student["school_name"] = school.get("school_name") or school.get("display_name") or "School"
+                    else:
+                        student["school_name"] = "School"
+            except Exception as e:
+                logger.warning(f"⚠️ Could not fetch school name for {student_id}: {str(e)}")
+                student.setdefault("school_name", "School")
             logger.info(f"[SCHOOL:{school_id or 'N/A'}] 🔍 Retrieved student: {student_id}") if school_id else None
         return student
     except:
@@ -131,6 +173,18 @@ def get_student_by_student_id(student_id: str, school_id: str = None) -> Optiona
     student = db.students.find_one(query)
     if student:
         student["id"] = str(student["_id"])
+        # Fetch school_name for display in forms
+        try:
+            sid = student.get("school_id")
+            if sid:
+                school = db.schools.find_one({"_id": ObjectId(sid)})
+                if school:
+                    student["school_name"] = school.get("school_name") or school.get("display_name") or "School"
+                else:
+                    student["school_name"] = "School"
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch school name for {student_id}: {str(e)}")
+            student.setdefault("school_name", "School")
         logger.info(f"[SCHOOL:{school_id or 'N/A'}] 🔍 Retrieved student by student_id: {student_id}") if school_id else None
     return student
 

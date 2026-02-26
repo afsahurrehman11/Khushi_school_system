@@ -3,6 +3,7 @@ export interface Student {
   name: string;
   rollNo: string;
   registrationNumber?: string;
+  schoolName?: string;
   class: string | null; // null for unassigned students
   assignedClasses: string[];
   email: string;

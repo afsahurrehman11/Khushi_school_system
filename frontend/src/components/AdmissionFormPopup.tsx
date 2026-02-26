@@ -207,56 +207,174 @@ const AdmissionFormPopup: React.FC<AdmissionFormPopupProps> = ({ isOpen, onClose
 
         {/* Hidden printable content */}
         <div style={{ display: 'none' }}>
-          <div ref={printRef} style={{ width: '800px', padding: '24px', background: '#fff', color: '#111' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div ref={printRef} style={{ width: '800px', padding: '20px', background: '#fff', color: '#000', fontFamily: 'Arial, sans-serif', lineHeight: 1.4 }}>
+            {/* ==================== HEADER (2 COLUMN: LEFT TEXT, RIGHT IMAGE) ==================== */}
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 20, paddingBottom: 16, borderBottom: '3px solid #333' }}>
+              {/* Left: School Info */}
               <div>
-                <div style={{ fontSize: 20, fontWeight: 700 }}>{studentFields.school_name || 'School Name'}</div>
-                <div style={{ fontSize: 12, color: '#555' }}>Admission Form</div>
+                <div style={{ fontSize: 22, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>
+                  {studentFields.school_name || 'School Name'}
+                </div>
+                <div style={{ fontSize: 12, color: '#555', letterSpacing: 0.5, marginBottom: 8 }}>STUDENT ADMISSION FORM</div>
+                <div style={{ fontSize: 10, color: '#888' }}>Academic Year: {studentFields.academic_year || new Date().getFullYear()}</div>
+                
+                {/* Registration Number Box - Compact */}
+                <div style={{ backgroundColor: '#f0f4f8', border: '1px solid #1a3a52', padding: '6px 8px', marginTop: 10, textAlign: 'center' }}>
+                  <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', letterSpacing: 0.5 }}>REG NO:</div>
+                  <div style={{ fontSize: 14, fontWeight: 'bold', color: '#1a3a52', marginTop: 2 }}>
+                    {studentFields.registration_number || 'N/A'}
+                  </div>
+                </div>
               </div>
-              {imageUrl ? (
-                <img src={imageUrl} alt="profile" style={{ width: 100, height: 120, objectFit: 'cover', border: '1px solid #ddd' }} />
-              ) : null}
+
+              {/* Right: Student Photo */}
+              {imageUrl && (
+                <div style={{ textAlign: 'center' }}>
+                  <img src={imageUrl} alt="profile" style={{ width: 90, height: 110, objectFit: 'cover', border: '2px solid #333' }} />
+                </div>
+              )}
             </div>
 
-            <hr style={{ margin: '12px 0' }} />
+            {/* ==================== SECTION 1: STUDENT INFORMATION ==================== */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 'bold', color: '#fff', backgroundColor: '#1a3a52', padding: '4px 8px', marginBottom: 8 }}>
+                1. STUDENT PERSONAL INFORMATION
+              </div>
+              
+              {/* Row 1: Full Name and Gender */}
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12, marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>Full Name *</div>
+                  <div style={{ borderBottom: '1px solid #333', paddingBottom: 1, minHeight: 18, fontSize: 12 }}>
+                    {studentFields.full_name || ''}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>Gender</div>
+                  <div style={{ borderBottom: '1px solid #333', paddingBottom: 1, minHeight: 18, fontSize: 12 }}>
+                    {studentFields.gender || ''}
+                  </div>
+                </div>
+              </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              <div>
-                <div style={{ fontSize: 12, color: '#333', fontWeight: 600 }}>Full Name</div>
-                <div style={{ fontSize: 14 }}>{studentFields.full_name || ''}</div>
+              {/* Row 2: Student ID and Roll Number */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>Student ID</div>
+                  <div style={{ borderBottom: '1px solid #333', paddingBottom: 1, minHeight: 18, fontSize: 12 }}>
+                    {studentFields.student_id || ''}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>Roll Number</div>
+                  <div style={{ borderBottom: '1px solid #333', paddingBottom: 1, minHeight: 18, fontSize: 12 }}>
+                    {studentFields.roll_number || ''}
+                  </div>
+                </div>
               </div>
-              <div>
-                <div style={{ fontSize: 12, color: '#333', fontWeight: 600 }}>Student ID</div>
-                <div style={{ fontSize: 14 }}>{studentFields.student_id || ''}</div>
+
+              {/* Row 3: Date of Birth and Admission Date */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>Date of Birth</div>
+                  <div style={{ borderBottom: '1px solid #333', paddingBottom: 1, minHeight: 18, fontSize: 12 }}>
+                    {studentFields.date_of_birth || ''}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>Admission Date</div>
+                  <div style={{ borderBottom: '1px solid #333', paddingBottom: 1, minHeight: 18, fontSize: 12 }}>
+                    {studentFields.admission_date || ''}
+                  </div>
+                </div>
               </div>
-              <div>
-                <div style={{ fontSize: 12, color: '#333', fontWeight: 600 }}>Registration Number</div>
-                <div style={{ fontSize: 14 }}>{studentFields.registration_number || 'N/A'}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: '#333', fontWeight: 600 }}>Class / Section</div>
-                <div style={{ fontSize: 14 }}>{studentFields.class_id || ''} {studentFields.section ? (' / ' + studentFields.section) : ''}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: '#333', fontWeight: 600 }}>Date of Birth</div>
-                <div style={{ fontSize: 14 }}>{studentFields.date_of_birth || ''}</div>
+
+              {/* Row 4: Class and Section */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 0 }}>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>Class / Grade *</div>
+                  <div style={{ borderBottom: '1px solid #333', paddingBottom: 1, minHeight: 18, fontSize: 12 }}>
+                    {studentFields.class_id || ''}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>Section</div>
+                  <div style={{ borderBottom: '1px solid #333', paddingBottom: 1, minHeight: 18, fontSize: 12 }}>
+                    {studentFields.section || ''}
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 12, color: '#333', fontWeight: 600 }}>Guardian Information</div>
-              <div style={{ fontSize: 14 }}>{studentFields.guardian_info?.father_name || studentFields.parent_name || ''} • {studentFields.guardian_info?.parent_cnic || studentFields.parent_cnic || ''}</div>
-              <div style={{ fontSize: 12, color: '#333', marginTop: 8 }}>Contact</div>
-              <div style={{ fontSize: 14 }}>{studentFields.contact_info?.phone || studentFields.phone || ''} • {studentFields.contact_info?.email || studentFields.email || ''}</div>
+            {/* ==================== SECTION 2: GUARDIAN INFORMATION ==================== */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 'bold', color: '#fff', backgroundColor: '#1a3a52', padding: '4px 8px', marginBottom: 8 }}>
+                2. GUARDIAN / PARENT INFORMATION
+              </div>
+
+              {/* Row 1: Father/Guardian Name and CNIC */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 12, marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>Father / Guardian Name *</div>
+                  <div style={{ borderBottom: '1px solid #333', paddingBottom: 1, minHeight: 18, fontSize: 12 }}>
+                    {studentFields.guardian_info?.father_name || studentFields.parent_name || ''}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>CNIC</div>
+                  <div style={{ borderBottom: '1px solid #333', paddingBottom: 1, minHeight: 18, fontSize: 12 }}>
+                    {studentFields.guardian_info?.parent_cnic || studentFields.parent_cnic || ''}
+                  </div>
+                </div>
+              </div>
+
+              {/* Row 2: Contact Number and Email */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 12, marginBottom: 0 }}>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>Contact Number</div>
+                  <div style={{ borderBottom: '1px solid #333', paddingBottom: 1, minHeight: 18, fontSize: 12 }}>
+                    {studentFields.contact_info?.phone || studentFields.phone || ''}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>Email Address</div>
+                  <div style={{ borderBottom: '1px solid #333', paddingBottom: 1, minHeight: 18, fontSize: 12 }}>
+                    {studentFields.contact_info?.email || studentFields.email || ''}
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div style={{ marginTop: 24, display: 'flex', justifyContent: 'space-between' }}>
-              <div style={{ width: '45%', textAlign: 'center' }}>
-                <div style={{ borderTop: '1px solid #333', paddingTop: 8 }}>Parent Signature</div>
+            {/* ==================== SECTION 3: ADDRESS ==================== */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 'bold', color: '#fff', backgroundColor: '#1a3a52', padding: '4px 8px', marginBottom: 8 }}>
+                3. ADDRESS
               </div>
-              <div style={{ width: '45%', textAlign: 'center' }}>
-                <div style={{ borderTop: '1px solid #333', paddingTop: 8 }}>Administration Signature</div>
+              <div>
+                <div style={{ fontSize: 9, fontWeight: 'bold', color: '#1a3a52', marginBottom: 2 }}>Residential Address</div>
+                <div style={{ borderBottom: '1px solid #333', paddingBottom: 1, minHeight: 18, fontSize: 12 }}>
+                  {studentFields.guardian_info?.address || ''}
+                </div>
               </div>
+            </div>
+
+            {/* ==================== SECTION 4: SIGNATURES (COMPACT) ==================== */}
+            <div style={{ marginTop: 20, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+              <div style={{ textAlign: 'center', paddingTop: 8 }}>
+                <div style={{ borderTop: '1px solid #333', paddingTop: 4, minHeight: 28 }}></div>
+                <div style={{ fontSize: 10, fontWeight: 'bold', color: '#1a3a52', marginTop: 2 }}>Parent / Guardian</div>
+                <div style={{ fontSize: 8, color: '#666', marginTop: 1 }}>Date: ___________</div>
+              </div>
+              <div style={{ textAlign: 'center', paddingTop: 8 }}>
+                <div style={{ borderTop: '1px solid #333', paddingTop: 4, minHeight: 28 }}></div>
+                <div style={{ fontSize: 10, fontWeight: 'bold', color: '#1a3a52', marginTop: 2 }}>School Official</div>
+                <div style={{ fontSize: 8, color: '#666', marginTop: 1 }}>Date: ___________</div>
+              </div>
+            </div>
+
+            {/* Footer - Compact */}
+            <div style={{ marginTop: 12, paddingTop: 8, borderTop: '1px solid #ccc', textAlign: 'center', fontSize: 8, color: '#999' }}>
+              <div>Printed on {new Date().toLocaleDateString()}</div>
             </div>
           </div>
         </div>

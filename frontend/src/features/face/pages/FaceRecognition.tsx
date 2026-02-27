@@ -48,7 +48,18 @@ const FaceRecognition: React.FC = () => {
   const SUCCESS_DISPLAY_DURATION = 3000; // ms
 
   useEffect(() => {
-    checkSystemStatus();
+    const initializePage = async () => {
+      try {
+        // Load embeddings cache first for faster recognition
+        await loadEmbeddingsCache();
+        logger.info('FACE RECOGNITION', 'Embeddings cache loaded on page mount');
+      } catch (err) {
+        logger.warn('FACE RECOGNITION', `Failed to preload cache: ${err}`);
+      }
+      // Get system status
+      await checkSystemStatus();
+    };
+    initializePage();
     return () => {
       if (detectionFrameRef.current) {
         cancelAnimationFrame(detectionFrameRef.current);

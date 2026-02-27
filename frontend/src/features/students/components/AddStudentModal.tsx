@@ -91,6 +91,11 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
       setSubmitting(false);
       return;
     }
+    if (!formData.parent_cnic.trim()) {
+      setError('Parent / Guardian CNIC is required');
+      setSubmitting(false);
+      return;
+    }
 
     try {
       const payload = {
@@ -465,14 +470,15 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
             {/* Row 6: Guardian CNIC */}
             <div>
               <label className="block text-sm font-medium text-secondary-700 mb-1">
-                Parent / Guardian CNIC
+                Parent / Guardian CNIC <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
                 name="parent_cnic"
                 value={formData.parent_cnic}
                 onChange={handleChange}
-                placeholder="e.g. 12345-1234567-1 (optional)"
+                required
+                placeholder="e.g. 12345-1234567-1"
                 className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-all text-sm"
               />
             </div>

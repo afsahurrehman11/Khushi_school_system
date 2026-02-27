@@ -91,20 +91,32 @@ async def create_new_fee_category(
     """Create a new fee category"""
     school_id = current_user.get("school_id")
     admin_email = current_user.get("email")
-    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Creating new fee category")
     
     try:
+        logger.info(f"[FEE_CATEGORY] [SCHOOL:{school_id}] [ADMIN:{admin_email}] Creating new fee category")
+        logger.debug(f"[FEE_CATEGORY] Request data: name={category.name}, components_count={len(category.components)}")
+        
+        # Ensure school_id from context
+        if not category.school_id or category.school_id != school_id:
+            logger.warn(f"[FEE_CATEGORY] Overriding school_id: {category.school_id} -> {school_id}")
+        
         data = category.dict()
+        data["school_id"] = school_id  # Enforce school_id from auth context
         data["created_by"] = current_user.get("id")
+        
+        # Validate required fields
+        if not data.get("name") or not data["name"].strip():
+            logger.warn(f"[FEE_CATEGORY] [SCHOOL:{school_id}] Validation failed: name is required or empty")
+            raise HTTPException(status_code=422, detail="Fee category name is required")
         
         result = create_fee_category(data, school_id=school_id)
         if not result:
-            logger.error(f"[SCHOOL:{school_id}] ❌ Failed to create fee category")
+            logger.error(f"[FEE_CATEGORY] [SCHOOL:{school_id}] Failed to create fee category")
             raise HTTPException(status_code=400, detail="Failed to create fee category")
         
         total = calculate_category_total(result.get("components", []))
         
-        logger.info(f"[SCHOOL:{school_id}] ✅ Created fee category successfully")
+        logger.info(f"[FEE_CATEGORY] [SCHOOL:{school_id}] ✅ Created successfully: {data.get('name')}")
         return {
             "id": result.get("id"),
             "name": result.get("name"),
@@ -117,8 +129,11 @@ async def create_new_fee_category(
         }
     except HTTPException:
         raise
+    except ValueError as e:
+        logger.error(f"[FEE_CATEGORY] [SCHOOL:{school_id}] Validation error: {str(e)}")
+        raise HTTPException(status_code=422, detail=f"Validation error: {str(e)}")
     except Exception as e:
-        logger.error(f"[SCHOOL:{school_id}] ❌ Error creating fee category: {str(e)}")
+        logger.error(f"[FEE_CATEGORY] [SCHOOL:{school_id}] ❌ Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to create fee category")
 
 @router.put("/{category_id}", response_model=FeeCategoryResponse)

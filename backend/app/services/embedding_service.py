@@ -40,7 +40,7 @@ class EmbeddingGenerator:
     """Service for generating face embeddings from student images"""
     
     # Model configuration
-    EMBEDDING_MODEL = "VGGFace"  # Using DeepFace VGGFace (more stable than VGGFace2, 4096 dimensions)
+    EMBEDDING_MODEL = "VGG-Face"  # Using DeepFace VGG-Face (more stable than VGGFace2, 4096 dimensions)
     EMBEDDING_DIMENSION = 4096
     
     @staticmethod
@@ -203,12 +203,12 @@ class EmbeddingGenerator:
             try:
                 embedding_objs = _DEEPFACE.represent(
                     face_array,
-                    model_name="VGGFace",
+                    model_name="VGG-Face",
                     enforce_detection=False
                 )
             except (ValueError, KeyError) as model_err:
                 # Fallback to Facenet if VGGFace isn't available
-                logger.warning(f"VGGFace model unavailable: {str(model_err)}, trying Facenet...")
+                logger.warning(f"VGG-Face model unavailable: {str(model_err)}, trying Facenet...")
                 try:
                     embedding_objs = _DEEPFACE.represent(
                         face_array,

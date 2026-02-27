@@ -61,10 +61,12 @@ const PersonImageUpload: React.FC<PersonImageUploadProps> = ({
     setUploading(true);
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      // Use 'image' for teachers, 'file' for students - backend expects different field names
+      formData.append(personType === 'teacher' ? 'image' : 'file', file);
 
       const endpoint = personType === 'student' ? 'students' : 'teachers';
-      const uploadUrl = `${config.API_BASE_URL}/api/${endpoint}/${personId}/image`;
+      // config.API_BASE_URL already includes /api, so don't add it again
+      const uploadUrl = `${config.API_BASE_URL}/${endpoint}/${personId}/image`;
       
       logger.info('IMAGE', `[PersonImageUpload] POST -> ${uploadUrl} (${personType})`);
       
@@ -170,7 +172,8 @@ const PersonImageUpload: React.FC<PersonImageUploadProps> = ({
   const deleteImage = async () => {
     try {
       const endpoint = personType === 'student' ? 'students' : 'teachers';
-      const deleteUrl = `${config.API_BASE_URL}/api/${endpoint}/${personId}/image`;
+      // config.API_BASE_URL already includes /api, so don't add it again
+      const deleteUrl = `${config.API_BASE_URL}/${endpoint}/${personId}/image`;
       
       logger.info('IMAGE', `[PersonImageUpload] DELETE -> ${deleteUrl}`);
       const response = await fetch(deleteUrl, { 

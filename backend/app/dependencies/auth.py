@@ -159,7 +159,8 @@ def check_permission(required_permission: str):
     async def permission_checker(current_user: dict = Depends(get_current_user)):
         # Short-circuit and allow all actions when RBAC is disabled
         if RBAC_DISABLED:
-            logger.info("⚠️ RBAC disabled — allowing all permissions for %s", current_user.get("email"))
+            # RBAC is intentionally disabled in development.
+            # Do not emit noisy console messages here to keep logs clean during local development.
             return current_user
         
         # In production, implement proper RBAC here

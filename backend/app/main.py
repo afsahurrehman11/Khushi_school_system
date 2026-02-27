@@ -27,7 +27,7 @@ if hasattr(_ForwardRef, "_evaluate"):
 
     _ForwardRef._evaluate = _compat_forwardref_evaluate
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import os
@@ -39,7 +39,7 @@ from datetime import datetime
 from app.config import settings
 from app.database import get_db
 from app.startup import ensure_collections_exist
-from app.routers import auth, users, students, fees, classes, teachers, grades, accounting, payments, reports, root, student_import_export, chalans, fee_categories, class_fee_assignments, notifications, fee_payments, accountant, payment_methods, schools, root_admin, cash_sessions, statistics, attendance, whatsapp, face
+from app.routers import auth, users, students, fees, classes, teachers, grades, accounting, payments, reports, root, student_import_export, chalans, fee_categories, class_fee_assignments, notifications, fee_payments, accountant, payment_methods, schools, root_admin, cash_sessions, statistics, attendance, whatsapp, face, teacher_attendance
 from app.routers import saas as saas_router
 from app.routers import billing as billing_router
 from app.routers import fee_vouchers as fee_vouchers_router
@@ -169,6 +169,24 @@ try:
     )
     logger.info("✅ CORS middleware added")
 
+    # Normalize incoming paths: handle accidental duplicate '/api/api' prefixes
+    @app.middleware("http")
+    async def _normalize_api_prefix(request: Request, call_next):
+        try:
+            path = request.scope.get("path", "")
+            if isinstance(path, str) and path.startswith("/api/api"):
+                new_path = path.replace("/api/api", "/api", 1)
+                request.scope["path"] = new_path
+                # update raw_path used internally by Starlette
+                try:
+                    request.scope["raw_path"] = new_path.encode("utf-8")
+                except Exception:
+                    pass
+        except Exception:
+            # Be conservative - don't block requests if normalization fails
+            pass
+        return await call_next(request)
+
     # Add database routing middleware for multi-tenant support
     @app.middleware("http")
     async def db_routing_middleware(request, call_next):
@@ -204,6 +222,7 @@ try:
         app.include_router(cash_sessions, tags=["Cash Sessions"])
         app.include_router(statistics, tags=["Statistics"])
         app.include_router(attendance, prefix="/api", tags=["Attendance"])
+        app.include_router(teacher_attendance, prefix="/api", tags=["Teacher Attendance"])
         app.include_router(whatsapp, tags=["WhatsApp"])
         app.include_router(face, tags=["Face Recognition"])
         app.include_router(fee_vouchers_router, prefix="/api/fee-vouchers", tags=["Fee Vouchers"])
@@ -307,7 +326,7 @@ async def startup_event():
                 logger.info("🔧 Initializing SaaS root database...")
                 from app.services.saas_db import get_saas_root_db
                 saas_db = get_saas_root_db()
-                if saas_db:
+                if saas_db is not None:
                     logger.info("✅ SaaS root database connection: SUCCESS")
                     
                     # Create indexes for saas_root_db

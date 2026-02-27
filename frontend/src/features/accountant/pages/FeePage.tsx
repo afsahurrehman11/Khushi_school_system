@@ -349,19 +349,7 @@ const FeePage: React.FC = () => {
                     </select>
                   </div>
 
-                  {paymentMethod !== 'cash' && (
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Specific Payment Method *</label>
-                      <input
-                        type="text"
-                        value={customPaymentMethod}
-                        onChange={(e) => setCustomPaymentMethod(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="e.g., JazzCash, EasyPaisa, HBL Online"
-                        required
-                      />
-                    </div>
-                  )}
+                  {/* Specific payment method input handled below with datalist (avoid duplicate) */}
                 </div>
 
                   <div>

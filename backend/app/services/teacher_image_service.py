@@ -98,7 +98,8 @@ class TeacherImageService:
                 teacher_name = teacher.get("name", "Unknown Teacher")
                 teacher_reg_id = teacher.get("teacher_id") or teacher.get("cnic") or str(teacher_id)
                 
-                # 1. Enroll in external face recognition app (non-blocking)
+                # 1. Enroll in external face recognition app (OPTIONAL, non-blocking)
+                # This is for the standalone face-recognition-app which may not be running
                 try:
                     enrollment_result = await FaceEnrollmentService.enroll_person(
                         person_id=teacher_reg_id,
@@ -110,13 +111,16 @@ class TeacherImageService:
                     )
                     
                     if enrollment_result.get("success"):
-                        logger.info(f"✅ [FACE] Teacher {teacher_id} enrolled in face recognition system")
+                        logger.info(f"✅ [FACE-EXT] Teacher {teacher_id} enrolled in external face service")
+                    elif enrollment_result.get("skipped_external"):
+                        # External service not running - this is OK, local embedding still works
+                        logger.debug(f"ℹ️ [FACE-EXT] External service skipped for {teacher_id} (not running)")
                     else:
-                        logger.warning(f"⚠️ [FACE] Teacher {teacher_id} enrollment failed: {enrollment_result.get('error', 'Unknown error')}")
+                        logger.warning(f"⚠️ [FACE-EXT] External enrollment warning: {enrollment_result.get('error', 'Unknown')}")
                 except Exception as e:
-                    logger.error(f"🔴 [FACE] Enrollment exception for teacher {teacher_id}: {str(e)}")
+                    logger.debug(f"ℹ️ [FACE-EXT] External enrollment skipped: {str(e)}")
                 
-                # 2. Generate embedding for main database (non-blocking)
+                # 2. Generate embedding for main database (PRIMARY - this is what matters)
                 try:
                     embedding, emb_status = await FaceEnrollmentService.generate_embedding_for_person(
                         image_blob=image_blob,

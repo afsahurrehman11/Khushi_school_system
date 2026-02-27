@@ -136,19 +136,21 @@ class FaceEnrollmentService:
                 }
                 
         except requests.Timeout:
-            logger.error(f"🔴 [FACE] Enrollment timeout for {person_id}")
+            logger.warning(f"⚠️ [FACE-EXT] External enrollment timeout for {person_id} (non-critical)")
             return {
                 "success": False,
-                "error": "Face recognition service timeout"
+                "skipped_external": True,
+                "error": "External face recognition service timeout (optional feature)"
             }
         except requests.ConnectionError:
-            logger.error(f"🔴 [FACE] Cannot connect to face recognition service")
+            logger.warning(f"⚠️ [FACE-EXT] External face service unavailable (non-critical) - embeddings will still be generated locally")
             return {
                 "success": False,
-                "error": "Face recognition service unavailable"
+                "skipped_external": True,
+                "error": "External face service unavailable (optional)"
             }
         except Exception as e:
-            logger.error(f"🔴 [FACE] Enrollment error for {person_id}: {str(e)}")
+            logger.error(f"🔴 [FACE-EXT] Enrollment error for {person_id}: {str(e)}")
             return {
                 "success": False,
                 "error": str(e)

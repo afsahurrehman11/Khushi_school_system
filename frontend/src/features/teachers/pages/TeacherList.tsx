@@ -1,13 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { AnimatePresence } from 'framer-motion';
-import { ArrowLeft, UserPlus } from 'lucide-react';
-import Modal from '../../../components/Modal';
+import { UserPlus } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import Button from '../../../components/Button';
 import SearchBar from '../../../components/SearchBar';
-import Table from '../../../components/Table';
-import Badge from '../../../components/Badge';
 import ClassCard from '../../../components/ClassCard';
-import ViewToggle from '../../../components/ViewToggle';
 import TeacherCard from '../../../components/TeacherCard';
 import GroupByToggle from '../../../components/GroupByToggle';
 import { apiCallJSON, getAuthHeaders } from '../../../utils/api';
@@ -16,22 +12,30 @@ import logger from '../../../utils/logger';
 import AddTeacherModal from '../components/AddTeacherModal';
 
 const TeacherList: React.FC = () => {
+  const navigate = useNavigate();
   const [groupBy, setGroupBy] = useState<'teachers' | 'classrooms'>('teachers');
   const [selectedItem, setSelectedItem] = useState<string | null>(null); // teacher ID or classroom name
-  const [selectedTeacher, setSelectedTeacher] = useState<any | null>(null);
   const [teachers, setTeachers] = useState<any[]>([]);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [editTeacher, setEditTeacher] = useState<any | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [showUnassigned, setShowUnassigned] = useState(false);
 
-  const unassignedTeachers = useMemo(() => teachers.filter((t) => !t.assignedClasses || t.assignedClasses.length === 0), [teachers]);
-  const allClassrooms = useMemo(() => {
-    const classes = teachers.flatMap((t) => t.assignedClasses || []);
-    const unique = Array.from(new Set(classes)).sort();
-    return unique.map((className) => ({ className, teacherCount: teachers.filter((t) => (t.assignedClasses || []).includes(className)).length }));
+  const unassignedTeachers = useMemo(() => uniqueTeachers.filter((t) => !t.assignedClasses || t.assignedClasses.length === 0), [uniqueTeachers]);
+  const uniqueTeachers = useMemo(() => {
+    const seen = new Set();
+    return teachers.filter((t) => {
+      const id = t.id;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
   }, [teachers]);
+  const allClassrooms = useMemo(() => {
+    const classes = uniqueTeachers.flatMap((t) => t.assignedClasses || []);
+    const unique = Array.from(new Set(classes)).sort();
+    return unique.map((className) => ({ className, teacherCount: uniqueTeachers.filter((t) => (t.assignedClasses || []).includes(className)).length }));
+  }, [uniqueTeachers]);
 
   // Get teachers based on grouping mode and selection
   const displayTeachers = useMemo(() => {
@@ -39,15 +43,15 @@ const TeacherList: React.FC = () => {
     if (!selectedItem) return [];
 
     if (groupBy === 'classrooms') {
-      return teachers.filter((t) => (t.assignedClasses || []).includes(selectedItem));
+      return uniqueTeachers.filter((t) => (t.assignedClasses || []).includes(selectedItem));
     } else {
-      const teacher = teachers.find((t) => t.teacherId === selectedItem || String(t.id) === String(selectedItem) || t.cnic === selectedItem);
+      const teacher = uniqueTeachers.find((t) => t.teacherId === selectedItem || String(t.id) === String(selectedItem) || t.cnic === selectedItem);
       return teacher ? [teacher] : [];
     }
-  }, [groupBy, selectedItem, showUnassigned, unassignedTeachers, teachers]);
+  }, [groupBy, selectedItem, showUnassigned, unassignedTeachers, uniqueTeachers]);
 
   // Filter teachers based on search (only in detail view)
-  const filteredTeachers = useMemo(() => {
+  useMemo(() => {
     if (!searchQuery) return displayTeachers;
 
     return displayTeachers.filter(
@@ -61,18 +65,18 @@ const TeacherList: React.FC = () => {
 
   // Get all teachers for main view (when groupBy is teachers)
   // Show all teachers (including unassigned) in main view so list isn't empty
-  const allTeachers = useMemo(() => teachers, [teachers]);
+  useMemo(() => teachers, [teachers]);
 
   // Filter for main view search
   const filteredMainTeachers = useMemo(() => {
-    if (!searchQuery || selectedItem || showUnassigned) return allTeachers;
-    return allTeachers.filter((teacher: any) =>
+    if (!searchQuery || selectedItem || showUnassigned) return uniqueTeachers;
+    return uniqueTeachers.filter((teacher: any) =>
       (teacher.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (teacher.teacherId || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (teacher.email || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (teacher.subjects || []).some((subject: string) => subject.toLowerCase().includes(searchQuery.toLowerCase()))
     );
-  }, [allTeachers, searchQuery, selectedItem, showUnassigned]);
+  }, [uniqueTeachers, searchQuery, selectedItem, showUnassigned]);
 
   const filteredClassrooms = useMemo(() => {
     if (!searchQuery || selectedItem || showUnassigned) return allClassrooms;
@@ -82,7 +86,7 @@ const TeacherList: React.FC = () => {
   // Load teachers from API
   const loadTeachers = async () => {
     try {
-      const data = await apiCallJSON('/api/teachers', { method: 'GET', headers: { ...getAuthHeaders() } });
+      const data = await apiCallJSON('/teachers', { method: 'GET', headers: { ...getAuthHeaders() } });
       setTeachers(Array.isArray(data) ? data : []);
     } catch (err) {
       logger.error('TEACHERS', `Failed to load teachers: ${String(err)}`);
@@ -111,12 +115,13 @@ const TeacherList: React.FC = () => {
 
   const deleteTeacher = async (id: string) => {
     try {
-      await apiCallJSON(`/api/teachers/${id}`, { method: 'DELETE', headers: { ...getAuthHeaders() } });
+      logger.info('[TEACHERSLIST]', `Deleting teacher ID: "${id}"`);
+      await apiCallJSON(`/teachers/${id}`, { method: 'DELETE', headers: { ...getAuthHeaders() } });
+      logger.info('[TEACHERSLIST]', '✅ Teacher deleted successfully');
       entitySync.emitTeacherDeleted(id);
       loadTeachers();
-      setSelectedTeacher(null);
     } catch (err) {
-      logger.error('TEACHERS', `Failed to delete teacher: ${String(err)}`);
+      logger.error('[TEACHERSLIST]', `❌ Failed to delete teacher: ${String(err)}`);
     }
   };
 
@@ -126,49 +131,12 @@ const TeacherList: React.FC = () => {
     setSearchQuery('');
   };
 
-  const handleBackToMain = () => {
-    setSelectedItem(null);
-    setShowUnassigned(false);
-    setSearchQuery('');
-  };
-
-  
-
-  const handleTeacherProfileClick = (teacher: any) => {
-    setSelectedTeacher(teacher);
-  };
-
   const handleGroupByChange = (newGroupBy: 'teachers' | 'classrooms') => {
     setGroupBy(newGroupBy);
     setSelectedItem(null);
     setShowUnassigned(false);
     setSearchQuery('');
   };
-
-  const columns = [
-    { key: 'cnic', label: 'CNIC' },
-    { key: 'teacherId', label: 'Teacher ID' },
-    { key: 'name', label: 'Name' },
-    {
-      key: 'subjects',
-      label: 'Subjects',
-      render: (teacher: any) => (
-        <div className="flex flex-wrap gap-1">
-          {(teacher.subjects || []).slice(0, 2).map((subject: string, idx: number) => (
-            <Badge key={idx} label={subject} color="primary" />
-          ))}
-          {(teacher.subjects || []).length > 2 && (
-            <span className="text-xs text-secondary-500 ml-1">
-              +{(teacher.subjects || []).length - 2}
-            </span>
-          )}
-        </div>
-      ),
-    },
-    { key: 'email', label: 'Email' },
-    { key: 'phone', label: 'Phone' },
-    { key: 'experience', label: 'Experience' },
-  ];
 
   // Determine which view to show
   const showMainView = !selectedItem && !showUnassigned;
@@ -231,15 +199,23 @@ const TeacherList: React.FC = () => {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredMainTeachers.map((teacher) => (
-                <TeacherCard
-                  key={teacher.cnic || teacher.id || teacher.teacherId || teacher._id}
-                  {...teacher}
-                  onClick={() => { setEditTeacher(teacher); setAddModalOpen(true); }}
-                  onEdit={() => { setEditTeacher(teacher); setAddModalOpen(true); }}
-                  onDelete={() => { deleteTeacher(teacher.cnic || teacher.id || teacher.teacherId || teacher._id); }}
-                />
-              ))}
+              {filteredMainTeachers.map((teacher) => {
+                const id = teacher.cnic || teacher.id || teacher.teacherId || teacher._id;
+                return (
+                  <TeacherCard
+                    key={teacher.id}
+                    {...teacher}
+                    onClick={() => { 
+                      logger.info('[TEACHERS]', `Navigating to teacher detail - ID: "${id}" (type: ${typeof id})`);
+                      navigate(`/teachers/${id}`); 
+                    }}
+                    onDelete={() => { 
+                      logger.info('[TEACHERS]', `Attempting delete - ID: "${id}" (type: ${typeof id})`);
+                      deleteTeacher(id); 
+                    }}
+                  />
+                );
+              })}
             </div>
           )}
 
@@ -252,244 +228,6 @@ const TeacherList: React.FC = () => {
           </>
         )}
       </div>
-
-      {/* Add / Edit Teacher Modal */}
-      <AddTeacherModal
-        isOpen={addModalOpen}
-        onClose={() => { setAddModalOpen(false); setEditTeacher(null); }}
-        onTeacherAdded={() => loadTeachers()}
-        teacher={editTeacher}
-        onTeacherUpdated={() => { loadTeachers(); setEditTeacher(null); }}
-      />
-    </div>
-  );
-
-  // Detail view: Show teachers for selected classroom OR classes for selected teacher
-  const isClassroomView = groupBy === 'classrooms';
-  const selectedTeacherInfo = !isClassroomView && selectedItem 
-    ? allTeachers.find(t => t.teacherId === selectedItem || String(t.id) === String(selectedItem) || String(t._id) === String(selectedItem)) 
-    : null;
-
-  return (
-    <div className="min-h-screen bg-secondary-50 p-8">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" onClick={handleBackToMain}>
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back
-            </Button>
-            <div>
-              <h1 className="text-3xl font-bold text-secondary-900">
-                {showUnassigned
-                  ? 'Unassigned Teachers'
-                  : isClassroomView
-                  ? `Class ${selectedItem} - Teachers`
-                  : selectedTeacherInfo 
-                  ? `${selectedTeacherInfo.name} - Assigned Classes`
-                  : 'Teachers'}
-              </h1>
-              <p className="text-secondary-600">
-                {showUnassigned 
-                  ? `${filteredTeachers.length} teacher${filteredTeachers.length !== 1 ? 's' : ''}`
-                  : isClassroomView
-                  ? `${filteredTeachers.length} teacher${filteredTeachers.length !== 1 ? 's' : ''}`
-                  : selectedTeacherInfo
-                  ? `Teaching ${selectedTeacherInfo.assignedClasses?.length || 0} class${selectedTeacherInfo.assignedClasses?.length !== 1 ? 'es' : ''}`
-                  : ''}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            {showUnassigned && (
-              <Button variant="primary" onClick={() => {}}>
-                Assign to Classes
-              </Button>
-            )}
-            <ViewToggle view={viewMode} onViewChange={setViewMode} />
-          </div>
-        </div>
-
-        {/* Search Bar */}
-        {(isClassroomView || showUnassigned) && (
-          <div className="mb-6">
-            <SearchBar
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name, ID, email, or subject..."
-            />
-          </div>
-        )}
-
-        {/* Teachers Display (for classroom view or unassigned) */}
-        {(isClassroomView || showUnassigned) && (
-          <>
-            {viewMode === 'grid' ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredTeachers.map((teacher) => (
-                  <TeacherCard
-                    key={teacher.cnic || teacher.id || teacher.teacherId || teacher._id}
-                    {...teacher}
-                    onClick={() => { setEditTeacher(teacher); setAddModalOpen(true); }}
-                    onEdit={() => { setEditTeacher(teacher); setAddModalOpen(true); }}
-                    onDelete={() => { deleteTeacher(teacher.cnic || teacher.id || teacher.teacherId || teacher._id); }}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="bg-white rounded-xl shadow-soft overflow-hidden">
-                <Table
-                  data={filteredTeachers}
-                  columns={columns}
-                  onRowClick={handleTeacherProfileClick}
-                />
-              </div>
-            )}
-
-            {filteredTeachers.length === 0 && (
-              <div className="bg-white rounded-xl shadow-soft p-12 text-center">
-                <p className="text-secondary-500">No teachers found</p>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* Classes Display (for teacher view) */}
-        {!isClassroomView && !showUnassigned && selectedTeacherInfo && (
-          <>
-            {viewMode === 'grid' ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {selectedTeacherInfo.assignedClasses?.map((className: string) => {
-                  const [grade, section] = className.split('-');
-                  const teachersInClass = teachers.filter((t) => (t.assignedClasses || []).includes(className));
-                  return (
-                    <ClassCard
-                      key={className}
-                      className={grade}
-                      section={section}
-                      studentCount={teachersInClass.length}
-                      onClick={() => {}}
-                    />
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="bg-white rounded-xl shadow-soft overflow-hidden p-6">
-                <div className="space-y-3">
-                  {selectedTeacherInfo.assignedClasses?.map((className: string, idx: number) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between p-4 bg-secondary-50 rounded-lg hover:bg-secondary-100 transition-colors"
-                    >
-                      <div>
-                        <p className="font-semibold text-secondary-900">Class {className}</p>
-                        <p className="text-sm text-secondary-500">
-                          {teachers.filter((t) => (t.assignedClasses || []).includes(className)).length} teacher{teachers.filter((t) => (t.assignedClasses || []).includes(className)).length !== 1 ? 's' : ''} assigned
-                        </p>
-                      </div>
-                      <Badge label={className} color="secondary" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {(!selectedTeacherInfo.assignedClasses || selectedTeacherInfo.assignedClasses.length === 0) && (
-              <div className="bg-white rounded-xl shadow-soft p-12 text-center">
-                <p className="text-secondary-500">No assigned classes</p>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Teacher Profile Modal */}
-      <AnimatePresence>
-        {selectedTeacher && (
-          <Modal
-            isOpen={!!selectedTeacher}
-            onClose={() => setSelectedTeacher(null)}
-            title="Teacher Profile"
-            size="lg"
-          >
-            <div className="space-y-6">
-              <div className="flex items-center gap-4 pb-6 border-b border-secondary-200">
-                <div className="w-20 h-20 bg-primary-100 rounded-full flex items-center justify-center">
-                  <span className="text-3xl font-bold text-primary-700">
-                    {selectedTeacher.name.charAt(0)}
-                  </span>
-                </div>
-                <div>
-                  <h2 className="text-2xl font-bold text-secondary-900">
-                    {selectedTeacher.name}
-                  </h2>
-                  <p className="text-secondary-600">
-                    ID: {selectedTeacher.teacherId}
-                  </p>
-                  <p className="text-sm text-secondary-500 mt-1">
-                    {selectedTeacher.qualification}
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <p className="text-sm text-secondary-500 mb-1">Email</p>
-                  <p className="text-secondary-900">{selectedTeacher.email}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-secondary-500 mb-1">Phone</p>
-                  <p className="text-secondary-900">{selectedTeacher.phone}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-secondary-500 mb-1">Experience</p>
-                  <p className="text-secondary-900">{selectedTeacher.experience}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-secondary-500 mb-1">Date of Joining</p>
-                  <p className="text-secondary-900">
-                    {new Date(selectedTeacher.dateOfJoining).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-6 border-t border-secondary-200">
-                <h3 className="font-semibold text-secondary-900 mb-3">
-                  Teaching Subjects
-                </h3>
-                <div className="flex flex-wrap gap-2">
-                  {(selectedTeacher.subjects || []).map((subject: string, idx: number) => (
-                    <Badge key={idx} label={subject} color="primary" />
-                  ))}
-                </div>
-              </div>
-
-              {selectedTeacher.assignedClasses && selectedTeacher.assignedClasses.length > 0 && (
-                <div className="pt-6 border-t border-secondary-200">
-                  <h3 className="font-semibold text-secondary-900 mb-3">
-                    Assigned Classes
-                  </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedTeacher.assignedClasses.map((className: string, idx: number) => (
-                      <Badge key={idx} label={`Class ${className}`} color="secondary" />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex gap-3 pt-6 border-t border-secondary-200">
-                <Button variant="primary" className="flex-1" onClick={() => { setEditTeacher(selectedTeacher); setAddModalOpen(true); }}>
-                  Edit Profile
-                </Button>
-                <Button variant="danger" className="flex-1" onClick={() => { if (selectedTeacher) deleteTeacher(selectedTeacher.cnic || selectedTeacher.id || selectedTeacher.teacherId || selectedTeacher._id); }}>
-                  Remove Teacher
-                </Button>
-              </div>
-            </div>
-          </Modal>
-        )}
-      </AnimatePresence>
 
       {/* Add / Edit Teacher Modal */}
       <AddTeacherModal

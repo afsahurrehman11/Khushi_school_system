@@ -4,7 +4,7 @@ import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { StudentList, StudentImportExportPage } from './features/students';
-import { TeacherList } from './features/teachers';
+import { TeacherList, TeacherDetailPage } from './features/teachers';
 import { SubjectList } from './features/subjects';
 import { ClassList, ClassDetails, AttendanceList, MarkAttendance } from './features/classes';
 import { ChalanList } from './features/chalans';
@@ -298,6 +298,10 @@ function App() {
                 <Route
                   path="/teachers"
                   element={<ProtectedRoute element={<TeacherList />} requiredRoles={['Admin']} />}
+                />
+                <Route
+                  path="/teachers/:teacherId"
+                  element={<ProtectedRoute element={<TeacherDetailPage />} requiredRoles={['Admin']} />}
                 />
                 <Route
                   path="/whatsapp-bot"

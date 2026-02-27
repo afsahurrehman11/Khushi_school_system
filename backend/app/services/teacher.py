@@ -10,6 +10,10 @@ logger = logging.getLogger(__name__)
 
 def create_teacher(teacher_data: dict) -> Optional[dict]:
     db = get_db()
+    if db is None:
+        logger.error(f"❌ Database not available")
+        return None
+    
     school_id = teacher_data.get("school_id")
     
     if not school_id:
@@ -25,6 +29,11 @@ def create_teacher(teacher_data: dict) -> Optional[dict]:
     # uniqueness by CNIC if provided (within school)
     if teacher_data.get("cnic") and db.teachers.find_one({"cnic": teacher_data.get("cnic"), "school_id": school_id}):
         logger.warning(f"[SCHOOL:{school_id}] Teacher CNIC already exists: {teacher_data.get('cnic')}")
+        return None
+    # uniqueness by teacher_id if provided (within school)
+    teacher_id = teacher_data.get("teacher_id")
+    if teacher_id and db.teachers.find_one({"teacher_id": teacher_id, "school_id": school_id}):
+        logger.warning(f"[SCHOOL:{school_id}] Teacher ID already exists: {teacher_id}")
         return None
 
     # Normalize assigned_classes: accept class IDs or class names (within school)
@@ -102,6 +111,10 @@ def create_teacher(teacher_data: dict) -> Optional[dict]:
 
 def get_all_teachers(filters: dict = None, school_id: str = None) -> list:
     db = get_db()
+    if db is None:
+        logger.error(f"❌ Database not available")
+        return []
+    
     query = filters or {}
     
     # Add school isolation
@@ -120,6 +133,10 @@ def get_all_teachers(filters: dict = None, school_id: str = None) -> list:
 
 def get_teacher_by_id(teacher_id: str, school_id: str = None) -> Optional[dict]:
     db = get_db()
+    if db is None:
+        logger.error(f"❌ Database not available")
+        return None
+    
     try:
         query = {"_id": ObjectId(teacher_id)}
         if school_id:
@@ -146,6 +163,10 @@ def get_teacher_by_id(teacher_id: str, school_id: str = None) -> Optional[dict]:
 
 def get_teacher_by_teacher_id(teacher_id: str) -> Optional[dict]:
     db = get_db()
+    if db is None:
+        logger.error(f"❌ Database not available")
+        return None
+    
     teacher = db.teachers.find_one({"teacher_id": teacher_id})
     if teacher:
         teacher["id"] = str(teacher["_id"])
@@ -154,28 +175,22 @@ def get_teacher_by_teacher_id(teacher_id: str) -> Optional[dict]:
 
 def update_teacher(teacher_id: str, school_id: str = None, **kwargs) -> Optional[dict]:
     db = get_db()
+    if db is None:
+        logger.error(f"[UPDATE_TEACHER] ❌ Datab    ase not available")
+        return None
+    
     try:
-        query = {"_id": ObjectId(teacher_id)}
-        if school_id:
-            query["school_id"] = school_id
+        logger.info(f"[UPDATE_TEACHER] Attempting to update teacher ID: \"{teacher_id}\"")
+        logger.debug(f"[UPDATE_TEACHER] Update fields: {list(kwargs.keys())}")
         
-        kwargs["updated_at"] = datetime.utcnow()
-        result = db.teachers.find_one_and_update(
-            query,
-            {"$set": kwargs},
-            return_document=True
-        )
-        if result:
-            result["id"] = str(result["_id"])
-            logger.info(f"[SCHOOL:{school_id or 'N/A'}] ✅ Teacher updated: {teacher_id}")
-        return result
-    except:
-        # fallback: try updating by CNIC
+        # First attempt: try by MongoDB _id
         try:
-            query = {"cnic": teacher_id}
+            from bson import ObjectId
+            query = {"_id": ObjectId(teacher_id)}
             if school_id:
                 query["school_id"] = school_id
             
+            logger.debug(f"[UPDATE_TEACHER] Searching by _id: {query}")
             kwargs["updated_at"] = datetime.utcnow()
             result = db.teachers.find_one_and_update(
                 query,
@@ -184,31 +199,82 @@ def update_teacher(teacher_id: str, school_id: str = None, **kwargs) -> Optional
             )
             if result:
                 result["id"] = str(result["_id"])
-                logger.info(f"[SCHOOL:{school_id or 'N/A'}] ✅ Teacher updated: {teacher_id}")
-            return result
-        except:
-            return None
-
-
-def delete_teacher(teacher_id: str, school_id: str = None) -> bool:
-    db = get_db()
-    try:
-        query = {"_id": ObjectId(teacher_id)}
-        if school_id:
-            query["school_id"] = school_id
+                logger.info(f"[UPDATE_TEACHER] ✅ Teacher updated by _id: {teacher_id}")
+                return result
+            else:
+                logger.debug(f"[UPDATE_TEACHER] No teacher found by _id")
+        except Exception as e:
+            logger.debug(f"[UPDATE_TEACHER] _id lookup failed (expected for non-ObjectId): {str(e)}")
         
-        result = db.teachers.delete_one(query)
-        if result.deleted_count > 0:
-            logger.info(f"[SCHOOL:{school_id or 'N/A'}] ✅ Teacher deleted: {teacher_id}")
-            return True
-        # fallback: try delete by CNIC
+        # Fallback: try by CNIC
+        logger.debug(f"[UPDATE_TEACHER] Trying fallback search by CNIC")
         query = {"cnic": teacher_id}
         if school_id:
             query["school_id"] = school_id
         
-        result2 = db.teachers.delete_one(query)
-        if result2.deleted_count > 0:
-            logger.info(f"[SCHOOL:{school_id or 'N/A'}] ✅ Teacher deleted: {teacher_id}")
-        return result2.deleted_count > 0
-    except:
+        logger.debug(f"[UPDATE_TEACHER] Searching by CNIC: {query}")
+        kwargs["updated_at"] = datetime.utcnow()
+        result = db.teachers.find_one_and_update(
+            query,
+            {"$set": kwargs},
+            return_document=True
+        )
+        
+        if result:
+            result["id"] = str(result["_id"])
+            logger.info(f"[UPDATE_TEACHER] ✅ Teacher updated by CNIC: {teacher_id}")
+            return result
+        
+        logger.warn(f"[UPDATE_TEACHER] ❌ No teacher found with ID \"{teacher_id}\" (tried _id and CNIC)")
+        return None
+        
+    except Exception as e:
+        logger.error(f"[UPDATE_TEACHER] ❌ Unexpected error: {str(e)}")
+        return None
+
+
+def delete_teacher(teacher_id: str, school_id: str = None) -> bool:
+    db = get_db()
+    if db is None:
+        logger.error(f"[DELETE_TEACHER] ❌ Database not available")
+        return False
+    
+    try:
+        logger.info(f"[DELETE_TEACHER] Attempting to delete teacher ID: \"{teacher_id}\"")
+        
+        # First attempt: try by MongoDB _id
+        try:
+            from bson import ObjectId
+            query = {"_id": ObjectId(teacher_id)}
+            if school_id:
+                query["school_id"] = school_id
+            
+            logger.debug(f"[DELETE_TEACHER] Searching by _id: {query}")
+            result = db.teachers.delete_one(query)
+            if result.deleted_count > 0:
+                logger.info(f"[DELETE_TEACHER] ✅ Teacher deleted by _id: {teacher_id}")
+                return True
+            else:
+                logger.debug(f"[DELETE_TEACHER] No teacher found by _id")
+        except Exception as e:
+            logger.debug(f"[DELETE_TEACHER] _id lookup failed (expected for non-ObjectId): {str(e)}")
+        
+        # Fallback: try by CNIC
+        logger.debug(f"[DELETE_TEACHER] Trying fallback search by CNIC")
+        query = {"cnic": teacher_id}
+        if school_id:
+            query["school_id"] = school_id
+        
+        logger.debug(f"[DELETE_TEACHER] Searching by CNIC: {query}")
+        result = db.teachers.delete_one(query)
+        
+        if result.deleted_count > 0:
+            logger.info(f"[DELETE_TEACHER] ✅ Teacher deleted by CNIC: {teacher_id}")
+            return True
+        
+        logger.warn(f"[DELETE_TEACHER] ❌ No teacher found with ID \"{teacher_id}\" (tried _id and CNIC)")
+        return False
+        
+    except Exception as e:
+        logger.error(f"[DELETE_TEACHER] ❌ Unexpected error: {str(e)}")
         return False

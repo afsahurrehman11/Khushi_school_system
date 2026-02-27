@@ -2,6 +2,8 @@
 Face Recognition Service
 Handles embedding generation, face matching, and attendance recording.
 Integrated with existing CMS attendance collections.
+
+Now uses ONNX Runtime + MobileFaceNet (~20MB) instead of PyTorch (~400MB).
 """
 import logging
 import io
@@ -21,24 +23,24 @@ handler.setFormatter(logging.Formatter('[FACE][%(levelname)s] %(message)s'))
 if not logger.handlers:
     logger.addHandler(handler)
 
-# Lazy loading flags for heavy ML libraries
-# These will be initialized on first use to avoid slow startup
+# Lazy loading flags for ML libraries
 _ml_libs_initialized = False
-USE_FACENET = False
-FACENET_MODEL = None
-DEVICE = None
-TORCH = None
+USE_ONNX = False
+_ONNX_SESSION = None
 Image = None
 CV2_AVAILABLE = False
 cv2 = None
 
 def _init_ml_libs():
-    """Lazily initialize heavy ML libraries (PyTorch, FaceNet, OpenCV).
+    """Lazily initialize ML libraries (ONNX Runtime, OpenCV).
     
     Only called when actually needed for face recognition operations,
     not at module import time to avoid slow server startup.
+    
+    Uses ONNX Runtime (~15MB) + MobileFaceNet (~4MB) instead of
+    PyTorch (~280MB) + FaceNet (~107MB).
     """
-    global _ml_libs_initialized, USE_FACENET, FACENET_MODEL, DEVICE, TORCH, Image, CV2_AVAILABLE, cv2
+    global _ml_libs_initialized, USE_ONNX, _ONNX_SESSION, Image, CV2_AVAILABLE, cv2
     
     if _ml_libs_initialized:
         return
@@ -46,21 +48,24 @@ def _init_ml_libs():
     _ml_libs_initialized = True
     logger.info("📦 Initializing ML libraries for face recognition...")
     
-    # Try to load FaceNet/PyTorch
+    # Try to load ONNX Runtime with MobileFaceNet
     try:
-        import torch as _torch
-        TORCH = _torch
-        from facenet_pytorch import InceptionResnetV1  # type: ignore
         from PIL import Image as _Image
         Image = _Image
-        FACENET_MODEL = InceptionResnetV1(pretrained='vggface2').eval()
-        DEVICE = TORCH.device('cuda' if TORCH.cuda.is_available() else 'cpu')
-        FACENET_MODEL = FACENET_MODEL.to(DEVICE)
-        USE_FACENET = True
-        logger.info(f"✅ FaceNet loaded on {DEVICE}")
+        
+        # Import EmbeddingGenerator which handles ONNX model loading
+        from .embedding_service import EmbeddingGenerator, _init_mobilefacenet
+        
+        # Initialize the ONNX model
+        if _init_mobilefacenet():
+            USE_ONNX = True
+            logger.info("✅ MobileFaceNet ONNX loaded")
+        else:
+            logger.info("MobileFaceNet ONNX not available")
+            
     except Exception as e:
-        logger.info(f"FaceNet not available, using fallback: {e}")
-        USE_FACENET = False
+        logger.info(f"ONNX face recognition not available: {e}")
+        USE_ONNX = False
 
     # Try OpenCV for face detection
     try:
@@ -75,7 +80,7 @@ def _init_ml_libs():
 def _get_embedding_version():
     """Get embedding version based on available libraries."""
     _init_ml_libs()
-    return "facenet_v1" if USE_FACENET else "fallback_v1"
+    return "mobilefacenet_onnx_v1" if USE_ONNX else "fallback_v1"
 
 # In-memory embedding cache
 _embedding_cache: Dict[str, Dict[str, Any]] = {
@@ -318,70 +323,31 @@ class FaceRecognitionService:
             return None, str(e)
     
     def _image_bytes_to_embedding(self, data: bytes) -> Optional[np.ndarray]:
-        """Convert image bytes to normalized embedding vector"""
+        """Convert image bytes to normalized embedding vector using MobileFaceNet ONNX"""
         # Lazily initialize ML libraries when first needed
         _init_ml_libs()
         
-        if USE_FACENET and FACENET_MODEL is not None and Image is not None:
+        if USE_ONNX and Image is not None:
             try:
+                # Use EmbeddingGenerator from embedding_service for ONNX inference
+                from .embedding_service import EmbeddingGenerator
+                
                 img = Image.open(io.BytesIO(data)).convert('RGB')
                 
-                # Try face detection with OpenCV
-                if CV2_AVAILABLE:
-                    arr = np.asarray(img)[:, :, ::-1].copy()
-                    gray = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
-                    
-                    # Apply CLAHE for better contrast
-                    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-                    gray = clahe.apply(gray)
-                    
-                    cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-                    cascade = cv2.CascadeClassifier(cascade_path)
-                    
-                    faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(30, 30))
-                    if len(faces) == 0:
-                        faces = cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=2, minSize=(20, 20))
-                    
-                    if len(faces) > 0:
-                        x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-                        logger.info(f"Face detected: {w}x{h} at ({x},{y})")
-                        
-                        # Crop with padding
-                        pad = 0.5
-                        x0 = max(0, int(x - w * pad / 2))
-                        y0 = max(0, int(y - h * pad / 2))
-                        x1 = min(img.width, int(x + w + w * pad / 2))
-                        y1 = min(img.height, int(y + h + h * pad / 2))
-                        img = img.crop((x0, y0, x1, y1))
-                    else:
-                        logger.warning("No face detected, using full image")
+                # Use EmbeddingGenerator's face detection and embedding pipeline
+                embedding_list, status = EmbeddingGenerator.generate_embedding_from_image(img)
                 
-                # Resize to FaceNet input size
-                img = img.resize((160, 160), Image.Resampling.LANCZOS)
+                if embedding_list is not None:
+                    return np.array(embedding_list, dtype=np.float32)
                 
-                # Transform to tensor
-                import torchvision.transforms as transforms
-                trans = transforms.Compose([
-                    transforms.ToTensor(),
-                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
-                ])
-                t = trans(img).unsqueeze(0)
-                
-                if DEVICE is not None:
-                    t = t.to(DEVICE)
-                
-                with TORCH.no_grad():
-                    emb = FACENET_MODEL(t)
-                
-                vec = emb.detach().cpu().numpy().flatten().astype(np.float32)
-                norm = np.linalg.norm(vec)
-                return vec / (norm if norm != 0 else 1.0)
+                logger.warning(f"Embedding generation failed: {status}")
+                return None
                 
             except Exception as e:
-                logger.error(f"FaceNet embedding failed: {e}")
+                logger.error(f"ONNX embedding failed: {e}")
                 return None
         
-        # Fallback: grayscale 64x64
+        # Fallback: grayscale 64x64 (no ML required)
         if CV2_AVAILABLE:
             try:
                 arr = np.frombuffer(data, np.uint8)
@@ -409,48 +375,91 @@ class FaceRecognitionService:
     
     def compare_embedding(self, query_embedding: np.ndarray, threshold: float = 0.85) -> Optional[Dict[str, Any]]:
         """
-        Compare query embedding against all cached embeddings.
+        Compare query embedding against all cached embeddings using vectorized operations.
+        This is 10-50x faster than loop-based comparison for large caches.
         Returns best match if confidence >= threshold, else None.
         """
         best_match = None
         best_confidence = 0.0
+        best_person_id = None
+        best_person_type = None
         
-        # Search students
-        for person_id, data in _embedding_cache["students"].items():
-            similarity = self._cosine_similarity(query_embedding, data["embedding"])
-            if similarity > best_confidence:
-                best_confidence = similarity
-                best_match = {
-                    "person_type": "student",
-                    "person_id": person_id,
-                    **data
-                }
+        # Normalize query embedding once
+        query_norm = np.linalg.norm(query_embedding)
+        if query_norm == 0:
+            return None
+        query_normalized = query_embedding / query_norm
         
-        # Search employees
-        for person_id, data in _embedding_cache["employees"].items():
-            similarity = self._cosine_similarity(query_embedding, data["embedding"])
-            if similarity > best_confidence:
-                best_confidence = similarity
-                best_match = {
-                    "person_type": "employee",
-                    "person_id": person_id,
-                    **data
-                }
+        # Vectorized search for students
+        if _embedding_cache["students"]:
+            student_ids = list(_embedding_cache["students"].keys())
+            student_embeddings = np.array([
+                _embedding_cache["students"][pid]["embedding"] 
+                for pid in student_ids
+            ], dtype=np.float32)
+            
+            # Batch normalize all student embeddings
+            norms = np.linalg.norm(student_embeddings, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1, norms)  # Avoid division by zero
+            student_embeddings_normalized = student_embeddings / norms
+            
+            # Vectorized cosine similarity (dot product of normalized vectors)
+            similarities = np.dot(student_embeddings_normalized, query_normalized)
+            
+            # Find best match among students
+            best_student_idx = np.argmax(similarities)
+            if similarities[best_student_idx] > best_confidence:
+                best_confidence = similarities[best_student_idx]
+                best_person_id = student_ids[best_student_idx]
+                best_person_type = "student"
         
-        if best_match and best_confidence >= threshold:
-            best_match["confidence"] = float(best_confidence)
-            logger.info(f"[MATCH] {best_match['name']} | Confidence: {best_confidence:.2f}")
+        # Vectorized search for employees
+        if _embedding_cache["employees"]:
+            employee_ids = list(_embedding_cache["employees"].keys())
+            employee_embeddings = np.array([
+                _embedding_cache["employees"][pid]["embedding"] 
+                for pid in employee_ids
+            ], dtype=np.float32)
+            
+            # Batch normalize all employee embeddings
+            norms = np.linalg.norm(employee_embeddings, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1, norms)
+            employee_embeddings_normalized = employee_embeddings / norms
+            
+            # Vectorized cosine similarity
+            similarities = np.dot(employee_embeddings_normalized, query_normalized)
+            
+            # Check if any employee beats current best
+            best_employee_idx = np.argmax(similarities)
+            if similarities[best_employee_idx] > best_confidence:
+                best_confidence = similarities[best_employee_idx]
+                best_person_id = employee_ids[best_employee_idx]
+                best_person_type = "employee"
+        
+        # Build match result if above threshold
+        if best_person_id and best_confidence >= threshold:
+            cache_key = "students" if best_person_type == "student" else "employees"
+            data = _embedding_cache[cache_key][best_person_id]
+            best_match = {
+                "person_type": best_person_type,
+                "person_id": best_person_id,
+                "confidence": float(best_confidence),
+                **{k: v for k, v in data.items() if k != "embedding"}
+            }
+            logger.info(f"[MATCH] {best_match.get('name', 'Unknown')} | Confidence: {best_confidence:.2f}")
             return best_match
         
-        if best_match:
-            logger.info(f"[RETRY] Low confidence: {best_confidence:.2f} for {best_match['name']}")
+        if best_person_id:
+            cache_key = "students" if best_person_type == "student" else "employees"
+            name = _embedding_cache[cache_key][best_person_id].get("name", "Unknown")
+            logger.info(f"[RETRY] Low confidence: {best_confidence:.2f} for {name}")
         else:
             logger.info("[RETRY] No match found in cache")
         
         return None
     
     def _cosine_similarity(self, a: np.ndarray, b: np.ndarray) -> float:
-        """Calculate cosine similarity between two vectors"""
+        """Calculate cosine similarity between two vectors (kept for compatibility)"""
         dot = np.dot(a, b)
         norm_a = np.linalg.norm(a)
         norm_b = np.linalg.norm(b)
@@ -878,7 +887,7 @@ class EmbeddingGenerationService:
                             "face_embedding": embedding,
                             "embedding_status": "generated",
                             "embedding_generated_at": datetime.utcnow(),
-                            "embedding_model": "facenet" if USE_FACENET else "fallback",
+                            "embedding_model": "mobilefacenet_onnx" if USE_ONNX else "fallback",
                             "embedding_version": _get_embedding_version()
                         }
                     }
@@ -999,7 +1008,7 @@ class EmbeddingGenerationService:
                         "face_embedding": embedding,
                         "embedding_status": "generated",
                         "embedding_generated_at": datetime.utcnow(),
-                        "embedding_model": "facenet" if USE_FACENET else "fallback",
+                        "embedding_model": "mobilefacenet_onnx" if USE_ONNX else "fallback",
                         "embedding_version": _get_embedding_version()
                     }
                 }

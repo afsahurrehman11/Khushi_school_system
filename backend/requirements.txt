@@ -1,27 +1,62 @@
+# ============================================
+# CMS Backend - Heroku Optimized (CPU-Only)
+# ============================================
+# Last updated: 2026-02-27
+# Using: ONNX Runtime + MobileFaceNet for lightweight face recognition
+# Total ML footprint: ~20MB (vs ~400MB with PyTorch)
+
+# --- Core Framework ---
 pydantic==1.10.12
 fastapi==0.103.2
 uvicorn==0.23.2
+starlette==0.27.0
+
+# --- Database ---
 pymongo==4.15.4
+
+# --- Authentication ---
 python-jose==3.3.0
 passlib==1.7.4
+
+# --- File Handling ---
 python-multipart==0.0.6
 python-dotenv==1.0.1
 openpyxl==3.1.2
-starlette==0.27.0
+
+# --- Core Utilities ---
 typing-extensions==4.12.0
 Pillow==10.0.1
 numpy>=1.26.4
 requests==2.31.0
-deepface==0.0.98
-tensorflow==2.16.2
-opencv-python==4.8.0.76
-tf-keras
 httpx>=0.24.0
+
+# --- PDF/Reports ---
 reportlab>=4.0.0
 matplotlib>=3.8.0
+
+# --- System Monitoring ---
 psutil>=5.9.0
 
-# PyTorch for FaceNet (CPU build). Adjust version/index if you need CUDA builds.
-torch>=2.2.0
-torchvision>=0.17.0
-facenet-pytorch>=2.2.0
+# --- Image Processing (headless = smaller, no GUI deps) ---
+opencv-python-headless==4.8.0.76
+
+# ============================================
+# FACE RECOGNITION - MOBILEFACENET (LIGHTWEIGHT)
+# ============================================
+# ONNX Runtime CPU (~15MB) - Much lighter than PyTorch (~280MB)
+onnxruntime==1.17.0
+
+# ============================================
+# MODEL: MobileFaceNet (downloaded at runtime)
+# - Size: ~4MB (vs FaceNet's 107MB)
+# - Accuracy: 99.28% on LFW (vs 99.63% for FaceNet)
+# - Speed: 4x faster inference
+# ============================================
+
+# ============================================
+# REMOVED (to reduce slug size):
+# - torch (~280MB) - replaced with onnxruntime (~15MB)
+# - torchvision (~50MB) - not needed
+# - facenet-pytorch (~107MB model) - replaced with MobileFaceNet (~4MB)
+# - tensorflow, deepface, tf-keras - not needed
+# ============================================

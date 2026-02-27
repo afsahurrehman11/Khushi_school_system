@@ -21,7 +21,6 @@ const TeacherList: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showUnassigned, setShowUnassigned] = useState(false);
 
-  const unassignedTeachers = useMemo(() => uniqueTeachers.filter((t) => !t.assignedClasses || t.assignedClasses.length === 0), [uniqueTeachers]);
   const uniqueTeachers = useMemo(() => {
     const seen = new Set();
     return teachers.filter((t) => {
@@ -31,6 +30,7 @@ const TeacherList: React.FC = () => {
       return true;
     });
   }, [teachers]);
+  const unassignedTeachers = useMemo(() => uniqueTeachers.filter((t) => !t.assignedClasses || t.assignedClasses.length === 0), [uniqueTeachers]);
   const allClassrooms = useMemo(() => {
     const classes = uniqueTeachers.flatMap((t) => t.assignedClasses || []);
     const unique = Array.from(new Set(classes)).sort();

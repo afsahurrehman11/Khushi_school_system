@@ -101,7 +101,7 @@ class Settings(BaseSettings):
     # Hard-coded deployed URL for self-ping. This value is used when no
     # environment variable is provided and enables the self-ping task.
     # Replace with your deployed URL if different.
-    self_ping_url: Optional[str] = os.environ.get("SELF_PING_URL", "https://khushi-school-system.onrender.com")
+    self_ping_url: Optional[str] = os.environ.get("SELF_PING_URL", "https://khushi-solutions-3f944a9b5e3b.herokuapp.com")
     # Interval in minutes between pings (default 57)
     self_ping_interval_minutes: int = int(os.environ.get("SELF_PING_INTERVAL_MINUTES", 57))
     # Whether to enable the self-ping background task. Disabled by default

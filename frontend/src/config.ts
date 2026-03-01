@@ -1,7 +1,19 @@
+/**
+ * API Configuration
+ * 
+ * Uses environment variables:
+ * - Development: Uses .env file (VITE_API_URL)
+ * - Production: Uses .env.production file (VITE_API_URL)
+ * 
+ * No auto-detection or fallback logic - always uses the configured URL.
+ */
 export const config: { API_BASE_URL: string } = {
-    API_BASE_URL: import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:8000/api" : "https://khushi-solutions-3f944a9b5e3b.herokuapp.com/api")
+    API_BASE_URL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 };
 
-// Log initial configuration
-const backendType = import.meta.env.DEV ? "local backend (development)" : "production backend on Heroku";
-console.log(`%c[CONFIG] Using ${backendType}: ${config.API_BASE_URL}`, 'color: cyan');
+// Single clear log at startup showing which backend is being used
+const mode = import.meta.env.DEV ? 'DEVELOPMENT' : 'PRODUCTION';
+console.log(
+    `%c[BACKEND] ${mode} mode - API: ${config.API_BASE_URL}`,
+    `color: ${import.meta.env.DEV ? 'cyan' : 'lime'}; font-weight: bold; font-size: 14px; padding: 4px;`
+);

@@ -2,6 +2,7 @@
 import { InAppNotificationService } from './InAppNotificationService';
 import { config } from '../../../config';
 import logger from '../../../utils/logger';
+import { authService } from '../../../services/auth';
 
 // API_BASE already includes /api suffix, so don't duplicate it
 const API_BASE = config.API_BASE_URL;
@@ -20,7 +21,7 @@ function handlePayload(raw: string) {
 }
 
 export function startNotificationSSE(): () => void {
-  const token = localStorage.getItem('token');
+  const headers = authService.getAuthHeaders();
   const url = `${API_BASE}/notifications/stream`;
 
   const controller = new AbortController();
@@ -30,7 +31,7 @@ export function startNotificationSSE(): () => void {
     try {
       const resp = await fetch(url, {
         method: 'GET',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers,
         signal: controller.signal,
       });
 

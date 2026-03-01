@@ -18,6 +18,7 @@ import json
 import asyncio
 from app.database import get_db
 from bson import ObjectId
+from app.utils.validators import is_valid_pk_phone
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,25 @@ async def create_new_student(
 
         data["school_id"] = school_id
 
+        # Server-side phone format validation
+        # Check student contact phone
+        contact_phone = None
+        if isinstance(data.get('contact_info'), dict):
+            contact_phone = data['contact_info'].get('phone')
+        contact_phone = contact_phone or data.get('phone')
+
+        guardian_contact = None
+        if isinstance(data.get('guardian_info'), dict):
+            guardian_contact = data['guardian_info'].get('guardian_contact') or data['guardian_info'].get('parent_contact')
+
+        if contact_phone and not is_valid_pk_phone(contact_phone):
+            logger.warning(f"❌ Invalid student phone format: {contact_phone}")
+            raise HTTPException(status_code=400, detail="Student phone must be in format 92XXXXXXXXXX")
+
+        if guardian_contact and not is_valid_pk_phone(guardian_contact):
+            logger.warning(f"❌ Invalid guardian phone format: {guardian_contact}")
+            raise HTTPException(status_code=400, detail="Parent contact must be in format 92XXXXXXXXXX")
+
         student = create_student(data)
         if not student:
             logger.error("❌ Failed to create student - possible duplicate ID")
@@ -242,6 +262,23 @@ async def create_student_with_image(
                 raise HTTPException(status_code=400, detail="Missing school context for student creation")
 
         data['school_id'] = school_id
+        # Server-side phone format validation for upload-with-image path
+        contact_phone = None
+        if isinstance(data.get('contact_info'), dict):
+            contact_phone = data['contact_info'].get('phone')
+        contact_phone = contact_phone or data.get('phone')
+
+        guardian_contact = None
+        if isinstance(data.get('guardian_info'), dict):
+            guardian_contact = data['guardian_info'].get('guardian_contact') or data['guardian_info'].get('parent_contact')
+
+        if contact_phone and not is_valid_pk_phone(contact_phone):
+            logger.warning(f"❌ Invalid student phone format (with image): {contact_phone}")
+            raise HTTPException(status_code=400, detail="Student phone must be in format 92XXXXXXXXXX")
+
+        if guardian_contact and not is_valid_pk_phone(guardian_contact):
+            logger.warning(f"❌ Invalid guardian phone format (with image): {guardian_contact}")
+            raise HTTPException(status_code=400, detail="Parent contact must be in format 92XXXXXXXXXX")
         
         # Add image data if uploaded (stored as base64 blob)
         if image_blob:

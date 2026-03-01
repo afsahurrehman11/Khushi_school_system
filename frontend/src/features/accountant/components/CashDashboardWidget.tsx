@@ -1,6 +1,6 @@
 /**
  * Cash Dashboard Widget
- * Shows current cash session status with payment method breakdown
+ * Shows current today's session status with payment method breakdown
  */
 
 import React from 'react';
@@ -84,7 +84,7 @@ const CashDashboardWidget: React.FC<CashDashboardWidgetProps> = ({ className = '
               <Wallet className="w-6 h-6 text-primary-600" />
             </div>
             <div>
-              <h3 className="text-xl font-bold text-secondary-900">Cash Session</h3>
+              <h3 className="text-xl font-bold text-secondary-900">Today's Session</h3>
               <p className="text-sm text-secondary-600 flex items-center gap-1">
                 <Calendar className="w-4 h-4" />
                 {new Date(session.started_at).toLocaleDateString()}

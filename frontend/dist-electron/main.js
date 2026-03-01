@@ -1,72 +1,89 @@
-import { app as e, BrowserWindow as r } from "electron";
-import { fileURLToPath as l } from "node:url";
-import n from "node:path";
-import a from "node:fs";
-import m from "node:os";
-e.disableHardwareAcceleration();
-e.commandLine.appendSwitch("disable-gpu");
-e.commandLine.appendSwitch("enable-software-rasterizer");
-e.commandLine.appendSwitch("disable-gpu-compositing");
-e.commandLine.appendSwitch("disable-gpu-sandbox");
-e.commandLine.appendSwitch("disable-d3d11");
-e.commandLine.appendSwitch("disable-dx12");
-e.commandLine.appendSwitch("disable-accelerated-2d-canvas");
-e.commandLine.appendSwitch("disable-direct-composition");
-e.commandLine.appendSwitch("disable-gpu-memory-buffer-video-frames");
-const s = n.dirname(l(import.meta.url));
-process.env.APP_ROOT = n.join(s, "..");
+import { app, BrowserWindow } from "electron";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch("disable-gpu");
+app.commandLine.appendSwitch("enable-software-rasterizer");
+app.commandLine.appendSwitch("disable-gpu-compositing");
+app.commandLine.appendSwitch("disable-gpu-sandbox");
+app.commandLine.appendSwitch("disable-d3d11");
+app.commandLine.appendSwitch("disable-dx12");
+app.commandLine.appendSwitch("disable-accelerated-2d-canvas");
+app.commandLine.appendSwitch("disable-direct-composition");
+app.commandLine.appendSwitch("disable-gpu-memory-buffer-video-frames");
+const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
+process.env.APP_ROOT = path.join(__dirname$1, "..");
 try {
-  const i = n.join(m.tmpdir(), "khushi-erps-electron");
-  e.setPath("userData", i);
-} catch {
+  const tmpUserData = path.join(os.tmpdir(), "khushi-erps-electron");
+  app.setPath("userData", tmpUserData);
+} catch (err) {
 }
-const t = process.env.VITE_DEV_SERVER_URL, b = n.join(process.env.APP_ROOT, "dist-electron"), d = n.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = t ? n.join(process.env.APP_ROOT, "public") : d;
-let o;
-const w = e.requestSingleInstanceLock();
-w || (e.quit(), process.exit(0));
-e.on("second-instance", () => {
-  o && (o.isMinimized() && o.restore(), o.focus());
+const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
+const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
+const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
+let win;
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+  process.exit(0);
+}
+app.on("second-instance", () => {
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  }
 });
-const c = () => {
+const cleanupAndExit = () => {
   try {
-    e.quit();
-  } catch {
+    app.quit();
+  } catch (e) {
   }
   try {
     process.exit(0);
-  } catch {
+  } catch (e) {
   }
 };
-process.on("SIGINT", c);
-process.on("SIGTERM", c);
-process.on("exit", c);
-function p() {
-  if (o = new r({
-    icon: n.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
+process.on("SIGINT", cleanupAndExit);
+process.on("SIGTERM", cleanupAndExit);
+process.on("exit", cleanupAndExit);
+function createWindow() {
+  win = new BrowserWindow({
+    icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
     webPreferences: {
       // Prefer a CommonJS preload when available (preload.cjs) for maximum compatibility.
-      preload: a.existsSync(n.join(s, "preload.cjs")) ? n.join(s, "preload.cjs") : n.join(s, "preload.mjs"),
-      sandbox: !1
+      preload: fs.existsSync(path.join(__dirname$1, "preload.cjs")) ? path.join(__dirname$1, "preload.cjs") : path.join(__dirname$1, "preload.mjs"),
+      sandbox: false
     }
-  }), o.webContents.on("did-finish-load", () => {
-    o?.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
-  }), t)
-    o.loadURL(t);
-  else {
-    const i = n.join(d, "index.html");
-    console.log("Loading production HTML from:", i), console.log("File exists:", a.existsSync(i)), o.loadFile(i);
+  });
+  win.webContents.on("did-finish-load", () => {
+    win?.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+  });
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(VITE_DEV_SERVER_URL);
+  } else {
+    const indexPath = path.join(RENDERER_DIST, "index.html");
+    console.log("Loading production HTML from:", indexPath);
+    console.log("File exists:", fs.existsSync(indexPath));
+    win.loadFile(indexPath);
   }
 }
-e.on("window-all-closed", () => {
-  process.platform !== "darwin" && (e.quit(), o = null);
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+    win = null;
+  }
 });
-e.on("activate", () => {
-  r.getAllWindows().length === 0 && p();
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
 });
-e.whenReady().then(p);
+app.whenReady().then(createWindow);
 export {
-  b as MAIN_DIST,
-  d as RENDERER_DIST,
-  t as VITE_DEV_SERVER_URL
+  MAIN_DIST,
+  RENDERER_DIST,
+  VITE_DEV_SERVER_URL
 };

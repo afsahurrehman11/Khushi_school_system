@@ -96,27 +96,36 @@ async def assign_category_to_class(
     """Assign a fee category to a class"""
     school_id = current_user.get("school_id")
     admin_email = current_user.get("email")
-    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Assigning fee category to class")
+    
+    if not school_id:
+        logger.error(f"[ADMIN:{admin_email}] ❌ No school_id in user context")
+        raise HTTPException(status_code=400, detail="School ID required")
+    
+    # Override school_id from user context for security
+    assignment.school_id = school_id
+    
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Assigning fee category {assignment.category_id} to class {assignment.class_id}")
     
     try:
         result = assign_fee_category_to_class(
             class_id=assignment.class_id,
             category_id=assignment.category_id,
+            school_id=school_id,
             assigned_by=current_user.get("id"),
-            apply_to_existing=assignment.apply_to_existing if hasattr(assignment, 'apply_to_existing') else False
+            apply_to_existing=assignment.apply_to_existing if assignment.apply_to_existing else False
         )
         
         if not result:
             logger.error(f"[SCHOOL:{school_id}] ❌ Failed to assign fee category")
             raise HTTPException(status_code=400, detail="Failed to assign fee category")
         
-        logger.info(f"[SCHOOL:{school_id}] ✅ Assigned fee category to class")
+        logger.info(f"[SCHOOL:{school_id}] ✅ Assigned fee category to class successfully")
         return result
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"[SCHOOL:{school_id}] ❌ Error assigning category: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to assign fee category")
+        logger.error(f"[SCHOOL:{school_id}] ❌ Error assigning category: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to assign fee category: {str(e)}")
 
 @router.put("/{assignment_id}")
 async def update_category_assignment(

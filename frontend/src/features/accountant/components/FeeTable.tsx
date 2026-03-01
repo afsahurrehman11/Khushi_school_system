@@ -3,6 +3,7 @@ import { challanApi, feesApi, feeCategoriesApi } from '../services/feeApi';
 import Button from '../../../components/Button';
 import { InAppNotificationService } from '../services';
 import { config } from '../../../config';
+import { authService } from '../../../services/auth';
 
 interface FeeRow {
   id: string;
@@ -69,7 +70,7 @@ const FeeTable: React.FC = () => {
     let mounted = true;
     (async () => {
       try {
-        const cls = await fetch(`${config.API_BASE_URL}/api/classes`, { headers: localStorage.getItem('token') ? { Authorization: `Bearer ${localStorage.getItem('token')}` } : {} }).then(r => r.ok ? r.json() : []);
+        const cls = await fetch(`${config.API_BASE_URL}/api/classes`, { headers: authService.getAuthHeaders() }).then(r => r.ok ? r.json() : []);
         const cats = await feeCategoriesApi.getAllCategories().then((r: any) => Array.isArray(r) ? r : (r.categories || []));
         if (mounted) {
           setClasses(Array.isArray(cls) ? cls : []);

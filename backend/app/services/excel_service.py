@@ -13,11 +13,13 @@ import re
 from io import BytesIO
 from datetime import datetime
 from typing import List, Dict, Any, Tuple, Optional
+from app.utils.validators import is_valid_pk_phone
 
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from app.utils.student_id_utils import generate_imported_student_id, validate_student_id_uniqueness
+from app.utils.validators import normalize_phone
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -92,7 +94,7 @@ EXAMPLE_ROW = [
     "12345-1234567-1",
     "Male",
     "22/03/2015",
-    "03001234567",
+    "923001234567",
     "123 Main St, Lahore",
     "01/04/2025",
     "ali_ahmed.jpg",
@@ -380,6 +382,19 @@ def parse_and_validate_rows(xlsx_bytes: bytes) -> Dict[str, Any]:
             error_rows.extend(row_errors)
             continue
 
+        # Validate phone / parent contact format if provided
+        if parent_contact:
+            if not is_valid_pk_phone(parent_contact):
+                row_errors.append({
+                    "row": row_num,
+                    "column": "Parent_Contact",
+                    "value": parent_contact,
+                    "reason": "Parent contact must be in format 92XXXXXXXXXX",
+                    "status": "skipped",
+                })
+                error_rows.extend(row_errors)
+                continue
+
         if is_dup:
             continue
 
@@ -468,8 +483,14 @@ def build_student_doc(row: Dict) -> Dict:
     missing_fields = [f for f in required_optional_fields if not row.get(f)]
     data_status = "complete" if not missing_fields else "incomplete"
     
+    # Generate placeholder email to avoid unique constraint issues
+    student_id = row.get("student_id", "")
+    school_id = row.get("school_id", "unknown")
+    placeholder_email = f"{student_id}@no-email.{school_id}.local"
+    
     return {
-        "student_id": row.get("student_id", ""),
+        "school_id": school_id,  # CRITICAL: Must be included for query filtering
+        "student_id": student_id,
         "registration_number": row.get("registration_number", ""),
         "full_name": row["full_name"],
         "roll_number": row["roll_number"],
@@ -478,18 +499,20 @@ def build_student_doc(row: Dict) -> Dict:
         "gender": row.get("gender", ""),
         "date_of_birth": row.get("date_of_birth", ""),
         "admission_date": row.get("admission_date", "") or now.strftime("%Y-%m-%d"),
+        "admission_year": row.get("admission_year", now.year),
+        "email": placeholder_email,  # Prevent unique constraint errors
         "guardian_info": {
             "father_name": row.get("father_name", ""),
             "parent_cnic": row.get("father_cnic", ""),
-            "guardian_contact": row.get("parent_contact", ""),
+            "guardian_contact": normalize_phone(row.get("parent_contact", "")) if row.get("parent_contact") else "",
             "address": row.get("address", ""),
         },
         "contact_info": {
-            "phone": row.get("parent_contact", ""),
+            "phone": normalize_phone(row.get("parent_contact", "")) if row.get("parent_contact") else "",
         },
         "subjects": [],
         "assigned_teacher_ids": [],
-        "status": "active",
+        "status": "active",  # CRITICAL: Ensure imported students are active
         "data_status": data_status,
         "missing_fields": missing_fields,
         "academic_year": f"{now.year}-{now.year + 1}",

@@ -122,7 +122,9 @@ async def upload_and_validate(
 ):
     """
     Upload an Excel file with optional ZIP file containing student images.
-    Validates both files and returns a preview. No database writes happen here.
+    
+    IMPORTANT: This endpoint now returns immediately after accepting the upload.
+    Validation happens in the background. Poll /status/{import_id} to check progress.
     
     ZIP file rules:
     - Maximum size: 50MB
@@ -131,6 +133,7 @@ async def upload_and_validate(
     """
     school_id = current_user.get("school_id")
     admin_email = current_user.get("email", "")
+    database_name = current_user.get("database_name")
     logger.info(f"🔵 [BULK] Upload started by {admin_email}")
     logger.info(f"🔵 [BULK] Excel file: {file.filename}")
     
@@ -144,17 +147,21 @@ async def upload_and_validate(
             logger.error(f"🔴 [BULK] Invalid Excel file type: {file.content_type}")
             raise HTTPException(status_code=400, detail="Invalid file type. Only .xlsx / .xls files are accepted.")
 
+        # Quick size check (before reading entire file)
         content = await file.read()
-
-        # Size check for Excel
         if len(content) > MAX_FILE_SIZE:
             logger.error(f"🔴 [BULK] Excel file too large: {len(content)} bytes")
             raise HTTPException(status_code=400, detail="Excel file exceeds maximum size of 10MB.")
 
+        # Save Excel to temp file for background processing
+        excel_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+        excel_path = excel_tmp.name
+        await asyncio.to_thread(lambda: excel_tmp.write(content))
+        excel_tmp.close()
+        logger.info(f"🟢 [BULK] Excel saved to temp: {excel_path}")
+
         # Process ZIP file if provided
         zip_path = None
-        zip_validation_error = None
-
         if images_zip and images_zip.filename:
             logger.info(f"🔵 [BULK] ZIP file: {images_zip.filename}")
 
@@ -166,23 +173,27 @@ async def upload_and_validate(
             }
             if images_zip.content_type not in zip_allowed_types and not (images_zip.filename or "").endswith(".zip"):
                 logger.error(f"🔴 [BULK] Invalid ZIP file type: {images_zip.content_type}")
+                # Clean up Excel temp file
+                try:
+                    os.remove(excel_path)
+                except Exception:
+                    pass
                 raise HTTPException(status_code=400, detail="Invalid ZIP file type. Only .zip files are accepted.")
 
-            # Stream uploaded ZIP to a temporary file to avoid storing bytes in memory or DB
+            # Stream uploaded ZIP to a temporary file
             tmp_file = None
             try:
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
                 tmp_file = tmp.name
-                # copyfileobj is blocking — run in thread to avoid blocking event loop
                 await asyncio.to_thread(shutil.copyfileobj, images_zip.file, tmp)
                 tmp.close()
 
-                # Validate ZIP size and integrity via path-based validator
+                # Quick ZIP validation (just size and integrity, detailed validation in background)
                 is_valid, error_msg = validate_zip_file_path(tmp_file)
                 if not is_valid:
-                    # remove temp file on validation failure
                     try:
                         os.remove(tmp_file)
+                        os.remove(excel_path)
                     except Exception:
                         pass
                     logger.error(f"🔴 [BULK] ZIP validation failed: {error_msg}")
@@ -200,67 +211,196 @@ async def upload_and_validate(
                         os.remove(tmp_file)
                     except Exception:
                         pass
+                try:
+                    os.remove(excel_path)
+                except Exception:
+                    pass
                 logger.exception(f"🔴 [BULK] Failed to store/validate ZIP: {str(e)}")
                 raise HTTPException(status_code=400, detail=f"Failed to process ZIP file: {str(e)}")
 
-        # Parse & validate Excel
-        try:
-            result = parse_and_validate_rows(content)
-        except Exception as e:
-            logger.exception(f"🔴 [BULK] Parse error: {str(e)}")
-            raise HTTPException(status_code=400, detail=f"Failed to parse Excel file: {str(e)}")
-
-        # Check DB duplicates for valid rows
-        db = get_db()
-        clean_rows, db_dup_rows, updatable_rows = check_db_duplicates(result["valid_rows"], db, school_id=school_id)
-
-        all_errors = result["error_rows"] + result["duplicate_rows"] + db_dup_rows
-        all_duplicate_count = len(result["duplicate_rows"]) + len(db_dup_rows)
-
-        # Create an import log entry in "pending" state (preview stage)
+        # Create import log in "validating" state (validation happens in background)
         log_entry = create_import_log({
             "school_id": school_id,
             "file_name": file.filename or "unknown.xlsx",
             "zip_file_name": images_zip.filename if images_zip else None,
             "imported_by": admin_email,
             "imported_by_name": current_user.get("name", ""),
-            "total_rows": result["total_rows"],
+            "total_rows": 0,  # Will be updated after validation
             "successful_rows": 0,
-            "failed_rows": len(result["error_rows"]),
-            "duplicate_count": all_duplicate_count,
-            "status": "pending",
-            "errors": all_errors,
+            "failed_rows": 0,
+            "duplicate_count": 0,
+            "status": "validating",  # New status: validating → pending → processing → completed
+            "errors": [],
             "duplicate_action": duplicate_action,
             "has_zip": zip_path is not None,
-            # Stash validated rows for the confirm step (stored in DB as temp)
-            "_clean_rows": clean_rows,
-            "_updatable_rows": updatable_rows,
-            "_zip_path": zip_path,  # Store temp ZIP path for confirm step
+            "_excel_path": excel_path,  # Store temp Excel path
+            "_zip_path": zip_path,  # Store temp ZIP path
         })
 
-        logger.info(f"🟢 [BULK] Validated: {len(clean_rows)} valid rows, {all_duplicate_count} duplicates")
-        
+        import_id = log_entry["id"]
+        logger.info(f"🟢 [BULK] Import {import_id} created, starting background validation")
+
+        # Launch background validation task
+        asyncio.get_event_loop().create_task(
+            _run_validation_background(
+                import_id, 
+                admin_email, 
+                school_id, 
+                database_name, 
+                excel_path, 
+                zip_path,
+                duplicate_action
+            )
+        )
+
+        # Return immediately - frontend will poll for status
         return {
-            "import_id": log_entry["id"],
+            "import_id": import_id,
             "file_name": file.filename,
             "zip_file_name": images_zip.filename if images_zip else None,
-            "total_rows": result["total_rows"],
-            "valid_rows": len(clean_rows) + (len(updatable_rows) if duplicate_action == "update" else 0),
-            "error_rows": len(result["error_rows"]),
-            "duplicate_rows": all_duplicate_count,
-            "errors": all_errors[:100],  # cap preview at 100 errors
-            "duplicate_action": duplicate_action,
-            "has_images": zip_path is not None,
-            "preview_data": [
-                {k: v for k, v in r.items() if not k.startswith("_")}
-                for r in clean_rows[:20]
-            ],
+            "status": "validating",
+            "message": "File uploaded successfully. Validation in progress. Poll /status/{import_id} to check progress.",
         }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"🔴 [BULK] Upload failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+async def _run_validation_background(
+    import_id: str, 
+    user_email: str, 
+    school_id: str, 
+    database_name: str,
+    excel_path: str, 
+    zip_path: Optional[str],
+    duplicate_action: str
+):
+    """Background coroutine that validates the Excel file without blocking the HTTP response."""
+    logger.info(f"🔵 [BULK] Starting background validation for {import_id}")
+    try:
+        # Read Excel file from temp storage
+        with open(excel_path, 'rb') as f:
+            content = f.read()
+
+        # Parse & validate Excel (the slow operation)
+        try:
+            result = await asyncio.to_thread(parse_and_validate_rows, content)
+        except Exception as e:
+            logger.exception(f"🔴 [BULK] Parse error: {str(e)}")
+            update_import_log(import_id, {
+                "status": "failed",
+                "errors": [{"row": 0, "column": "-", "value": "-", "reason": f"Failed to parse Excel file: {str(e)}"}],
+                "_excel_path": None,
+                "_zip_path": None,
+            })
+            # Cleanup temp files
+            _cleanup_temp_files(excel_path, zip_path)
+            _publish_notification(user_email, {
+                "type": "import_validation_failed",
+                "import_id": import_id,
+                "message": f"Failed to parse Excel file: {str(e)}",
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+            return
+
+        # Check DB duplicates for valid rows (another slow operation)
+        db = get_school_database(database_name)
+        try:
+            clean_rows, db_dup_rows, updatable_rows = await asyncio.to_thread(
+                check_db_duplicates, 
+                result["valid_rows"], 
+                db, 
+                school_id=school_id
+            )
+        except Exception as e:
+            logger.exception(f"🔴 [BULK] Duplicate check error: {str(e)}")
+            update_import_log(import_id, {
+                "status": "failed",
+                "errors": [{"row": 0, "column": "-", "value": "-", "reason": f"Database error: {str(e)}"}],
+                "_excel_path": None,
+                "_zip_path": None,
+            })
+            _cleanup_temp_files(excel_path, zip_path)
+            _publish_notification(user_email, {
+                "type": "import_validation_failed",
+                "import_id": import_id,
+                "message": f"Database error: {str(e)}",
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+            return
+
+        all_errors = result["error_rows"] + result["duplicate_rows"] + db_dup_rows
+        all_duplicate_count = len(result["duplicate_rows"]) + len(db_dup_rows)
+
+        # Update import log to "pending" state (validation complete, ready for confirmation)
+        update_import_log(import_id, {
+            "status": "pending",
+            "total_rows": result["total_rows"],
+            "failed_rows": len(result["error_rows"]),
+            "duplicate_count": all_duplicate_count,
+            "errors": all_errors,
+            # Stash validated rows for the confirm step
+            "_clean_rows": clean_rows,
+            "_updatable_rows": updatable_rows,
+            # Keep the temp file paths for confirm step
+            "_excel_path": excel_path,
+            "_zip_path": zip_path,
+        })
+
+        logger.info(f"🟢 [BULK] Validation complete for {import_id}: {len(clean_rows)} valid, {all_duplicate_count} duplicates")
+
+        # Publish notification to frontend
+        _publish_notification(user_email, {
+            "type": "import_validation_complete",
+            "import_id": import_id,
+            "total_rows": result["total_rows"],
+            "valid_rows": len(clean_rows) + (len(updatable_rows) if duplicate_action == "update" else 0),
+            "error_rows": len(result["error_rows"]),
+            "duplicate_rows": all_duplicate_count,
+            "preview_data": [
+                {k: v for k, v in r.items() if not k.startswith("_")}
+                for r in clean_rows[:20]
+            ],
+            "message": f"Validation complete: {len(clean_rows)} students ready to import",
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+
+        # Cleanup Excel temp file (keep zip for confirm step)
+        try:
+            if excel_path and os.path.exists(excel_path):
+                os.remove(excel_path)
+                logger.info(f"🟢 [BULK] Removed temp Excel: {excel_path}")
+        except Exception as e:
+            logger.warning(f"⚠️ [BULK] Failed to remove temp Excel: {e}")
+
+    except Exception:
+        logger.exception(f"🔴 [BULK] Background validation failed for {import_id}")
+        update_import_log(import_id, {
+            "status": "failed",
+            "errors": [{"row": 0, "column": "-", "value": "-", "reason": "Internal server error during validation"}],
+            "_excel_path": None,
+            "_zip_path": None,
+        })
+        _cleanup_temp_files(excel_path, zip_path)
+        _publish_notification(user_email, {
+            "type": "import_validation_failed",
+            "import_id": import_id,
+            "message": "Internal server error during validation",
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+
+
+def _cleanup_temp_files(excel_path: Optional[str], zip_path: Optional[str]):
+    """Helper to cleanup temporary files."""
+    for path in [excel_path, zip_path]:
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+                logger.info(f"🟢 [BULK] Removed temp file: {path}")
+            except Exception as e:
+                logger.warning(f"⚠️ [BULK] Failed to remove temp file {path}: {e}")
 
 
 @router.post("/confirm/{import_id}")
@@ -324,6 +464,7 @@ async def _run_import_background(import_id: str, user_email: str, school_id: str
         updatable_rows = log.get("_updatable_rows", [])
         duplicate_action = log.get("duplicate_action", "skip")
         zip_path = log.get("_zip_path")
+        excel_path = log.get("_excel_path")  # Also cleanup Excel if it exists
 
         db = get_school_database(database_name)
 
@@ -347,13 +488,8 @@ async def _run_import_background(import_id: str, user_email: str, school_id: str
         if fail > 0 or exec_errors:
             status = "completed_with_errors" if success > 0 else "failed"
 
-        # After processing, remove temp zip file if present
-        try:
-            if zip_path and os.path.exists(zip_path):
-                os.remove(zip_path)
-                logger.info(f"🟢 [BULK] Removed temp ZIP: {zip_path}")
-        except Exception:
-            logger.warning(f"⚠️ [BULK] Failed to remove temp ZIP: {zip_path}")
+        # After processing, remove temp files (both Excel and ZIP)
+        _cleanup_temp_files(excel_path, zip_path)
 
         update_import_log(import_id, {
             "status": status,
@@ -364,6 +500,7 @@ async def _run_import_background(import_id: str, user_email: str, school_id: str
             "_clean_rows": [],
             "_updatable_rows": [],
             "_zip_path": None,
+            "_excel_path": None,
         })
 
         logger.info(f"🟢 [BULK] Completed: {success} successful, {fail + log.get('failed_rows', 0)} failed")
@@ -427,13 +564,16 @@ async def _run_import_background(import_id: str, user_email: str, school_id: str
             "failed_rows": fail + log.get("failed_rows", 0),
             "file_name": log.get("file_name", ""),
             "message": (
-                f"{success} students imported successfully. {fail + log.get('failed_rows', 0)} failed."
+                f"✅ Import completed successfully! {success} students imported. {fail + log.get('failed_rows', 0)} failed."
                 if status == "completed"
-                else f"Import finished with errors. {success} succeeded, {fail + log.get('failed_rows', 0)} failed. Download the error report."
+                else f"⚠️ Import finished with errors. {success} succeeded, {fail + log.get('failed_rows', 0)} failed."
             ),
             "timestamp": datetime.utcnow().isoformat(),
+            "should_refresh": True,  # Signal frontend to refresh student list
         }
         _publish_notification(user_email, notification)
+        
+        logger.info(f"🟢 [BULK] Published completion notification to {user_email}")
 
     except Exception:
         logger.exception(f"🔴 [BULK] Background import failed for {import_id}")
@@ -458,7 +598,10 @@ async def get_import_status(
     import_id: str,
     current_user: dict = Depends(require_school_admin),
 ):
-    """Poll import status."""
+    """
+    Poll import status. 
+    Status lifecycle: validating → pending → processing → completed/failed
+    """
     school_id = current_user.get("school_id")
     admin_email = current_user.get("email", "")
     logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Checking import status {import_id}")
@@ -474,17 +617,40 @@ async def get_import_status(
             logger.error(f"[SCHOOL:{school_id}] ❌ School mismatch for import {import_id}")
             raise HTTPException(status_code=403, detail="Access denied")
 
-        logger.info(f"[SCHOOL:{school_id}] ✅ Status: {log.get('status')}")
-        return {
+        status = log.get("status")
+        logger.info(f"[SCHOOL:{school_id}] ✅ Status: {status}")
+
+        # Base response
+        response = {
             "import_id": log["id"],
-            "status": log.get("status"),
+            "status": status,
             "file_name": log.get("file_name"),
+            "zip_file_name": log.get("zip_file_name"),
             "total_rows": log.get("total_rows", 0),
             "successful_rows": log.get("successful_rows", 0),
             "failed_rows": log.get("failed_rows", 0),
             "duplicate_count": log.get("duplicate_count", 0),
             "errors": log.get("errors", [])[:100],
+            "duplicate_action": log.get("duplicate_action", "skip"),
+            "has_images": log.get("has_zip", False),
         }
+
+        # Include preview data for pending state (validation complete)
+        if status == "pending":
+            clean_rows = log.get("_clean_rows", [])
+            updatable_rows = log.get("_updatable_rows", [])
+            duplicate_action = log.get("duplicate_action", "skip")
+            
+            response.update({
+                "valid_rows": len(clean_rows) + (len(updatable_rows) if duplicate_action == "update" else 0),
+                "error_rows": log.get("failed_rows", 0),
+                "preview_data": [
+                    {k: v for k, v in r.items() if not k.startswith("_")}
+                    for r in clean_rows[:20]
+                ],
+            })
+
+        return response
     except HTTPException:
         raise
     except Exception as e:
@@ -599,7 +765,9 @@ async def notification_stream(
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
+            # Use 'close' to avoid server keep-alive attempting to write
+            # to closed SSE connections which can raise h11 LocalProtocolError
+            "Connection": "close",
             "X-Accel-Buffering": "no",
         },
     )

@@ -286,6 +286,34 @@ def delete_subject(subject_id: str, school_id: str = None) -> bool:
         logger.info(f"[SCHOOL:{school_id}] ✅ Subject {subject_id} deleted")
     return res.deleted_count > 0
 
+
+def delete_class(class_id: str, school_id: str = None) -> bool:
+    """Delete class by ID (with school isolation and safety checks)"""
+    db = get_db()
+    try:
+        oid = ObjectId(class_id)
+    except:
+        return False
+    
+    query = {"_id": oid}
+    if school_id:
+        query["school_id"] = school_id
+    
+    # Check if any students are assigned to this class
+    student_count = db.students.count_documents({
+        "class_id": class_id,
+        "school_id": school_id
+    }) if school_id else db.students.count_documents({"class_id": class_id})
+    
+    if student_count > 0:
+        logger.warning(f"[SCHOOL:{school_id}] Cannot delete class {class_id} - {student_count} students assigned")
+        return False
+    
+    res = db.classes.delete_one(query)
+    if school_id and res.deleted_count > 0:
+        logger.info(f"[SCHOOL:{school_id}] ✅ Class {class_id} deleted")
+    return res.deleted_count > 0
+
 # ================= Class Operations =================
 
 def create_class(class_name: str, section: str, assigned_subjects: list = None, assigned_teachers: list = None, school_id: str = None) -> Optional[dict]:

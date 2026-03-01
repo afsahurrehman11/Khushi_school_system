@@ -138,3 +138,39 @@ class FeePaymentResponse(BaseModel):
     remarks: Optional[str]
     received_by: str
     paid_at: datetime
+
+
+# ================= Fee Voucher Settings Models =================
+
+class FeeVoucherSettingsCreate(BaseModel):
+    """Create fee voucher settings"""
+    # `school_id` is assigned server-side from the authenticated user's context
+    header_text: Optional[str] = ""
+    footer_text: Optional[str] = ""
+    due_day: Optional[int] = None
+
+class FeeVoucherSettingsUpdate(BaseModel):
+    """Update fee voucher settings"""
+    header_text: Optional[str] = None
+    footer_text: Optional[str] = None
+    due_day: Optional[int] = None
+
+class FeeVoucherSettingsInDB(BaseModel):
+    """Fee voucher settings in database"""
+    id: Optional[str] = None
+    school_id: str
+    header_text: str
+    footer_text: str
+    due_day: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+
+class FeeVoucherSettingsResponse(BaseModel):
+    """Fee voucher settings response"""
+    id: str
+    school_id: str
+    header_text: str
+    footer_text: str
+    due_day: Optional[int]
+    created_at: datetime
+    updated_at: datetime

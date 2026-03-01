@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import logger from '../utils/logger';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Settings, Bell, Menu, GraduationCap, LogOut, DollarSign, TrendingUp, Filter, MessageSquare, ScanFace, Users, FileUp } from 'lucide-react';
+import { Settings, Bell, Menu, GraduationCap, LogOut, DollarSign, TrendingUp, MessageSquare, ScanFace, Users, FileUp } from 'lucide-react';
 import CashVerificationModal from '../features/accountant/components/CashVerificationModal';
 import { cashSessionService, CashSession } from '../features/accountant/services/cashSessionService';
 
@@ -30,19 +30,22 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
     }
   }, []);
 
+  // Navigation items with explicit role-based visibility:
+  // - Admin/Root: All items
+  // - Accountant: All items EXCEPT Admin
+  // - Teacher: Only Classes
   const navigation = [
     { name: 'Admin', href: '/dashboard/admin', icon: Settings, roles: ['Admin', 'Root'] },
-    { name: 'Students', href: '/students', icon: Users, roles: ['Admin', 'Teacher', 'Accountant'] },
-    { name: 'Import/Export', href: '/students/import-export', icon: FileUp, roles: ['Admin'] },
-    { name: 'Teachers', href: '/teachers', icon: GraduationCap, permission: 'teachers.read' },
-    { name: 'Subjects', href: '/subjects', icon: GraduationCap, permission: 'subjects.read' },
-    { name: 'Classes', href: '/classes', icon: TrendingUp, permission: 'classes.read' },
-    { name: 'Fees', href: '/fees', icon: DollarSign, permission: 'fees.view' },
-    { name: 'Accounting', href: '/dashboard/accountant', icon: TrendingUp, permission: 'accounting.dashboard_view' },
-    { name: 'Reports', href: '/reports', icon: Filter, permission: 'reports.view' },
-    { name: 'WhatsApp Bot', href: '/whatsapp-bot', icon: MessageSquare, permission: 'whatsapp.view' },
-    { name: 'Face App', href: '/face-app', icon: ScanFace, roles: ['Admin', 'Teacher'] },
-    { name: 'Settings', href: '/settings', icon: Settings },
+    { name: 'Students', href: '/students', icon: Users, roles: ['Admin', 'Root', 'Accountant'] },
+    { name: 'Import/Export', href: '/students/import-export', icon: FileUp, roles: ['Admin', 'Root', 'Accountant'] },
+    { name: 'Teachers', href: '/teachers', icon: GraduationCap, roles: ['Admin', 'Root', 'Accountant'] },
+    { name: 'Subjects', href: '/subjects', icon: GraduationCap, roles: ['Admin', 'Root', 'Accountant'] },
+    { name: 'Classes', href: '/classes', icon: TrendingUp, roles: ['Admin', 'Root', 'Accountant', 'Teacher'] },
+    { name: 'Fees', href: '/fees', icon: DollarSign, roles: ['Admin', 'Root', 'Accountant'] },
+    { name: 'Accounting', href: '/dashboard/accountant', icon: TrendingUp, roles: ['Admin', 'Root', 'Accountant'] },
+    { name: 'WhatsApp Bot', href: '/whatsapp-bot', icon: MessageSquare, roles: ['Admin', 'Root', 'Accountant'] },
+    { name: 'Face App', href: '/face-app', icon: ScanFace, roles: ['Admin', 'Root', 'Accountant'] },
+    { name: 'Settings', href: '/settings', icon: Settings, roles: ['Admin', 'Root', 'Accountant'] },
   ];
 
   const handleLogout = async () => {
@@ -114,22 +117,10 @@ const Layout: React.FC<LayoutProps> = ({ children, onLogout }) => {
         <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto custom-scrollbar">
           {navigation.map((item) => {
             const Icon = item.icon;
-            // permission guard: if item.roles is defined, check role membership
-            if (item.roles) {
-              const userRole = typeof user?.role === 'object' ? user?.role?.name : user?.role;
-              if (!userRole || !item.roles.includes(userRole)) {
-                return null;
-              }
-            }
-            // permission guard: if item.permission is defined, ensure user has it
-            else if (item.permission) {
-              const hasPerm = !!(
-                (typeof user?.role === 'object' && user.role.permissions?.includes(item.permission)) ||
-                // support legacy role string (e.g., 'Admin') by granting admin access
-                (typeof user?.role === 'object' && user.role.name?.toLowerCase() === 'admin') ||
-                (typeof user?.role === 'string' && user.role.toLowerCase() === 'admin')
-              );
-              if (!hasPerm) return null;
+            // Role-based visibility: check if user's role is in the item's roles array
+            const userRole = typeof user?.role === 'object' ? user?.role?.name : user?.role;
+            if (!userRole || !item.roles.includes(userRole)) {
+              return null;
             }
             const active = isActive(item.href);
             return (

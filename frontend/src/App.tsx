@@ -8,8 +8,7 @@ import { TeacherList, TeacherDetailPage } from './features/teachers';
 import { SubjectList } from './features/subjects';
 import { ClassList, ClassDetails, AttendanceList, MarkAttendance } from './features/classes';
 import { ChalanList } from './features/chalans';
-import { config } from './config';
-import { AccountantDashboard, FeePage, ReportsPage } from './features/accountant';
+import { AccountantDashboard, FeePage } from './features/accountant';
 import { AdminDashboard } from './features/admin';
 import { WhatsAppDashboard } from './features/whatsapp';
 import { FaceDashboard, FaceStudents, FaceEmployees, FaceRecognition, FaceSettings } from './features/face';
@@ -103,67 +102,6 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ element, requiredRoles 
 
 function App() {
   React.useEffect(() => {
-    // Backend health check
-    const checkBackend = async () => {
-      const isDev = import.meta.env.DEV;
-      
-      // Log environment mode
-      console.log(`%c[ENVIRONMENT] Running in ${isDev ? 'DEVELOPMENT' : 'PRODUCTION'} mode`, 
-        isDev ? 'color: orange; font-weight: bold' : 'color: green; font-weight: bold');
-      console.log(`%c[BACKEND] Initial API URL: ${config.API_BASE_URL}`, 'color: cyan');
-      
-      // In production build, only use Heroku backend
-      if (!isDev) {
-        try {
-          const response = await fetch('https://khushi-solutions-3f944a9b5e3b.herokuapp.com/health', { method: 'GET' });
-          if (response.ok) {
-            logger.info('BACKEND', 'Health check passed - connected to PRODUCTION backend (Heroku)');
-            config.API_BASE_URL = 'https://khushi-solutions-3f944a9b5e3b.herokuapp.com/api';
-            console.log('%c[BACKEND] ✅ Connected to: https://khushi-solutions-3f944a9b5e3b.herokuapp.com/api', 'color: lime; font-weight: bold');
-          } else {
-            logger.warn('BACKEND', 'Health check failed - Heroku backend not responding');
-            console.log('%c[BACKEND] ⚠️ Heroku backend not responding', 'color: yellow; font-weight: bold');
-          }
-        } catch (error) {
-          logger.error('BACKEND', `Health check error - Heroku backend unreachable: ${String(error)}`);
-          console.log('%c[BACKEND] ❌ Failed to connect to Heroku backend', 'color: red; font-weight: bold');
-        }
-        return;
-      }
-      
-      // In development, try localhost ports first
-      const ports = [8000, 8001, 8002, 8003, 8004];
-      for (const port of ports) {
-        try {
-          const response = await fetch(`http://localhost:${port}/health`, { method: 'GET' });
-          if (response.ok) {
-            logger.info('BACKEND', `Health check passed - backend is running on port ${port}`);
-            config.API_BASE_URL = `http://localhost:${port}/api`;
-            console.log(`%c[BACKEND] ✅ Connected to: http://localhost:${port}/api (DEVELOPMENT)`, 'color: lime; font-weight: bold');
-            return;
-          }
-        } catch (error) {
-          // Continue to next port
-        }
-      }
-      // If no local port works in dev, try production as fallback
-      try {
-        const response = await fetch('https://khushi-solutions-3f944a9b5e3b.herokuapp.com/health', { method: 'GET' });
-        if (response.ok) {
-          logger.info('BACKEND', 'Health check passed - falling back to Heroku backend');
-          config.API_BASE_URL = 'https://khushi-solutions-3f944a9b5e3b.herokuapp.com/api';
-          console.log('%c[BACKEND] ✅ Fallback to: https://khushi-solutions-3f944a9b5e3b.herokuapp.com/api', 'color: lime; font-weight: bold');
-        } else {
-          logger.warn('BACKEND', 'Health check failed - no backend available');
-          console.log('%c[BACKEND] ⚠️ No backend available', 'color: yellow; font-weight: bold');
-        }
-      } catch (error) {
-        logger.error('BACKEND', `Health check error - no backend available: ${String(error)}`);
-        console.log('%c[BACKEND] ❌ No backend available', 'color: red; font-weight: bold');
-      }
-    };
-    checkBackend();
-
     const enableNotifications = import.meta.env.VITE_ENABLE_NOTIFICATIONS === 'true'
     if (!enableNotifications) return
     // const stop = startNotificationSSE();
@@ -225,27 +163,24 @@ function App() {
               <Routes>
                 <Route
                   path="/dashboard/accountant"
-                  element={<ProtectedRoute element={<AccountantDashboard />} requiredRoles={['Accountant', 'Admin']} />}
+                  element={<ProtectedRoute element={<AccountantDashboard />} requiredRoles={['Accountant', 'Admin', 'Root']} />}
                 />
                 <Route
                   path="/fees"
-                  element={<ProtectedRoute element={<FeePage />} requiredRoles={['Accountant', 'Admin']} />}
+                  element={<ProtectedRoute element={<FeePage />} requiredRoles={['Accountant', 'Admin', 'Root']} />}
                 />
                 <Route
                   path="/fee-categories"
-                  element={<ProtectedRoute element={<FeePage />} requiredRoles={['Accountant', 'Admin']} />}
+                  element={<ProtectedRoute element={<FeePage />} requiredRoles={['Accountant', 'Admin', 'Root']} />}
                 />
                 <Route
                   path="/challans"
-                  element={<ProtectedRoute element={<FeePage />} requiredRoles={['Accountant', 'Admin']} />}
+                  element={<ProtectedRoute element={<FeePage />} requiredRoles={['Accountant', 'Admin', 'Root']} />}
                 />
-                <Route
-                  path="/reports"
-                  element={<ProtectedRoute element={<ReportsPage />} requiredRoles={['Accountant', 'Admin', 'Admin']} />}
-                />
+                
                 <Route
                   path="/dashboard/teacher"
-                  element={<ProtectedRoute element={<TeacherList />} requiredRoles={['Teacher', 'Admin']} />}
+                  element={<ProtectedRoute element={<TeacherList />} requiredRoles={['Admin', 'Root', 'Accountant', 'Teacher']} />}
                 />
                 <Route
                   path="/dashboard/admin"
@@ -253,80 +188,80 @@ function App() {
                 />
                 <Route
                   path="/students"
-                  element={<ProtectedRoute element={<StudentList />} requiredRoles={['Admin', 'Teacher', 'Accountant']} />}
+                  element={<ProtectedRoute element={<StudentList />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/subjects"
-                  element={<ProtectedRoute element={<SubjectList />} requiredRoles={['Admin', 'Teacher']} />}
+                  element={<ProtectedRoute element={<SubjectList />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/classes"
-                  element={<ProtectedRoute element={<ClassList />} requiredRoles={['Admin', 'Teacher']} />}
+                  element={<ProtectedRoute element={<ClassList />} requiredRoles={['Admin', 'Root', 'Accountant', 'Teacher']} />}
                 />
                 <Route
                   path="/classes/:classId"
-                  element={<ProtectedRoute element={<ClassDetails />} requiredRoles={['Admin', 'Teacher']} />}
+                  element={<ProtectedRoute element={<ClassDetails />} requiredRoles={['Admin', 'Root', 'Accountant', 'Teacher']} />}
                 />
                 <Route
                   path="/classes/:classId/attendance"
-                  element={<ProtectedRoute element={<AttendanceList />} requiredRoles={['Admin', 'Teacher']} />}
+                  element={<ProtectedRoute element={<AttendanceList />} requiredRoles={['Admin', 'Root', 'Accountant', 'Teacher']} />}
                 />
                 <Route
                   path="/classes/:classId/attendance/:date"
-                  element={<ProtectedRoute element={<MarkAttendance />} requiredRoles={['Admin', 'Teacher']} />}
+                  element={<ProtectedRoute element={<MarkAttendance />} requiredRoles={['Admin', 'Root', 'Accountant', 'Teacher']} />}
                 />
                 <Route
                   path="/chalans"
-                  element={<ProtectedRoute element={<ChalanList />} requiredRoles={['Admin', 'Accountant']} />}
+                  element={<ProtectedRoute element={<ChalanList />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/students/import-export"
-                  element={<ProtectedRoute element={<StudentImportExportPage />} requiredRoles={['Admin', 'Teacher', 'Accountant']} />}
+                  element={<ProtectedRoute element={<StudentImportExportPage />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/students/incomplete-data"
-                  element={<ProtectedRoute element={<StudentImportExportPage />} requiredRoles={['Admin']} />}
+                  element={<ProtectedRoute element={<StudentImportExportPage />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/fees/print"
-                  element={<ProtectedRoute element={<FeeVoucherPrintPage />} requiredRoles={['Admin', 'Accountant']} />}
+                  element={<ProtectedRoute element={<FeeVoucherPrintPage />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/analytics"
-                  element={<ProtectedRoute element={<AnalyticsDashboard />} requiredRoles={['Admin']} />}
+                  element={<ProtectedRoute element={<AnalyticsDashboard />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/teachers"
-                  element={<ProtectedRoute element={<TeacherList />} requiredRoles={['Admin']} />}
+                  element={<ProtectedRoute element={<TeacherList />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/teachers/:teacherId"
-                  element={<ProtectedRoute element={<TeacherDetailPage />} requiredRoles={['Admin']} />}
+                  element={<ProtectedRoute element={<TeacherDetailPage />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/whatsapp-bot"
-                  element={<ProtectedRoute element={<WhatsAppDashboard />} requiredRoles={['Admin']} />}
+                  element={<ProtectedRoute element={<WhatsAppDashboard />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 {/* Face Recognition Routes */}
                 <Route
                   path="/face-app"
-                  element={<ProtectedRoute element={<FaceDashboard />} requiredRoles={['Admin', 'Teacher']} />}
+                  element={<ProtectedRoute element={<FaceDashboard />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/face-app/students"
-                  element={<ProtectedRoute element={<FaceStudents />} requiredRoles={['Admin', 'Teacher']} />}
+                  element={<ProtectedRoute element={<FaceStudents />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/face-app/employees"
-                  element={<ProtectedRoute element={<FaceEmployees />} requiredRoles={['Admin']} />}
+                  element={<ProtectedRoute element={<FaceEmployees />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/face-app/recognition"
-                  element={<ProtectedRoute element={<FaceRecognition />} requiredRoles={['Admin', 'Teacher']} />}
+                  element={<ProtectedRoute element={<FaceRecognition />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/face-app/settings"
-                  element={<ProtectedRoute element={<FaceSettings />} requiredRoles={['Admin']} />}
+                  element={<ProtectedRoute element={<FaceSettings />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route path="/settings" element={
                   <ProtectedRoute element={
@@ -338,7 +273,7 @@ function App() {
                         </div>
                       </div>
                     </div>
-                  } />
+                  } requiredRoles={['Admin', 'Root', 'Accountant']} />
                 } />
               </Routes>
             </Layout>

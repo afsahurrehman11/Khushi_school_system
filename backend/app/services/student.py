@@ -5,6 +5,7 @@ from bson.objectid import ObjectId
 from io import BytesIO
 from typing import List, Tuple
 from app.utils.student_id_utils import generate_student_id, validate_student_id_uniqueness, generate_registration_number
+from app.utils.validators import normalize_phone
 import logging
 import zipfile
 
@@ -63,6 +64,24 @@ def create_student(student_data: dict) -> Optional[dict]:
         student_data["created_at"] = datetime.utcnow()
         student_data["updated_at"] = datetime.utcnow()
 
+        # Normalize phone numbers in provided data to reduce response-model validation issues
+        try:
+            ci = student_data.get('contact_info')
+            if isinstance(ci, dict):
+                if ci.get('phone'):
+                    ci['phone'] = normalize_phone(ci.get('phone'))
+                if ci.get('emergency_contact'):
+                    ci['emergency_contact'] = normalize_phone(ci.get('emergency_contact'))
+                student_data['contact_info'] = ci
+
+            gi = student_data.get('guardian_info')
+            if isinstance(gi, dict):
+                if gi.get('guardian_contact'):
+                    gi['guardian_contact'] = normalize_phone(gi.get('guardian_contact'))
+                student_data['guardian_info'] = gi
+        except Exception:
+            pass
+
         result = db.students.insert_one(student_data)
         student_data["id"] = str(result.inserted_id)
         logger.info(f"[SCHOOL:{school_id}] ✅ Student created successfully: {student_data['student_id']} - {student_data['full_name']}")
@@ -87,7 +106,8 @@ def get_all_students(filters: dict = None, school_id: str = None) -> list:
     school_names = {}
     if school_id:
         try:
-            school = db.schools.find_one({"_id": ObjectId(school_id)})
+            # school_id is a UUID string stored in schools.school_id field
+            school = db.schools.find_one({"school_id": school_id})
             if school:
                 school_names[school_id] = school.get("display_name") or school.get("name") or "School"
         except Exception as e:
@@ -98,7 +118,8 @@ def get_all_students(filters: dict = None, school_id: str = None) -> list:
             school_ids = set(s.get("school_id") for s in students if s.get("school_id"))
             for sid in school_ids:
                 try:
-                    school = db.schools.find_one({"_id": ObjectId(sid)})
+                    # school_id is a UUID string stored in schools.school_id field
+                    school = db.schools.find_one({"school_id": sid})
                     if school:
                         school_names[sid] = school.get("display_name") or school.get("name") or "School"
                 except:
@@ -131,6 +152,25 @@ def get_all_students(filters: dict = None, school_id: str = None) -> list:
             student['school_name'] = school_names[sid]
         elif not student.get('school_name'):
             student['school_name'] = 'School'
+
+        # Normalize phone fields to avoid Pydantic response validation errors
+        try:
+            from app.utils.validators import normalize_phone as _norm
+            ci = student.get('contact_info')
+            if isinstance(ci, dict):
+                if ci.get('phone'):
+                    ci['phone'] = _norm(ci.get('phone'))
+                if ci.get('emergency_contact'):
+                    ci['emergency_contact'] = _norm(ci.get('emergency_contact'))
+                student['contact_info'] = ci
+
+            gi = student.get('guardian_info')
+            if isinstance(gi, dict):
+                if gi.get('guardian_contact'):
+                    gi['guardian_contact'] = _norm(gi.get('guardian_contact'))
+                student['guardian_info'] = gi
+        except Exception:
+            pass
     
     logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(students)} students") if school_id else None
     return students
@@ -150,7 +190,8 @@ def get_student_by_id(student_id: str, school_id: str = None) -> Optional[dict]:
             try:
                 sid = student.get("school_id")
                 if sid:
-                    school = db.schools.find_one({"_id": ObjectId(sid)})
+                    # school_id is a UUID string stored in schools.school_id field
+                    school = db.schools.find_one({"school_id": sid})
                     if school:
                         student["school_name"] = school.get("display_name") or school.get("name") or "School"
                     else:
@@ -159,6 +200,24 @@ def get_student_by_id(student_id: str, school_id: str = None) -> Optional[dict]:
                 logger.warning(f"⚠️ Could not fetch school name for {student_id}: {str(e)}")
                 student.setdefault("school_name", "School")
             logger.info(f"[SCHOOL:{school_id or 'N/A'}] 🔍 Retrieved student: {student_id}") if school_id else None
+            # Normalize phone fields before returning
+            try:
+                from app.utils.validators import normalize_phone as _norm
+                ci = student.get('contact_info')
+                if isinstance(ci, dict):
+                    if ci.get('phone'):
+                        ci['phone'] = _norm(ci.get('phone'))
+                    if ci.get('emergency_contact'):
+                        ci['emergency_contact'] = _norm(ci.get('emergency_contact'))
+                    student['contact_info'] = ci
+
+                gi = student.get('guardian_info')
+                if isinstance(gi, dict):
+                    if gi.get('guardian_contact'):
+                        gi['guardian_contact'] = _norm(gi.get('guardian_contact'))
+                    student['guardian_info'] = gi
+            except Exception:
+                pass
         return student
     except:
         return None
@@ -177,7 +236,8 @@ def get_student_by_student_id(student_id: str, school_id: str = None) -> Optiona
         try:
             sid = student.get("school_id")
             if sid:
-                school = db.schools.find_one({"_id": ObjectId(sid)})
+                # school_id is a UUID string stored in schools.school_id field
+                school = db.schools.find_one({"school_id": sid})
                 if school:
                     student["school_name"] = school.get("display_name") or school.get("name") or "School"
                 else:
@@ -186,6 +246,24 @@ def get_student_by_student_id(student_id: str, school_id: str = None) -> Optiona
             logger.warning(f"⚠️ Could not fetch school name for {student_id}: {str(e)}")
             student.setdefault("school_name", "School")
         logger.info(f"[SCHOOL:{school_id or 'N/A'}] 🔍 Retrieved student by student_id: {student_id}") if school_id else None
+    # Normalize phone fields before returning
+    try:
+        from app.utils.validators import normalize_phone as _norm
+        ci = student.get('contact_info')
+        if isinstance(ci, dict):
+            if ci.get('phone'):
+                ci['phone'] = _norm(ci.get('phone'))
+            if ci.get('emergency_contact'):
+                ci['emergency_contact'] = _norm(ci.get('emergency_contact'))
+            student['contact_info'] = ci
+
+        gi = student.get('guardian_info')
+        if isinstance(gi, dict):
+            if gi.get('guardian_contact'):
+                gi['guardian_contact'] = _norm(gi.get('guardian_contact'))
+            student['guardian_info'] = gi
+    except Exception:
+        pass
     return student
 
 def update_student(student_id: str, school_id: str = None, **kwargs) -> Optional[dict]:

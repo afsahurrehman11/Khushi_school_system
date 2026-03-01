@@ -29,17 +29,24 @@ def _normalize_doc(doc: dict) -> dict:
 
 # ================= Class Fee Assignment Operations =================
 
-def assign_fee_category_to_class(class_id: str, category_id: str, assigned_by: str, apply_to_existing: bool = False) -> Optional[dict]:
+def assign_fee_category_to_class(
+    class_id: str, 
+    category_id: str, 
+    school_id: str,
+    assigned_by: str, 
+    apply_to_existing: bool = False
+) -> Optional[dict]:
     """Assign a fee category to a class"""
     db = get_db()
     
     # Remove any existing active assignment for this class
     db.class_fee_assignments.update_many(
-        {"class_id": class_id, "is_active": True},
+        {"class_id": class_id, "school_id": school_id, "is_active": True},
         {"$set": {"is_active": False, "deactivated_at": datetime.utcnow()}}
     )
     
     assignment = {
+        "school_id": school_id,
         "class_id": class_id,
         "category_id": category_id,
         "assigned_by": assigned_by,
@@ -59,7 +66,11 @@ def assign_fee_category_to_class(class_id: str, category_id: str, assigned_by: s
             snapshot = chalan_service.create_category_snapshot(category_id)
             if snapshot:
                 # find matching challans
-                existing = list(db.student_challans.find({"class_id": class_id, "status": {"$in": ["pending", "unpaid"]}}))
+                existing = list(db.student_challans.find({
+                    "class_id": class_id, 
+                    "school_id": school_id,
+                    "status": {"$in": ["pending", "unpaid"]}
+                }))
                 for ch in existing:
                     paid = ch.get("paid_amount", ch.get("paid", 0)) or 0
                     new_total = snapshot.get("total_amount", 0)

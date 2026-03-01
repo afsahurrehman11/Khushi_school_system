@@ -373,9 +373,9 @@ const AdminDashboard: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredUsers.map((user) => (
+                    {filteredUsers.map((user, userIdx) => (
                       <motion.tr
-                        key={user._id}
+                        key={`${user._id || user.email || 'user'}-${userIdx}`}
                         whileHover={{ backgroundColor: '#f8fafc' }}
                         className="border-b border-secondary-100 transition-colors"
                       >
@@ -460,9 +460,9 @@ const AdminDashboard: React.FC = () => {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {roles.map((role) => (
+                {roles.map((role, roleIdx) => (
                   <motion.div
-                    key={role._id}
+                    key={role._id || role.name || roleIdx}
                     whileHover={{ y: -4 }}
                     className="border-2 border-secondary-200 rounded-lg p-6 hover:border-primary-300 hover:shadow-soft transition-all"
                   >
@@ -475,9 +475,9 @@ const AdminDashboard: React.FC = () => {
                         <h4 className="text-sm font-bold text-secondary-700 mb-2">Permissions:</h4>
                         <div className="flex flex-wrap gap-2">
                           {role.permissions.length > 0 ? (
-                            role.permissions.map((perm) => (
+                            role.permissions.map((perm, permIdx) => (
                               <span
-                                key={perm}
+                                key={perm || permIdx}
                                 className="px-2 py-1 bg-primary-100 text-primary-700 rounded text-xs font-semibold"
                               >
                                 {perm.replace(/_/g, ' ')}
@@ -558,7 +558,7 @@ const AdminDashboard: React.FC = () => {
                 className="w-full px-4 py-2 border-2 border-secondary-300 rounded-lg focus:outline-none focus:border-primary-500 transition-colors"
               >
                 {roles.map((role) => (
-                  <option key={role._id} value={role.name}>
+                  <option key={role._id || role.name} value={role.name}>
                     {role.name}
                   </option>
                 ))}

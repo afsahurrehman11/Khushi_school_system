@@ -56,15 +56,40 @@ class RegenerateSingleRequest(BaseModel):
 
 @router.get("/status")
 async def get_status(db=Depends(get_db)):
-    """Get face recognition system status (public endpoint)"""
-    from ..services.face_service import USE_FACENET, DEVICE, _cache_loaded, _embedding_cache
-    
+    """Get face recognition system status (public endpoint)
+
+    Use safe attribute lookups on the face service module so this
+    endpoint won't crash if optional ML attributes are missing.
+    """
+    try:
+        from ..services import face_service as fs
+    except Exception:
+        # If the face_service module cannot be imported, return best-effort status
+        return {
+            "facenet_available": False,
+            "device": "cpu",
+            "cache_loaded": False,
+            "cached_students": 0,
+            "cached_employees": 0,
+            "ready": False
+        }
+
+    # Prefer explicit flags if present; support older/newer attribute names
+    facenet_available = getattr(fs, 'USE_FACENET', None)
+    if facenet_available is None:
+        # older/newer code may use USE_ONNX
+        facenet_available = getattr(fs, 'USE_ONNX', False)
+
+    device = getattr(fs, 'DEVICE', None)
+    cache_loaded = getattr(fs, '_cache_loaded', False)
+    embedding_cache = getattr(fs, '_embedding_cache', {"students": {}, "employees": {}})
+
     return {
-        "facenet_available": USE_FACENET,
-        "device": str(DEVICE) if DEVICE else "cpu",
-        "cache_loaded": _cache_loaded,
-        "cached_students": len(_embedding_cache["students"]),
-        "cached_employees": len(_embedding_cache["employees"]),
+        "facenet_available": bool(facenet_available),
+        "device": str(device) if device else "cpu",
+        "cache_loaded": bool(cache_loaded),
+        "cached_students": len(embedding_cache.get("students", {})),
+        "cached_employees": len(embedding_cache.get("employees", {})),
         "ready": True
     }
 

@@ -57,11 +57,16 @@ class PaymentsService {
       const schoolId = authService.getSchoolId();
       const adminEmail = authService.getUser()?.email || 'unknown';
       logger.info('PAYMENTS', `Recording fee payment ${payment.amount} by ${adminEmail} in ${schoolId}`);
-      
+      // Ensure school_id is present (backend Pydantic model requires it)
+      const payload = {
+        ...payment,
+        school_id: payment.school_id || schoolId,
+      };
+
       const response = await fetch(this.feePaymentsEndpoint, {
         method: 'POST',
         headers: authService.getAuthHeaders(),
-        body: JSON.stringify(payment),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {

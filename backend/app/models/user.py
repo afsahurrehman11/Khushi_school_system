@@ -80,10 +80,10 @@ class TokenData(BaseModel):
 # ================= Admin Panel Models =================
 
 class AdminUserCreate(BaseModel):
-    email: str
+    email: str  # For school users: just username (e.g., "john.doe"), @schoolname will be auto-appended
     name: str
     password: str
-    role: str
+    role: str  # Admin, Accountant, Teacher, Inventory Manager
 
 class AdminUserUpdate(BaseModel):
     name: Optional[str] = None

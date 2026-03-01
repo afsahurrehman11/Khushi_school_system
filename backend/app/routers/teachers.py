@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 from typing import List, Optional
 from app.models.teacher import TeacherSchema, TeacherInDB, TeacherCreate, TeacherUpdate
 from app.services.teacher import (
@@ -27,7 +29,7 @@ async def list_teachers(
         
         teachers = get_all_teachers(school_id=school_id)
         logger.info(f"[SCHOOL:{school_id or 'All'}] ✅ Retrieved {len(teachers)} teachers")
-        return teachers
+        return JSONResponse(content=jsonable_encoder(teachers))
     except Exception as e:
         logger.error(f"[SCHOOL:{school_id or 'N/A'}] ❌ Failed to fetch teachers: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -48,7 +50,7 @@ async def get_teacher(
             logger.warning(f"[SCHOOL:{school_id or 'All'}] Teacher not found: {teacher_id}")
             raise HTTPException(status_code=404, detail="Teacher not found")
         
-        return teacher
+        return JSONResponse(content=jsonable_encoder(teacher))
     except HTTPException:
         raise
     except Exception as e:

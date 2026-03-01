@@ -2,6 +2,7 @@
 
 import { apiCall, getAuthHeaders } from '../../../utils/api';
 import { config } from '../../../config';
+import { authService } from '../../../services/auth';
 import type {
   ImportPreviewResponse,
   ImportConfirmResponse,
@@ -143,7 +144,7 @@ export function createNotificationStream(
   onMessage: (data: any) => void,
   onError?: (err: Event) => void
 ): EventSource {
-  const token = localStorage.getItem('token');
+  const token = authService.getToken();
   // EventSource doesn't support custom headers, so we pass the token as a query param.
   // The backend SSE endpoint also accepts token via Depends(get_current_user) using
   // the standard Authorization header. For SSE we'll use a polling fallback instead.

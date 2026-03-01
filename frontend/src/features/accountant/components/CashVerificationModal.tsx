@@ -96,7 +96,7 @@ const CashVerificationModal: React.FC<CashVerificationModalProps> = ({
 
       onVerified();
     } catch (err: any) {
-      setError(err.message || 'Failed to verify cash session');
+      setError(err.message || "Failed to verify Today's session");
     } finally {
       setSubmitting(false);
     }

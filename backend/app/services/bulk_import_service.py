@@ -216,6 +216,7 @@ def get_or_create_class_id(
 ) -> Optional[str]:
     """
     Get existing class ID or return the ID of a newly created class from cache.
+    Converts class name + section to actual MongoDB _id.
     """
     class_norm = _normalize_key(class_name)
     section_norm = _normalize_key(section) if section else ""
@@ -232,6 +233,25 @@ def get_or_create_class_id(
     }
     if section_norm:
         query["section_norm"] = section_norm
+    else:
+        # Handle empty section case
+        query["$or"] = [
+            {"section_norm": ""},
+            {"section_norm": {"$exists": False}},
+            {"section_norm": None}
+        ]
+        # Re-structure query with $and
+        query = {
+            "$and": [
+                {"school_id": school_id},
+                {"class_name_norm": class_norm},
+                {"$or": [
+                    {"section_norm": ""},
+                    {"section_norm": {"$exists": False}},
+                    {"section_norm": None}
+                ]}
+            ]
+        }
     
     existing = db.classes.find_one(query)
     if existing:
@@ -344,9 +364,30 @@ def execute_import_with_images(
         # --- STAGE 4: Create students using TRANSACTION ---
         logger.info(f"[BULK] Stage 4: Creating {len(rows_to_insert)} students with transaction")
         
-        # Add school_id and process images for all rows
+        # Add school_id, convert class names to IDs, and process images for all rows
         for row in rows_to_insert:
             row["school_id"] = school_id
+            
+            # CRITICAL: Convert class_name to actual MongoDB _id
+            class_name = row.get("class_id", "")  # This currently contains class NAME, not ID
+            section = row.get("section", "")
+            
+            # Get or retrieve the actual class ObjectId
+            actual_class_id = get_or_create_class_id(
+                class_name, 
+                section, 
+                school_id, 
+                db, 
+                created_classes_cache
+            )
+            
+            if not actual_class_id:
+                logger.error(f"[BULK] Could not get class ID for {class_name}/{section}")
+                # This shouldn't happen since we pre-created all classes
+                # But handle it gracefully
+                continue
+            
+            row["class_id"] = actual_class_id  # NOW it contains the actual ObjectId string
             
             # Process image if available
             image_blob, image_type = _process_student_image(

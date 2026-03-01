@@ -28,7 +28,7 @@ interface ClassOption {
   section: string;
 }
 
-const initialForm = {
+  const initialForm = {
   name: '',
   teacherId: '',
   cnic: '',
@@ -337,6 +337,15 @@ const AddTeacherModal: React.FC<AddTeacherModalProps> = ({ isOpen, onClose, onTe
       return;
     }
 
+    // Validate phone format if provided (now: 92XXXXXXXXXX)
+    const phoneRegex = /^92\d{10}$/;
+    if (form.phone && !phoneRegex.test(form.phone)) {
+      logger.warn('[TEACHER_FORM]', 'Validation failed: Phone format invalid');
+      setError('Phone must be in format 92XXXXXXXXXX');
+      setSubmitting(false);
+      return;
+    }
+
     try {
       // Build assigned_classes array
       const assigned_classes = classAssignments
@@ -537,7 +546,7 @@ const AddTeacherModal: React.FC<AddTeacherModalProps> = ({ isOpen, onClose, onTe
                   name="phone"
                   value={form.phone}
                   onChange={handleChange}
-                  placeholder="Phone number"
+                  placeholder="92XXXXXXXXXX"
                   className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-all text-sm"
                 />
               </div>

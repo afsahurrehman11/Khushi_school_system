@@ -1,1 +1,1 @@
-web: cd backend && gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT --log-file - --timeout 120
+web: cd backend && gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT --log-file - --timeout 300 --graceful-timeout 300 --workers 2 --worker-connections 1000 --max-requests 1000 --max-requests-jitter 50

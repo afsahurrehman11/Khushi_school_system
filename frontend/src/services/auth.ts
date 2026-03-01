@@ -190,6 +190,10 @@ class AuthService {
         return '/root-admin';
       case 'admin':
         return '/students';
+      case 'accountant':
+        return '/dashboard/accountant';
+      case 'teacher':
+        return '/classes';
       case 'staff':
         return '/students';
       default:

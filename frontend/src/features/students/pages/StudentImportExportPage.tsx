@@ -39,6 +39,7 @@ import {
   getIncompleteStudents,
   updateIncompleteStudent,
 } from '../services/importExportApi';
+import { entitySync } from '../../../utils/entitySync';
 
 type TabType = 'import-export' | 'incomplete';
 type ImportStep = 'upload' | 'preview' | 'processing' | 'result';
@@ -216,8 +217,48 @@ const StudentImportExportPage: React.FC = () => {
 
     try {
       const res = await uploadForPreview(file, duplicateAction, zipFile);
-      setPreview(res);
-      setStep('preview');
+      
+      // If backend returns validating status, poll until validation is complete
+      if ((res as any).status === 'validating') {
+        let attempts = 0;
+        const maxAttempts = 60; // 2 minutes max (60 * 2 seconds)
+        
+        while (attempts < maxAttempts) {
+          attempts++;
+          await new Promise((r) => setTimeout(r, 2000));
+          
+          const statusRes = await getImportStatus((res as any).import_id);
+          
+          if ((statusRes as any).status === 'pending') {
+            // Validation complete - use the data from status response
+            const s: any = statusRes;
+            const r: any = res;
+            setPreview({
+              import_id: s.import_id,
+              file_name: s.file_name || r.file_name,
+              zip_file_name: s.zip_file_name || r.zip_file_name,
+              total_rows: s.total_rows || 0,
+              valid_rows: s.valid_rows || 0,
+              error_rows: s.error_rows || s.failed_rows || 0,
+              duplicate_rows: s.duplicate_count || 0,
+              errors: s.errors || [],
+              duplicate_action: s.duplicate_action || duplicateAction,
+              preview_data: s.preview_data || [],
+              has_images: s.has_images || false,
+            });
+            setStep('preview');
+            return;
+          } else if (statusRes.status === 'failed') {
+            throw new Error('Validation failed. Please check your file and try again.');
+          }
+        }
+        
+        throw new Error('Validation timed out. Please try again.');
+      } else {
+        // Older flow: direct preview response
+        setPreview(res);
+        setStep('preview');
+      }
     } catch (err: any) {
       // Check for missing columns error
       const errorMsg = err.message || 'Upload failed';
@@ -256,6 +297,12 @@ const StudentImportExportPage: React.FC = () => {
             import_id: preview.import_id,
           });
           setStep('result');
+          // Notify other components that students were created/updated so lists refresh
+          try {
+            entitySync.emitStudentCreated(preview.import_id);
+          } catch (e) {
+            // ignore
+          }
           return;
         }
       }
@@ -334,6 +381,13 @@ const StudentImportExportPage: React.FC = () => {
   const saveStudentData = async (studentId: string) => {
     setSavingStudent(studentId);
     try {
+      // Validate parent contact follows new format 92XXXXXXXXXX
+      const phoneRegex = /^92\d{10}$/;
+      if (editValues.parent_contact && !phoneRegex.test(editValues.parent_contact)) {
+        setError('Parent contact must be in format 92XXXXXXXXXX');
+        setSavingStudent(null);
+        return;
+      }
       await updateIncompleteStudent(studentId, editValues);
       await loadIncompleteStudents();
       setEditingStudent(null);
@@ -610,13 +664,13 @@ const StudentImportExportPage: React.FC = () => {
             </div>
 
             {/* Errors List */}
-            {preview.errors.length > 0 && (
+            {(preview.errors?.length || 0) > 0 && (
               <div className="border border-red-200 rounded-lg overflow-hidden">
                 <div className="bg-red-50 px-4 py-2 border-b border-red-200">
                   <h4 className="font-medium text-red-900">Issues Found</h4>
                 </div>
                 <div className="max-h-60 overflow-y-auto">
-                  {preview.errors.slice(0, 20).map((err, idx) => (
+                  {(preview.errors || []).slice(0, 20).map((err, idx) => (
                     <div
                       key={idx}
                       className="px-4 py-2 border-b border-red-100 last:border-0 text-sm"
@@ -630,9 +684,9 @@ const StudentImportExportPage: React.FC = () => {
                       )}
                     </div>
                   ))}
-                  {preview.errors.length > 20 && (
+                  {(preview.errors?.length || 0) > 20 && (
                     <div className="px-4 py-2 text-sm text-red-600">
-                      ... and {preview.errors.length - 20} more errors
+                      ... and {(preview.errors?.length || 0) - 20} more errors
                     </div>
                   )}
                 </div>
@@ -640,7 +694,7 @@ const StudentImportExportPage: React.FC = () => {
             )}
 
             {/* Preview Table */}
-            {preview.preview_data.length > 0 && (
+            {(preview.preview_data?.length || 0) > 0 && (
               <div className="border rounded-lg overflow-hidden">
                 <div className="bg-secondary-50 px-4 py-2 border-b">
                   <h4 className="font-medium text-secondary-900">Preview (first 20 rows)</h4>
@@ -658,7 +712,7 @@ const StudentImportExportPage: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {preview.preview_data.map((row, idx) => (
+                      {(preview.preview_data || []).map((row, idx) => (
                         <tr key={idx} className="border-b hover:bg-secondary-50">
                           <td className="px-3 py-2">{row.row_num}</td>
                           <td className="px-3 py-2">{row.full_name}</td>
@@ -946,7 +1000,7 @@ const StudentImportExportPage: React.FC = () => {
                                       value={editValues.parent_contact || ''}
                                       onChange={(e) => setEditValues({ ...editValues, parent_contact: e.target.value })}
                                       className="mt-1 w-full px-3 py-2 border rounded-lg text-sm"
-                                      placeholder="03XX-XXXXXXX"
+                                      placeholder="92XXXXXXXXXX"
                                     />
                                   </div>
                                 )}

@@ -97,6 +97,19 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
       return;
     }
 
+    // Validate phone formats: student phone and parent_contact (now: 92XXXXXXXXXX)
+    const phoneRegex = /^92\d{10}$/;
+    if (formData.phone && !phoneRegex.test(formData.phone)) {
+      setError('Phone must be in format 92XXXXXXXXXX');
+      setSubmitting(false);
+      return;
+    }
+    if (formData.parent_contact && !phoneRegex.test(formData.parent_contact)) {
+      setError('Parent contact must be in format 92XXXXXXXXXX');
+      setSubmitting(false);
+      return;
+    }
+
     try {
       const payload = {
         full_name: formData.full_name.trim(),
@@ -432,7 +445,7 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
                 name="phone"
                 value={formData.phone}
                 onChange={handleChange}
-                placeholder="Phone number"
+                placeholder="92XXXXXXXXXX"
                 className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-all text-sm"
               />
             </div>
@@ -461,7 +474,7 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
                   name="parent_contact"
                   value={formData.parent_contact}
                   onChange={handleChange}
-                  placeholder="Parent contact number"
+                  placeholder="92XXXXXXXXXX"
                   className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-all text-sm"
                 />
               </div>
@@ -478,9 +491,11 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
                 value={formData.parent_cnic}
                 onChange={handleChange}
                 required
-                placeholder="e.g. 12345-1234567-1"
+                maxLength={13}
+                placeholder="e.g. 3520112345678"
                 className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-all text-sm"
               />
+              <p className="text-xs text-secondary-500 mt-1">Enter 13 digits without dashes (e.g. 3520112345678)</p>
             </div>
 
             {/* Row 7: Address */}

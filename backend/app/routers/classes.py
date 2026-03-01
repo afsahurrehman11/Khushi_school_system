@@ -5,7 +5,7 @@ from app.models.class_subject import SubjectSchema, SubjectInDB, ClassSchema, Cl
 from app.services.class_subject import (
     get_all_subjects, get_subject_by_id, create_subject,
     get_all_classes, get_class_by_id, create_class,
-    update_subject, delete_subject
+    update_subject, delete_subject, delete_class
 )
 from app.dependencies.auth import check_permission
 
@@ -210,3 +210,29 @@ async def create_new_class(
     except Exception as e:
         logger.error(f"[SCHOOL:{school_id}] ❌ Failed to create class: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to create class")
+
+
+@router.delete("/classes/{class_id}")
+async def remove_class(
+    class_id: str,
+    current_user: dict = Depends(check_permission("academics.assign_subjects"))
+):
+    """Delete a class by ID (if no students assigned)"""
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Deleting class {class_id}")
+    try:
+        ok = delete_class(class_id, school_id=school_id)
+        if not ok:
+            logger.warning(f"[SCHOOL:{school_id}] Class {class_id} not found or has students assigned")
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot delete class. Either it doesn't exist or has students assigned to it."
+            )
+        logger.info(f"[SCHOOL:{school_id}] ✅ Class {class_id} deleted")
+        return {"deleted": True, "message": "Class deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[SCHOOL:{school_id}] ❌ Failed to delete class: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete class")

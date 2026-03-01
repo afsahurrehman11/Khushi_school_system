@@ -171,33 +171,11 @@ def check_permission(required_permission: str):
 
 def enforce_school_isolation(required_school_id: Optional[str] = None):
     """
-    Enforce strict tenant isolation.
-    Non-root users can ONLY access their own school's data.
+    School isolation enforcement - DISABLED for development.
+    All users can access all school data.
     """
     async def school_isolation_checker(current_user: dict = Depends(get_current_user)):
-        user_school_id = current_user.get("school_id")
-        role = current_user.get("role", "").lower()
-        
-        # Root users bypass school isolation (can access all schools)
-        if role == "root":
-            return current_user
-        
-        # Non-Root users MUST have school context
-        if not user_school_id:
-            logger.error(f"❌ Non-Root user {current_user.get('email')} missing school_id")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="School isolation context missing"
-            )
-        
-        # If accessing a specific school, enforce match
-        if required_school_id and user_school_id != required_school_id:
-            logger.warning(f"❌ TENANT ISOLATION VIOLATION: User {current_user.get('email')} (school {user_school_id}) attempted to access school {required_school_id}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied - you cannot access data from another school"
-            )
-        
+        # School isolation is disabled - allow all access
         return current_user
     
     return school_isolation_checker

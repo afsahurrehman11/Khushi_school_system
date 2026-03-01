@@ -5,6 +5,7 @@ import { InAppNotificationService } from '../services';
 import ChallanModal from '../components/ChallanModal';
 import printChallan from '../utils/printChallan';
 import { config } from '../../../config';
+import { authService } from '../../../services/auth';
 
 export const ChallanSubPage: React.FC = () => {
   const [rows, setRows] = useState<any[]>([]);
@@ -67,7 +68,7 @@ export const ChallanSubPage: React.FC = () => {
     let mounted = true;
     (async () => {
       try {
-        const cls = await fetch(`${config.API_BASE_URL}/api/classes`, { headers: localStorage.getItem('token') ? { Authorization: `Bearer ${localStorage.getItem('token')}` } : {} }).then(r => r.ok ? r.json() : []);
+        const cls = await fetch(`${config.API_BASE_URL}/classes`, { headers: authService.getAuthHeaders() }).then(r => r.ok ? r.json() : []);
         const cats = await feeCategoriesApi.getAllCategories().then((r: any) => Array.isArray(r) ? r : (r.categories || []));
         if (mounted) {
           setClasses(Array.isArray(cls) ? cls : []);

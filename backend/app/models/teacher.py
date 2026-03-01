@@ -1,6 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from typing import List, Optional
 from datetime import datetime
+from app.utils.validators import is_valid_pk_phone
 
 
 # ================= Teacher Models =================
@@ -12,6 +13,14 @@ class TeacherSchema(BaseModel):
     name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+
+    @validator('phone')
+    def validate_phone_format(cls, v):
+        if v in (None, ''):
+            return v
+        if not is_valid_pk_phone(v):
+            raise ValueError("Phone must be in format 92XXXXXXXXXX")
+        return v
     qualification: Optional[str] = None
     assigned_classes: Optional[List[str]] = None  # e.g. ["Grade 7-A"] or class IDs
     assigned_subjects: Optional[List[str]] = None  # Subject IDs
@@ -46,6 +55,14 @@ class TeacherCreate(BaseModel):
     cnic: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+
+    @validator('phone')
+    def validate_phone_format_create(cls, v):
+        if v in (None, ''):
+            return v
+        if not is_valid_pk_phone(v):
+            raise ValueError("Phone must be in format 92XXXXXXXXXX")
+        return v
     qualification: Optional[str] = None
     experience: Optional[str] = None
     assigned_classes: Optional[List[str]] = None

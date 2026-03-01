@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { analyticsService, MissingDataStudent } from '../services/analytics';
 import { studentsService } from '../services/students';
+import { apiCallJSON } from '../utils/api';
 import ImageUpload from '../features/students/components/ImageUpload';
 
 const missingFieldLabels: Record<string, string> = {
@@ -48,7 +49,32 @@ const MissingDataPage: React.FC = () => {
   const loadMissingData = async () => {
     setLoading(true);
     try {
-      const data = await analyticsService.getMissingData();
+      let data = await analyticsService.getMissingData();
+
+      // If backend returned class identifiers (e.g. ObjectId strings) instead of names,
+      // fetch classes and map ids -> human readable class_name
+      const looksLikeObjectId = (val: any) => typeof val === 'string' && /^[a-f0-9]{24}$/i.test(val);
+      const needRemap = data.length > 0 && data.some((s: any) => looksLikeObjectId(s.class_name));
+      if (needRemap) {
+        try {
+          const classes = await apiCallJSON('/api/classes');
+          const map = new Map<string, string>();
+          (classes || []).forEach((c: any) => {
+            const id = c.id || c._id || (c.class_id ? String(c.class_id) : undefined) || (c._id && c._id.toString ? c._id.toString() : undefined);
+            const name = c.class_name || c.name || c.display_name || id;
+            if (id) map.set(String(id), name);
+          });
+
+          data = data.map((s: any) => ({
+            ...s,
+            class_name: map.get(String(s.class_name)) || s.class_name,
+          }));
+        } catch (e) {
+          // If mapping fails, leave data as-is
+          console.warn('MissingData: failed to remap class names', e);
+        }
+      }
+
       setStudents(data);
     } catch (err) {
       console.error('Failed to load missing data:', err);

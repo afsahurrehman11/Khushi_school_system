@@ -1,6 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from typing import List, Optional
 from datetime import datetime
+from app.utils.validators import is_valid_pk_phone
 
 # ================= Student Models =================
 
@@ -16,6 +17,22 @@ class ContactInfo(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     emergency_contact: Optional[str] = None
+
+    @validator('phone')
+    def validate_phone_format(cls, v):
+        if v in (None, ''):
+            return v
+        if not is_valid_pk_phone(v):
+            raise ValueError("Phone must be in format 92XXXXXXXXXX")
+        return v
+
+    @validator('emergency_contact')
+    def validate_emergency_contact(cls, v):
+        if v in (None, ''):
+            return v
+        if not is_valid_pk_phone(v):
+            raise ValueError("Emergency contact must be in format 92XXXXXXXXXX")
+        return v
 
 class StudentSchema(BaseModel):
     school_id: str  # School isolation

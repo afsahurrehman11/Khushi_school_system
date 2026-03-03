@@ -124,7 +124,17 @@ def get_all_teachers(filters: dict = None, school_id: str = None) -> list:
     
     teachers = list(db.teachers.find(query))
     for t in teachers:
-        t["id"] = str(t["_id"])
+        # Convert Mongo _id to string `id` and remove raw ObjectId to avoid JSON issues
+        try:
+            t["id"] = str(t["_id"])
+        except Exception:
+            t["id"] = None
+        # Remove the raw MongoDB _id to prevent json encoding errors elsewhere
+        if "_id" in t:
+            try:
+                del t["_id"]
+            except Exception:
+                pass
     
     if school_id:
         logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved {len(teachers)} teachers")

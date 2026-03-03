@@ -14,7 +14,16 @@ export const apiCall = async (
   endpoint: string,
   options: RequestInit = {}
 ): Promise<Response> => {
-  const url = `${config.API_BASE_URL}${endpoint}`;
+  // Normalize endpoint to avoid double-prefixing when callers pass '/api/...' while
+  // `config.API_BASE_URL` already contains '/api'. Also allow full URLs.
+  let url: string;
+  if (/^https?:\/\//i.test(endpoint)) {
+    url = endpoint; // absolute URL passed
+  } else {
+    // remove any leading '/api' or slashes so we can safely join
+    const trimmed = endpoint.replace(/^\/api/i, '').replace(/^\/+/, '');
+    url = `${config.API_BASE_URL}/${trimmed}`;
+  }
   const headers = {
     ...getAuthHeaders(),
     ...options.headers,
@@ -59,6 +68,8 @@ export const apiCallJSON = async <T = any>(
   
   const data = await response.json();
   logger.info('API', `JSON success ${endpoint}`);
+  // Log the actual response data for debugging
+  logger.debug('API', `[${endpoint}] Full response body: ${JSON.stringify(data)}`);
   return data;
 };
 

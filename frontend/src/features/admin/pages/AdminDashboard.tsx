@@ -3,7 +3,20 @@ import logger from '../../../utils/logger';
 
 logger.fileLoaded('features/admin/pages/AdminDashboard.tsx');
 import { motion } from 'framer-motion';
-import { Users, Settings, Trash2, Plus } from 'lucide-react';
+import { Users, Settings, Trash2, Plus, RefreshCw } from 'lucide-react';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  LineChart,
+  Line
+} from 'recharts';
+import { analyticsService } from '../../../services/analytics';
 import Button from '../../../components/Button';
 import Modal from '../../../components/Modal';
 import api from '../../../utils/api';
@@ -69,6 +82,10 @@ const AdminDashboard: React.FC = () => {
   const [roleFormData, setRoleFormData] = useState<RoleFormData>({ name: '', description: '', permissions: [] });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [schoolName, setSchoolName] = useState<string>('');
+  const [overview, setOverview] = useState<any>(null);
+  const [feeSummary, setFeeSummary] = useState<any>(null);
+  const [attendanceSummary, setAttendanceSummary] = useState<any>(null);
   
   // Helper function to get role name from user object
   const getRoleName = (user: User) => {
@@ -103,6 +120,7 @@ const AdminDashboard: React.FC = () => {
   useEffect(() => {
     fetchUsers();
     fetchRoles();
+    loadAnalyticsOverview();
   }, []);
 
   useEffect(() => {
@@ -228,6 +246,34 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Analytics: load compact overview for admin dashboard
+  const loadAnalyticsOverview = async () => {
+    try {
+      const [ov, fees, att] = await Promise.all([
+        analyticsService.getDashboardOverview(),
+        analyticsService.getFeeSummary(),
+        analyticsService.getAttendanceSummary(30)
+      ]);
+      setOverview(ov);
+      setFeeSummary(fees);
+      setAttendanceSummary(att);
+    } catch (err) {
+      logger.warn('ADMIN', `Failed to load analytics for admin dashboard: ${String(err)}`);
+    }
+  };
+
+  // Fetch school name from fee voucher settings
+  const loadSchoolName = async () => {
+    try {
+      const res = await api.get('/api/fee-voucher-settings');
+      setSchoolName(res.school_name || '');
+    } catch (e) {
+      // ignore silently
+    }
+  };
+
+  useEffect(() => { loadSchoolName(); }, []);
+
   const handleTogglePermission = (permission: string) => {
     if (roleFormData.permissions.includes(permission)) {
       setRoleFormData({
@@ -254,6 +300,86 @@ const AdminDashboard: React.FC = () => {
           <h1 className="text-4xl font-bold text-secondary-900 mb-2">Admin Dashboard</h1>
           <p className="text-secondary-600">Manage users, roles, and permissions</p>
         </motion.div>
+
+        {/* School name and compact analytics */}
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold text-secondary-900">{schoolName || 'School Dashboard'}</h2>
+            <p className="text-sm text-secondary-600">Quick analytics overview for administrators</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => { loadSchoolName(); loadAnalyticsOverview(); }}
+              className="px-3 py-2 bg-white border border-secondary-200 rounded-lg flex items-center gap-2 hover:bg-secondary-50"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* Compact analytics tiles */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <p className="text-sm text-gray-500">Total Students</p>
+            <p className="text-2xl font-bold text-gray-900">{overview?.total_students ?? '-'}</p>
+            <p className="text-xs text-gray-500">Active: {overview?.active_students ?? '-'}</p>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <p className="text-sm text-gray-500">Fee Collection</p>
+            <p className="text-2xl font-bold text-gray-900">{feeSummary ? `${new Intl.NumberFormat('en-PK', { style: 'currency', currency: 'PKR', maximumFractionDigits:0 }).format(feeSummary.summary?.total_collected ?? feeSummary.total_collected ?? 0)}` : '-'}</p>
+            <p className="text-xs text-gray-500">Pending: {feeSummary ? new Intl.NumberFormat('en-PK', { style: 'currency', currency: 'PKR', maximumFractionDigits:0 }).format(feeSummary.summary?.total_pending ?? feeSummary.total_pending ?? 0) : '-'}</p>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <p className="text-sm text-gray-500">Attendance Rate</p>
+            <p className="text-2xl font-bold text-gray-900">{attendanceSummary ? `${attendanceSummary.summary?.attendance_rate ?? attendanceSummary.attendance_rate ?? '-'}%` : '-'}</p>
+            <p className="text-xs text-gray-500">Period: 30 days</p>
+          </div>
+        </div>
+
+        {/* Small charts row */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <h3 className="text-sm font-semibold mb-2">Collection Status</h3>
+            <div style={{ width: '100%', height: 160 }}>
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie
+                    data={feeSummary ? [
+                      { name: 'Collected', value: feeSummary.summary?.total_collected ?? feeSummary.total_collected ?? 0 },
+                      { name: 'Pending', value: feeSummary.summary?.total_pending ?? feeSummary.total_pending ?? 0 }
+                    ] : [{ name: 'N/A', value: 1 }]}
+                    dataKey="value"
+                    innerRadius={40}
+                    outerRadius={60}
+                    paddingAngle={3}
+                  >
+                    <Cell fill="#10b981" />
+                    <Cell fill="#ef4444" />
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 lg:col-span-2">
+            <h3 className="text-sm font-semibold mb-2">Monthly Collection Trend</h3>
+            <div style={{ width: '100%', height: 160 }}>
+              <ResponsiveContainer>
+                <LineChart data={feeSummary?.monthly_collection || []}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip formatter={(v) => new Intl.NumberFormat('en-PK', { style: 'currency', currency: 'PKR', maximumFractionDigits:0 }).format(v as number)} />
+                  <Line type="monotone" dataKey="amount" stroke="#6366f1" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
 
         {/* Alerts */}
         {error && (

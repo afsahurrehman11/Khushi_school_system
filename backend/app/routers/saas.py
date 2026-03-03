@@ -6,6 +6,7 @@ API endpoints for root users to manage the multi-tenant SaaS system
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from typing import List, Optional
 from datetime import datetime, timedelta
+import uuid
 import logging
 
 from app.models.saas import (
@@ -67,6 +68,9 @@ async def create_school(
         logger.info(f"[ROOT:{current_user.get('email')}] ✅ School created: {school.school_name} (DB: {school.database_name})")
         
         # Generate JWT for admin auto-login
+        # Create session id for admin auto-login token so that the auto-generated
+        # token is subject to the single-session enforcement just like normal logins.
+        session_id = str(uuid.uuid4())
         token_data = {
             "sub": admin_user.get("email"),
             "user_id": admin_user.get("id"),
@@ -74,6 +78,7 @@ async def create_school(
             "database_name": admin_user.get("database_name"),
             "school_slug": admin_user.get("school_slug"),
             "school_id": admin_user.get("school_id"),
+            "sid": session_id,
         }
         
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
@@ -81,6 +86,18 @@ async def create_school(
             data=token_data,
             expires_delta=access_token_expires
         )
+        # Persist active session for this newly-created admin user
+        try:
+            root_db = get_saas_root_db()
+            root_db.global_users.update_one(
+                {"email": admin_user.get("email")},
+                {"$set": {
+                    "active_session_id": session_id,
+                    "session_expires": datetime.utcnow() + access_token_expires
+                }}
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Could not persist active session for new admin {admin_user.get('email')}: {e}")
         
         # Return school info with admin auth for auto-login and password for display
         return {

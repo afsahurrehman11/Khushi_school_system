@@ -6,6 +6,7 @@ from app.services.school import (
     update_school, delete_school
 )
 from app.dependencies.auth import get_current_root, get_current_admin_with_school
+from app.services.saas_db import get_school_by_id
 import logging
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ async def get_schools(
 
 
 @router.get("/schools/{school_id}", response_model=SchoolInDB, tags=["Schools"])
-async def get_school_by_id(
+async def get_school_by_id_root(
     school_id: str,
     current_user: dict = Depends(get_current_root)
 ):
@@ -114,11 +115,60 @@ async def get_current_admin_school(
     try:
         school_id = current_user.get("school_id")
         logger.info(f"[SCHOOL:{school_id}] [ADMIN:{current_user.get('email')}] Fetching school info")
-        school = get_school(school_id)
-        if not school:
-            raise HTTPException(status_code=404, detail="School not found")
-        logger.info(f"[SCHOOL:{school_id}] ✅ School info retrieved")
-        return school
+        # Use SaaS root lookup which supports both school_id (custom id) and ObjectId
+        # `get_school_by_id` is synchronous and returns a dict or None
+        try:
+            school = get_school_by_id(school_id)
+            # Log type and keys to help debug mismatches (avoid dumping large blobs)
+            if isinstance(school, dict):
+                keys = list(school.keys())
+                logger.debug(f"[SCHOOL:{school_id}] saas lookup returned dict with keys: {keys}")
+                # If image blobs exist, log their lengths (not contents)
+                if 'left_image_blob' in school:
+                    left_len = len(school.get('left_image_blob') or '')
+                    logger.debug(f"[SCHOOL:{school_id}] left_image_blob length: {left_len}")
+                if 'right_image_blob' in school:
+                    right_len = len(school.get('right_image_blob') or '')
+                    logger.debug(f"[SCHOOL:{school_id}] right_image_blob length: {right_len}")
+            else:
+                logger.debug(f"[SCHOOL:{school_id}] saas lookup returned non-dict: {type(school)} -> {school}")
+
+            if not school:
+                logger.warning(f"[SCHOOL:{school_id}] School not found in saas_root_db")
+                raise HTTPException(status_code=404, detail="School not found")
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"[SCHOOL:{school_id}] ❌ Error while fetching school from saas_root_db: {e}")
+            raise HTTPException(status_code=500, detail="Failed to lookup school in saas_root_db")
+
+        # Map root DB fields to SchoolResponse-compatible shape
+        try:
+            # Priority: school_name (from fee-voucher-settings sync) > name > display_name
+            school_name = school.get("school_name") or school.get("name") or school.get("display_name") or ''
+            response = {
+                "id": school.get("id") or school.get("_id") or str(school_id),
+                "name": school_name,
+                "display_name": school_name,
+                "email": school.get("email"),
+                "phone": school.get("phone"),
+                "address": school.get("address"),
+                "city": school.get("city"),
+                "is_active": school.get("is_active", True),
+                "created_at": school.get("created_at"),
+                "left_image_blob": school.get("left_image_blob"),
+                "right_image_blob": school.get("right_image_blob")
+            }
+            logger.info(f"[SCHOOL:{school_id}] [DEBUG] Mapped response: school_name={school_name}, email={response.get('email')}, has_left_blob={bool(school.get('left_image_blob'))}, has_right_blob={bool(school.get('right_image_blob'))}")
+        except Exception as e:
+            logger.exception(f"[SCHOOL:{school_id}] ❌ Failed to map school fields: {e}")
+            raise HTTPException(status_code=500, detail="Failed to prepare school response")
+        logger.info(f"[SCHOOL:{school_id}] ✅ School info retrieved (from saas_root_db)")
+        # Log the response being sent to frontend for debugging
+        logger.info(f"[SCHOOL:{school_id}] [DEBUG] Response keys: {list(response.keys())}")
+        logger.info(f"[SCHOOL:{school_id}] [DEBUG] name={response.get('name')}, display_name={response.get('display_name')}, email={response.get('email')}")
+        return response
     except Exception as e:
         school_id = current_user.get("school_id")
         logger.error(f"[SCHOOL:{school_id}] ❌ Failed to fetch school info: {str(e)}")

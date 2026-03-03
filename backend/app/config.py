@@ -55,7 +55,8 @@ class Settings(BaseSettings):
     # JWT Configuration
     secret_key: str = "your-secret-key-change-in-production"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
+    # Default access token expiry set to 8 hours (480 minutes)
+    access_token_expire_minutes: int = 480
 
     # MongoDB Configuration - ALWAYS from backend/.env or environment
     # No fallback to development defaults - must be explicitly set

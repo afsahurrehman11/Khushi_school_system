@@ -95,6 +95,30 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
             detail="User account is deactivated"
         )
 
+    # Enforce single active session per account.
+    # Tokens must contain the session id ('sid') which must match the
+    # currently persisted `active_session_id` for the user. If it
+    # doesn't match, the token is considered invalid (user logged in
+    # elsewhere).
+    token_sid = payload.get("sid")
+    persisted_sid = user.get("active_session_id")
+    if not token_sid or not persisted_sid or token_sid != persisted_sid:
+        logger.warning(f"❌ Session mismatch for user {email}: token_sid={token_sid} persisted_sid={persisted_sid}")
+        raise credentials_exception
+
+    # Optionally enforce session expiry saved in the DB (fallback if token exp not sufficient)
+    session_expires = user.get("session_expires")
+    try:
+        if session_expires:
+            # `session_expires` is expected to be a datetime stored in MongoDB
+            if datetime.utcnow() > session_expires:
+                logger.warning(f"❌ Session expired for user {email}")
+                raise credentials_exception
+    except Exception:
+        # If any error occurs while validating session expiry, treat token as invalid
+        logger.warning(f"⚠️ Could not validate session expiry for {email}")
+        raise credentials_exception
+
     # Return complete user context from token + database
     return {
         "id": user.get("id") or user_id,

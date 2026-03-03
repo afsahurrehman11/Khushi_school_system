@@ -31,6 +31,12 @@ def create_or_get_payment_method(name: str) -> dict:
 def list_payment_methods() -> List[dict]:
     db = get_db()
     methods = list(db.payment_methods.find({}).sort("name", 1))
+    result = []
     for m in methods:
-        m["id"] = str(m["_id"])
-    return methods
+        result.append({
+            "id": str(m["_id"]),
+            "name": m.get("name", ""),
+            "normalized": m.get("normalized", ""),
+            "created_at": m.get("created_at")
+        })
+    return result

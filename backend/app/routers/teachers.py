@@ -29,7 +29,8 @@ async def list_teachers(
         
         teachers = get_all_teachers(school_id=school_id)
         logger.info(f"[SCHOOL:{school_id or 'All'}] ✅ Retrieved {len(teachers)} teachers")
-        return JSONResponse(content=jsonable_encoder(teachers))
+        # Return plain list and let FastAPI handle validation/encoding
+        return teachers
     except Exception as e:
         logger.error(f"[SCHOOL:{school_id or 'N/A'}] ❌ Failed to fetch teachers: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

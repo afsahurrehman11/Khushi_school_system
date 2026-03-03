@@ -14,9 +14,11 @@ interface TableProps<T> {
   selectable?: boolean;
   selectedIds?: Set<string | number>;
   onToggleSelect?: (id: string | number) => void;
+  // optional action buttons to render before checkbox
+  actionButtons?: (item: T) => React.ReactNode;
 }
 
-function Table<T extends Record<string, any>>({ columns, data, onRowClick, selectable = false, selectedIds, onToggleSelect }: TableProps<T>) {
+function Table<T extends Record<string, any>>({ columns, data, onRowClick, selectable = false, selectedIds, onToggleSelect, actionButtons }: TableProps<T>) {
   return (
     <div className="overflow-x-auto rounded-lg border border-secondary-200 bg-white shadow-soft">
       <table className="min-w-full divide-y divide-secondary-200">
@@ -66,22 +68,25 @@ function Table<T extends Record<string, any>>({ columns, data, onRowClick, selec
           ) : (
             data.map((item, index) => (
               <tr
-                key={index}
+                key={String(item.id) || index}
                 onClick={() => onRowClick?.(item)}
                 className={`${onRowClick ? 'cursor-pointer hover:bg-secondary-50' : ''} transition-colors`}
               >
                 {selectable && (
                   <td className="px-4 py-4 whitespace-nowrap text-sm text-secondary-900">
-                    <input
-                      type="checkbox"
-                      checked={!!selectedIds?.has(item.id)}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        onToggleSelect?.(item.id);
-                      }}
-                    />
+                    <div className="flex items-center gap-3">
+                      {actionButtons && actionButtons(item)}
+                      <input
+                        type="checkbox"
+                        checked={!!selectedIds?.has(item.id)}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          onToggleSelect?.(item.id);
+                        }}
+                      />
+                    </div>
                   </td>
                 )}
                 {columns.map((column) => (

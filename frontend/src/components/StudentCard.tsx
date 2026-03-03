@@ -17,6 +17,7 @@ interface StudentCardProps {
   selectable?: boolean;
   checked?: boolean;
   onToggleSelect?: (id: string | number) => void;
+  onAdmissionClick?: () => void;
 }
 
 const StudentCard: React.FC<StudentCardProps> = ({
@@ -34,6 +35,7 @@ const StudentCard: React.FC<StudentCardProps> = ({
   selectable = false,
   checked = false,
   onToggleSelect,
+  onAdmissionClick,
 }) => {
   return (
     <motion.div
@@ -43,17 +45,30 @@ const StudentCard: React.FC<StudentCardProps> = ({
       className={`bg-gradient-to-br from-indigo-50 via-white to-blue-50 rounded-xl p-6 shadow-sm cursor-pointer border-2 border-indigo-100 hover:border-indigo-300 transition-all relative ${selectable ? 'pl-12' : ''}`}
     >
       {selectable && (
-        <div className="absolute left-5 top-5">
-          <input
-            type="checkbox"
-            checked={checked}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => { e.stopPropagation(); onToggleSelect?.(id); }}
-            className="w-5 h-5 rounded border-2 border-indigo-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500"
-          />
+        <div className="absolute left-5 top-5 flex items-center gap-2">
+          <div>
+            <input
+              type="checkbox"
+              checked={checked}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => { e.stopPropagation(); onToggleSelect?.(id); }}
+              className="w-5 h-5 rounded border-2 border-indigo-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
         </div>
       )}
+
+      {/* Single admission action icon (top-right) */}
+      <div className="absolute right-5 top-5">
+        <button
+          onClick={(e) => { e.stopPropagation(); onAdmissionClick?.(); }}
+          title="Admission Options"
+          className="w-8 h-8 bg-white/95 rounded flex items-center justify-center border border-indigo-100 hover:bg-white"
+        >
+          <svg className="w-4 h-4 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" strokeLinecap="round" strokeLinejoin="round"/><polyline points="7 10 12 15 17 10" strokeLinecap="round" strokeLinejoin="round"/><line x1="12" y1="15" x2="12" y2="3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+      </div>
       
       {/* Header */}
       <div className="flex items-start gap-4 mb-5">

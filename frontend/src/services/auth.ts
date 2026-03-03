@@ -71,10 +71,21 @@ class AuthService {
   }
 
   /**
-   * Logout user
+   * Logout user (call backend to invalidate server session, then clear local storage)
    */
-  logout(): void {
+  async logout(): Promise<void> {
     logger.info('AUTH', '[API] 🔓 Logging out');
+    try {
+      // Call backend logout to clear server-side session state
+      await fetch(`${API_BASE_URL}/logout`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+      });
+    } catch (err: any) {
+      logger.warn('AUTH', `[API] Logout API call failed: ${String(err)}`);
+    }
+
+    // Clear local state regardless
     localStorage.removeItem(this.tokenKey);
     localStorage.removeItem(this.userKey);
   }

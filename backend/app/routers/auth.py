@@ -10,7 +10,8 @@ from app.config import settings
 from app.models.user import TokenResponse
 from app.dependencies.auth import create_access_token, get_current_user
 from app.services.saas_db import get_global_user_by_email, get_saas_root_db
-from datetime import timedelta
+from datetime import datetime, timedelta
+import uuid
 import hashlib
 import logging
 
@@ -130,10 +131,17 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     # Role stored as capitalized for frontend compatibility
     display_role = role.capitalize()  # "root" -> "Root", "admin" -> "Admin", "staff" -> "Staff"
     
+    # Create a new single-use session id for this login. Storing this
+    # session id in the global_users document allows us to enforce
+    # a single active session per account: issuing a new session will
+    # invalidate any previous tokens.
+    session_id = str(uuid.uuid4())
+
     token_data = {
         "sub": email,
         "user_id": user.get("id"),
         "role": display_role,
+        "sid": session_id,
     }
     
     # Add school context for non-root users
@@ -152,7 +160,18 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         data=token_data,
         expires_delta=access_token_expires
     )
-    
+    # Persist the active session id and expiry in the global_users collection
+    try:
+        root_db = get_saas_root_db()
+        root_db.global_users.update_one(
+            {"email": email},
+            {"$set": {
+                "active_session_id": session_id,
+                "session_expires": datetime.utcnow() + access_token_expires
+            }}
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ Could not persist active session for {email}: {e}")
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -184,3 +203,24 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
         "created_at": current_user.get("created_at"),
         "is_active": current_user.get("is_active", True)
     }
+
+
+@router.post("/logout")
+async def logout(current_user: dict = Depends(get_current_user)):
+    """Invalidate the current user's active session (logout).
+
+    This clears the persisted `active_session_id` and `session_expires`
+    fields stored in `saas_root_db.global_users` for the authenticated user.
+    """
+    email = current_user.get("email")
+    try:
+        root_db = get_saas_root_db()
+        # Unset the active session fields
+        root_db.global_users.update_one(
+            {"email": email},
+            {"$unset": {"active_session_id": "", "session_expires": ""}}
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ Could not clear active session for {email}: {e}")
+
+    return {"detail": "Logged out"}

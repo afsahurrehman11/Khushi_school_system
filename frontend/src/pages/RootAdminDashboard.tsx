@@ -10,6 +10,7 @@ import {
   SchoolStorageHistory, SchoolPlan, SchoolStatus 
 } from '../types';
 import { saasService } from '../services/saas';
+import { entitySync } from '../utils/entitySync';
 import { authService } from '../services/auth';
 import logger from '../utils/logger';
 
@@ -1107,6 +1108,21 @@ const RootAdminDashboard: React.FC = () => {
     loadData();
   }, [loadData]);
 
+  // Subscribe to global entity events so dashboard stats update automatically
+  useEffect(() => {
+    const unsubStudent = entitySync.subscribe('student', () => { loadData().catch(() => {}); });
+    const unsubTeacher = entitySync.subscribe('teacher', () => { loadData().catch(() => {}); });
+    const unsubClass = entitySync.subscribe('class', () => { loadData().catch(() => {}); });
+    const unsubSubject = entitySync.subscribe('subject', () => { loadData().catch(() => {}); });
+
+    return () => {
+      try { unsubStudent(); } catch (_) {}
+      try { unsubTeacher(); } catch (_) {}
+      try { unsubClass(); } catch (_) {}
+      try { unsubSubject(); } catch (_) {}
+    };
+  }, [loadData]);
+
   // State for admin credentials display after school creation
   const [adminCredentials, setAdminCredentials] = useState<{
     open: boolean;
@@ -1350,6 +1366,19 @@ const RootAdminDashboard: React.FC = () => {
         )}
 
         {/* Stats Cards */}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-white">Overview</h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { loadData().catch(() => {}); }}
+              className="flex items-center gap-2 px-3 py-1.5 bg-slate-700/50 hover:bg-slate-700 rounded text-slate-300"
+              title="Refresh stats"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span className="text-sm">Refresh</span>
+            </button>
+          </div>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {loading.stats ? (
             Array(4).fill(0).map((_, i) => (

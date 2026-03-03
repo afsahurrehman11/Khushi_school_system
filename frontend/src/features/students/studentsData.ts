@@ -1,5 +1,5 @@
 export interface Student {
-  id: number;
+  id: string;
   name: string;
   rollNo: string;
   registrationNumber?: string;
@@ -15,6 +15,7 @@ export interface Student {
   parentCnic?: string;
   profileImageBlob?: string | null;
   profileImageType?: string;
+  arrears?: number; // Per-student arrears amount
 }
 
 export const studentsData: Student[] = [];

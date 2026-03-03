@@ -148,12 +148,18 @@ class FeeVoucherSettingsCreate(BaseModel):
     header_text: Optional[str] = ""
     footer_text: Optional[str] = ""
     due_day: Optional[int] = None
+    school_name: Optional[str] = None
+    left_image_blob: Optional[str] = None  # Base64 encoded image
+    right_image_blob: Optional[str] = None  # Base64 encoded image
 
 class FeeVoucherSettingsUpdate(BaseModel):
     """Update fee voucher settings"""
     header_text: Optional[str] = None
     footer_text: Optional[str] = None
     due_day: Optional[int] = None
+    school_name: Optional[str] = None
+    left_image_blob: Optional[str] = None  # Base64 encoded image
+    right_image_blob: Optional[str] = None  # Base64 encoded image
 
 class FeeVoucherSettingsInDB(BaseModel):
     """Fee voucher settings in database"""
@@ -162,6 +168,9 @@ class FeeVoucherSettingsInDB(BaseModel):
     header_text: str
     footer_text: str
     due_day: Optional[int] = None
+    school_name: Optional[str] = None
+    left_image_blob: Optional[str] = None  # Base64 encoded image
+    right_image_blob: Optional[str] = None  # Base64 encoded image
     created_at: datetime
     updated_at: datetime
 
@@ -172,5 +181,8 @@ class FeeVoucherSettingsResponse(BaseModel):
     header_text: str
     footer_text: str
     due_day: Optional[int]
+    school_name: Optional[str]
+    left_image_blob: Optional[str]
+    right_image_blob: Optional[str]
     created_at: datetime
     updated_at: datetime

@@ -11,6 +11,12 @@ import logging
 
 from app.dependencies.auth import check_permission
 from app.database import get_db
+from app.services.analytics_job_service import (
+    create_analytics_job,
+    get_job_status as get_analytics_job_status,
+    get_job_result as get_analytics_job_result,
+    cleanup_old_jobs as cleanup_analytics_jobs
+)
 
 logger = logging.getLogger(__name__)
 
@@ -553,4 +559,59 @@ async def get_face_recognition_status(
         
     except Exception as e:
         logger.error(f"Error getting face recognition status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ================= Analytics Job Endpoints =================
+
+
+@router.post("/jobs")
+async def create_job(
+    payload: dict,
+    current_user: dict = Depends(check_permission("dashboard.read"))
+):
+    """Create a background analytics job. Minimal implementation: enqueues
+    a job to compute heavy dashboard analytics.
+    """
+    try:
+        user_id = current_user.get("id")
+        school_id = current_user.get("school_id")
+        job_params = payload or {}
+        job_id = create_analytics_job(user_id=user_id, school_id=school_id, job_params=job_params)
+        # Trigger cleanup in the background (non-blocking)
+        try:
+            cleanup_analytics_jobs()
+        except Exception:
+            pass
+        return {"job_id": job_id}
+    except Exception as e:
+        logger.error(f"Error creating analytics job: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/jobs/{job_id}")
+async def job_status(job_id: str, current_user: dict = Depends(check_permission("dashboard.read"))):
+    try:
+        status = get_analytics_job_status(job_id)
+        if not status:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return status
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching job status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/jobs/{job_id}/result")
+async def job_result(job_id: str, current_user: dict = Depends(check_permission("dashboard.read"))):
+    try:
+        result = get_analytics_job_result(job_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Result not available or job not completed")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching job result: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -29,6 +29,7 @@ interface FormData {
   parent_contact: string;
   phone: string;
   address: string;
+  arrears: string; // Per-student arrears (PKR) - stored as string for input
 }
 
 const initialFormData: FormData = {
@@ -43,6 +44,7 @@ const initialFormData: FormData = {
   parent_contact: '',
   phone: '',
   address: '',
+  arrears: '',
 };
 
 const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onStudentAdded, student, onStudentUpdated, classesFromParent }) => {
@@ -118,6 +120,7 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
         gender: formData.gender || 'Not specified',
         date_of_birth: formData.date_of_birth || new Date().toISOString().split('T')[0],
         admission_date: formData.admission_date || new Date().toISOString().split('T')[0],
+        arrears: formData.arrears ? parseFloat(formData.arrears) : 0,
         guardian_info: {
           parent_cnic: formData.parent_cnic.trim(),
           father_name: formData.parent_name.trim() || null,
@@ -242,6 +245,7 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
         parent_contact: student.guardianPhone || student.parent_contact || (student.guardian_info?.guardian_contact) || '',
         phone: student.phone || (student.contact_info?.phone) || '',
         address: student.address || (student.guardian_info?.address) || '',
+        arrears: student.arrears ? String(student.arrears) : '',
       });
     } else {
       setFormData({ ...initialFormData });
@@ -511,6 +515,24 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
                 rows={2}
                 className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-all resize-none text-sm"
               />
+            </div>
+
+            {/* Row 8: Arrears */}
+            <div>
+              <label className="block text-sm font-medium text-secondary-700 mb-1">
+                Arrears (PKR)
+              </label>
+              <input
+                type="number"
+                name="arrears"
+                value={formData.arrears}
+                onChange={handleChange}
+                placeholder="0.00"
+                min="0"
+                step="0.01"
+                className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-all text-sm"
+              />
+              <p className="text-xs text-secondary-500 mt-1">Per-student outstanding fee amount</p>
             </div>
           </div>
 

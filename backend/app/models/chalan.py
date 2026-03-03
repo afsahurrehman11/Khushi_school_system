@@ -78,6 +78,7 @@ class ChalanDetailResponse(BaseModel):
     total_amount: float
     paid_amount: float
     remaining_amount: float
+    student_arrears: float = 0.0  # Per-student arrears from StudentSchema
     status: str  # paid, partial, unpaid
     last_payment_date: Optional[datetime]
     created_at: datetime

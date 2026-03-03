@@ -15,6 +15,11 @@ const FeeVoucherSettingsModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [headerText, setHeaderText] = useState('');
   const [footerText, setFooterText] = useState('');
   const [dueDay, setDueDay] = useState<number | ''>('');
+  const [schoolName, setSchoolName] = useState('');
+  const [leftImagePreview, setLeftImagePreview] = useState<string | null>(null);
+  const [rightImagePreview, setRightImagePreview] = useState<string | null>(null);
+  const [leftImageBlob, setLeftImageBlob] = useState<string | null>(null);
+  const [rightImageBlob, setRightImageBlob] = useState<string | null>(null);
 
   const loadSettings = async () => {
     setLoading(true);
@@ -28,11 +33,21 @@ const FeeVoucherSettingsModal: React.FC<Props> = ({ isOpen, onClose }) => {
         setHeaderText(data.header_text || '');
         setFooterText(data.footer_text || '');
         setDueDay(typeof data.due_day === 'number' ? data.due_day : (data.due_day ? Number(data.due_day) : ''));
+        setSchoolName(data.school_name || '');
+        setLeftImagePreview(data.left_image_blob || null);
+        setRightImagePreview(data.right_image_blob || null);
+        setLeftImageBlob(data.left_image_blob || null);
+        setRightImageBlob(data.right_image_blob || null);
       } else {
         // Settings might not exist yet, that's okay
         setHeaderText('');
         setFooterText('');
         setDueDay('');
+        setSchoolName('');
+        setLeftImagePreview(null);
+        setRightImagePreview(null);
+        setLeftImageBlob(null);
+        setRightImageBlob(null);
       }
     } catch (err) {
       console.error('Failed to load voucher settings:', err);
@@ -48,8 +63,46 @@ const FeeVoucherSettingsModal: React.FC<Props> = ({ isOpen, onClose }) => {
     }
   }, [isOpen]);
 
+  const handleImageSelect = async (file: File, side: 'left' | 'right') => {
+    console.log(`[FEE_VOUCHER_IMG] 📸 Selecting ${side} image: ${file.name}, size: ${file.size} bytes, type: ${file.type}`);
+    try {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const base64 = e.target?.result as string;
+        console.log(`[FEE_VOUCHER_IMG] 🔍 ${side} image read complete, result length: ${base64?.length || 0}`);
+        if (side === 'left') {
+          setLeftImageBlob(base64);
+          setLeftImagePreview(base64);
+          console.log(`[FEE_VOUCHER_IMG] ✅ Left image state updated`);
+        } else {
+          setRightImageBlob(base64);
+          setRightImagePreview(base64);
+          console.log(`[FEE_VOUCHER_IMG] ✅ Right image state updated`);
+        }
+      };
+      reader.onerror = (error) => {
+        console.error(`[FEE_VOUCHER_IMG] ❌ Error reading ${side} image:`, error);
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      console.error(`[FEE_VOUCHER_IMG] ❌ Failed to load ${side} image:`, err);
+      InAppNotificationService.error(`Failed to load ${side} image`);
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
+    console.log('[FEE_VOUCHER_SAVE] 💾 Preparing to save fee voucher settings...');
+    console.log('[FEE_VOUCHER_SAVE] 📋 Settings:', {
+      header_text: headerText,
+      footer_text: footerText,
+      due_day: dueDay,
+      school_name: schoolName,
+      has_left_image: !!leftImageBlob,
+      has_right_image: !!rightImageBlob,
+      left_blob_length: leftImageBlob?.length || 0,
+      right_blob_length: rightImageBlob?.length || 0,
+    });
     try {
       const response = await fetch(`${config.API_BASE_URL}/fee-voucher-settings`, {
         method: 'POST',
@@ -61,16 +114,22 @@ const FeeVoucherSettingsModal: React.FC<Props> = ({ isOpen, onClose }) => {
           header_text: headerText,
           footer_text: footerText,
           due_day: dueDay === '' ? null : Number(dueDay),
+          school_name: schoolName,
+          left_image_blob: leftImageBlob,
+          right_image_blob: rightImageBlob,
         }),
       });
 
+      console.log(`[FEE_VOUCHER_SAVE] 📡 Response status: ${response.status}`);
       if (response.ok) {
+        console.log('[FEE_VOUCHER_SAVE] ✅ Settings saved successfully');
         InAppNotificationService.success('Voucher settings saved successfully');
         onClose();
       } else {
         let msg = 'Failed to save settings';
         try {
           const errorData = await response.json();
+          console.error('[FEE_VOUCHER_SAVE] ❌ Error response:', errorData);
           if (Array.isArray(errorData)) {
             msg = errorData.map((e: any) => {
               if (e.msg) {
@@ -89,10 +148,11 @@ const FeeVoucherSettingsModal: React.FC<Props> = ({ isOpen, onClose }) => {
         } catch (e) {
           // ignore parse errors and keep default message
         }
+        console.error('[FEE_VOUCHER_SAVE] ❌ Save failed:', msg);
         InAppNotificationService.error(msg);
       }
     } catch (err) {
-      console.error('Failed to save voucher settings:', err);
+      console.error('[FEE_VOUCHER_SAVE] ❌ Failed to save voucher settings:', err);
       InAppNotificationService.error('Failed to save settings');
     } finally {
       setSaving(false);
@@ -139,6 +199,70 @@ const FeeVoucherSettingsModal: React.FC<Props> = ({ isOpen, onClose }) => {
               <p className="mt-1 text-xs text-gray-500">
                 This text will appear after the fee details, before the stamp area.
               </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                School Name
+              </label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                value={schoolName}
+                onChange={(e) => setSchoolName(e.target.value)}
+                placeholder="e.g. My School"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                School name will be displayed on fee vouchers.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Left Image (for voucher columns)
+              </label>
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => e.target.files?.[0] && handleImageSelect(e.target.files[0], 'left')}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Upload image to appear on left side of fee voucher (small size).
+                  </p>
+                </div>
+                {leftImagePreview && (
+                  <div className="w-24 h-24 border border-gray-300 rounded-md overflow-hidden flex-shrink-0">
+                    <img src={leftImagePreview} alt="Left preview" className="w-full h-full object-cover" />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Right Image (for voucher columns)
+              </label>
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => e.target.files?.[0] && handleImageSelect(e.target.files[0], 'right')}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Upload image to appear on right side of fee voucher (small size).
+                  </p>
+                </div>
+                {rightImagePreview && (
+                  <div className="w-24 h-24 border border-gray-300 rounded-md overflow-hidden flex-shrink-0">
+                    <img src={rightImagePreview} alt="Right preview" className="w-full h-full object-cover" />
+                  </div>
+                )}
+              </div>
             </div>
 
             <div>

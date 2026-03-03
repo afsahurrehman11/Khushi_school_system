@@ -20,6 +20,7 @@ import RootAdminDashboard from './pages/RootAdminDashboard';
 import BillingDashboard from './pages/BillingDashboard';
 import FeeVoucherPrintPage from './pages/FeeVoucherPrintPage';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
+import SchoolSettings from './pages/SchoolSettings';
 import { authService } from './services/auth';
 
 interface ProtectedRouteProps {
@@ -264,16 +265,7 @@ function App() {
                   element={<ProtectedRoute element={<FaceSettings />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route path="/settings" element={
-                  <ProtectedRoute element={
-                    <div className="min-h-screen bg-secondary-50 p-8">
-                      <div className="max-w-7xl mx-auto">
-                        <h1 className="text-3xl font-bold text-secondary-900 mb-2">Settings</h1>
-                        <div className="bg-white rounded-xl shadow-soft p-8 text-center">
-                          <p className="text-secondary-600">Settings page coming soon...</p>
-                        </div>
-                      </div>
-                    </div>
-                  } requiredRoles={['Admin', 'Root', 'Accountant']} />
+                  <ProtectedRoute element={<SchoolSettings />} requiredRoles={['Admin', 'Root', 'Accountant']} />
                 } />
               </Routes>
             </Layout>

@@ -12,6 +12,7 @@ import StudentCard from '../../../components/StudentCard';
 import AddStudentModal from '../components/AddStudentModal';
 import MissingPhotosSection from '../components/MissingPhotosSection';
 import BulkImportWithImagesModal from '../components/BulkImportWithImagesModal';
+import AdmissionFormPopup from '../../../components/AdmissionFormPopup';
 import { apiCallJSON, getAuthHeaders } from '../../../utils/api';
 import { entitySync, useEntitySync } from '../../../utils/entitySync';
 import { Student } from '../studentsData';
@@ -19,6 +20,8 @@ import { Student } from '../studentsData';
 const StudentList: React.FC = () => {
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [admissionPopupOpen, setAdmissionPopupOpen] = useState(false);
+  const [admissionPopupStudent, setAdmissionPopupStudent] = useState<any | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [showUnassigned, setShowUnassigned] = useState(false);
@@ -35,16 +38,17 @@ const StudentList: React.FC = () => {
   // Runtime student data
   const [students, setStudents] = useState<Student[]>([]);
 
-  // selection for bulk actions
-  const [selectedIds, setSelectedIds] = useState<Set<any>>(new Set());
+  // selection for bulk actions (store ids as strings)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
-  const [bulkClass, setBulkClass] = useState('');
+  const [bulkClassName, setBulkClassName] = useState('');
+  const [bulkSection, setBulkSection] = useState('');
 
   const loadStudents = async () => {
     try {
       const data = await apiCallJSON('/api/students');
       const mapped = (data || []).map((s: any) => ({
-        id: Number(s.id || s.student_id || s.studentId || 0),
+        id: String(s.id || s.student_id || s.studentId || s._id || ''),
         name: s.full_name || s.name || '',
         rollNo: String(s.roll_number || s.roll || ''),
         registrationNumber: s.registration_number || '',
@@ -59,6 +63,8 @@ const StudentList: React.FC = () => {
         parentCnic: s.guardian_info?.parent_cnic || s.parent_cnic || '',
         profileImageBlob: s.profile_image_blob || null,
         profileImageType: s.profile_image_type || 'image/jpeg',
+        arrears: s.arrears || 0,
+        section: s.section || s.class_section || s.section || '',
       }));
       setStudents(mapped);
     } catch (err) {
@@ -154,18 +160,21 @@ const StudentList: React.FC = () => {
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      const sid = String(id);
+      if (next.has(sid)) next.delete(sid); else next.add(sid);
       return next;
     });
   };
 
   const clearSelection = () => setSelectedIds(new Set());
 
-  const deleteStudent = async (id: any) => {
+  const deleteStudent = async (id: string) => {
     try {
       await apiCallJSON(`/api/students/${String(id)}`, { method: 'DELETE', headers: getAuthHeaders() });
-      setStudents((prev) => prev.filter((s) => s.id !== id));
+      try { entitySync.emitStudentDeleted(String(id)); } catch (_) {}
+      setStudents((prev) => prev.filter((s) => s.id !== String(id)));
       if (selectedStudent?.id === id) setSelectedStudent(null);
+      setSelectedIds((prev) => { const next = new Set(prev); next.delete(String(id)); return next; });
     } catch (err) {
       // ignore
     }
@@ -177,8 +186,8 @@ const StudentList: React.FC = () => {
     try {
       await Promise.all(ids.map((id) => apiCallJSON(`/api/students/${String(id)}`, { method: 'DELETE', headers: getAuthHeaders() })));
       // Emit delete events for synchronization
-      ids.forEach(id => entitySync.emitStudentDeleted(String(id)));
-      setStudents((prev) => prev.filter((s) => !selectedIds.has(s.id)));
+      ids.forEach(id => { try { entitySync.emitStudentDeleted(String(id)); } catch (_) {} });
+      setStudents((prev) => prev.filter((s) => !selectedIds.has(String(s.id))));
       clearSelection();
     } catch (err) {
       // ignore
@@ -327,20 +336,32 @@ const StudentList: React.FC = () => {
               const displayClass = cls ? `${cls.class_name}${cls.section ? ` — ${cls.section}` : ''}` : (student.class || 'Unassigned');
               return (
                 <StudentCard
-                  key={student.id}
+                  key={String(student.id)}
                   {...student}
                   class={displayClass}
                   onClick={() => handleStudentClick(student)}
                   selectable={true}
                   checked={selectedIds.has(String(student.id))}
                   onToggleSelect={() => toggleSelect(String(student.id))}
+                  onAdmissionClick={() => { setAdmissionPopupStudent(student); setAdmissionPopupOpen(true); }}
                 />
               );
             })}
           </div>
         ) : (
           <div className="bg-white rounded-xl shadow-soft overflow-hidden">
-            <Table data={filteredStudents} columns={columns} onRowClick={handleStudentClick} selectable selectedIds={selectedIds} onToggleSelect={(id) => toggleSelect(String(id))} />
+            <Table data={filteredStudents} columns={columns} onRowClick={handleStudentClick} selectable selectedIds={selectedIds} onToggleSelect={(id) => toggleSelect(String(id))}
+              actionButtons={(item: any) => (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setAdmissionPopupStudent(item); setAdmissionPopupOpen(true); }}
+                    title="Admission Options"
+                    className="w-7 h-7 bg-white rounded flex items-center justify-center border border-secondary-200 hover:bg-white"
+                  >
+                    <svg className="w-4 h-4 text-secondary-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" strokeLinecap="round" strokeLinejoin="round"/><polyline points="7 10 12 15 17 10" strokeLinecap="round" strokeLinejoin="round"/><line x1="12" y1="15" x2="12" y2="3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                </div>
+              )} />
           </div>
         )}
 
@@ -426,6 +447,15 @@ const StudentList: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Admission Form Popup used for per-student download/print */}
+      {admissionPopupStudent && (
+        <AdmissionFormPopup
+          isOpen={admissionPopupOpen}
+          onClose={() => { setAdmissionPopupOpen(false); setAdmissionPopupStudent(null); }}
+          student={admissionPopupStudent}
+        />
+      )}
+
       <AddStudentModal isOpen={addStudentOpen} onClose={() => setAddStudentOpen(false)} onStudentAdded={() => loadStudents()} />
 
       {/* Bulk import modal */}
@@ -453,10 +483,34 @@ const StudentList: React.FC = () => {
       {/* Bulk assign modal */}
       <Modal isOpen={bulkAssignOpen} onClose={() => setBulkAssignOpen(false)} title="Assign Selected Students to Class">
         <div className="space-y-4">
-          <input type="text" value={bulkClass} onChange={(e) => setBulkClass(e.target.value)} placeholder="Enter class id" className="w-full px-3 py-2 border rounded" />
+          <div>
+            <label className="text-sm text-secondary-700">Class</label>
+            <select value={bulkClassName} onChange={(e) => { setBulkClassName(e.target.value); setBulkSection(''); }} className="w-full px-3 py-2 border rounded">
+              <option value="">Select class</option>
+              {Array.from(new Set(classesList.map(c => c.class_name))).map((cn) => (
+                <option key={cn} value={cn}>{cn}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm text-secondary-700">Section</label>
+            <select value={bulkSection} onChange={(e) => setBulkSection(e.target.value)} className="w-full px-3 py-2 border rounded" disabled={!bulkClassName}>
+              <option value="">Select section</option>
+              {classesList.filter(c => c.class_name === bulkClassName).map((c) => (
+                <option key={c.id} value={c.section || ''}>{c.section || 'Default'}</option>
+              ))}
+            </select>
+          </div>
+
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setBulkAssignOpen(false)}>Cancel</Button>
-            <Button variant="primary" onClick={() => assignSelectedToClass(bulkClass)}>Assign</Button>
+            <Button variant="primary" onClick={() => {
+              // find class id for selected class+section
+              const found = classesList.find(c => c.class_name === bulkClassName && (c.section || '') === (bulkSection || ''));
+              if (!found) return; 
+              assignSelectedToClass(found.id);
+            }} disabled={!bulkClassName || !bulkSection}>Assign</Button>
           </div>
         </div>
       </Modal>

@@ -166,7 +166,19 @@ async def create_new_student(
         # Fetch and include school_name in response for PDF/form generation
         try:
             db = get_db()
-            school = db.schools.find_one({"_id": ObjectId(school_id)})
+            # Prefer lookup by 'school_id' field (multi-tenant UUID), fall back to ObjectId
+            school = None
+            try:
+                school = db.schools.find_one({"school_id": school_id})
+            except Exception:
+                school = None
+
+            if not school:
+                try:
+                    school = db.schools.find_one({"_id": ObjectId(school_id)})
+                except Exception:
+                    school = None
+
             if school:
                 # Schools collection uses 'display_name' field
                 student["school_name"] = school.get("display_name") or school.get("name") or "School"

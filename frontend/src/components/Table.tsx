@@ -26,7 +26,7 @@ function Table<T extends Record<string, any>>({ columns, data, onRowClick, selec
           <tr>
             {/** selection column */}
             {selectable && (
-              <th className="px-4 py-3">
+              <th className="px-3 py-2">
                 <input
                   type="checkbox"
                   onMouseDown={(e) => e.stopPropagation()}
@@ -51,7 +51,7 @@ function Table<T extends Record<string, any>>({ columns, data, onRowClick, selec
             {columns.map((column) => (
               <th
                 key={column.key}
-                className="px-6 py-3 text-left text-xs font-semibold text-secondary-700 uppercase tracking-wider"
+                className="px-3 py-3 text-left text-sm font-semibold text-secondary-700 uppercase tracking-wider"
               >
                 {column.label}
               </th>
@@ -61,7 +61,7 @@ function Table<T extends Record<string, any>>({ columns, data, onRowClick, selec
         <tbody className="bg-white divide-y divide-secondary-200">
           {data.length === 0 ? (
             <tr>
-              <td colSpan={columns.length} className="px-6 py-12 text-center text-secondary-500">
+              <td colSpan={columns.length} className="px-3 py-10 text-center text-secondary-500">
                 No data available
               </td>
             </tr>
@@ -73,8 +73,8 @@ function Table<T extends Record<string, any>>({ columns, data, onRowClick, selec
                 className={`${onRowClick ? 'cursor-pointer hover:bg-secondary-50' : ''} transition-colors`}
               >
                 {selectable && (
-                  <td className="px-4 py-4 whitespace-nowrap text-sm text-secondary-900">
-                    <div className="flex items-center gap-3">
+                  <td className="px-3 py-3 whitespace-nowrap text-sm text-secondary-900">
+                    <div className="flex items-center gap-2">
                       {actionButtons && actionButtons(item)}
                       <input
                         type="checkbox"
@@ -90,7 +90,7 @@ function Table<T extends Record<string, any>>({ columns, data, onRowClick, selec
                   </td>
                 )}
                 {columns.map((column) => (
-                  <td key={column.key} className="px-6 py-4 whitespace-nowrap text-sm text-secondary-900">
+                  <td key={column.key} className="px-3 py-3 whitespace-nowrap text-sm text-secondary-900 align-middle">
                     {column.render ? column.render(item) : item[column.key]}
                   </td>
                 ))}

@@ -29,5 +29,6 @@ if __name__ == "__main__":
         port=port,
         reload=False,  # Disable reload for production
         log_level=os.environ.get("LOG_LEVEL", "info"),
-        access_log=os.environ.get("LOG_ACCESS", "true").lower() in ("1", "true", "yes")
+        access_log=os.environ.get("LOG_ACCESS", "true").lower() in ("1", "true", "yes"),
+        timeout_keep_alive=int(os.environ.get("UVICORN_KEEPALIVE", 5))
     )

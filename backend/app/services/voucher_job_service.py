@@ -153,11 +153,21 @@ def _process_voucher_job(job_id: str):
             
         elif job["job_type"] == "pdf":
             logger.info(f"[VOUCHER_JOB] Generating combined PDF for job {job_id}")
-            result_data = generate_class_vouchers_combined_pdf(
-                job["class_id"],
-                job["school_id"],
-                db
-            )
+            # Support class-level combined PDFs and whole-school combined PDFs
+            if job["class_id"] == "ALL":
+                logger.info(f"[VOUCHER_JOB] Detected school-wide job for school {job['school_id']}")
+                # Import here to avoid circular imports at module load
+                from app.services.school_voucher_service import generate_school_vouchers_combined_pdf
+                result_data = generate_school_vouchers_combined_pdf(
+                    job["school_id"],
+                    db
+                )
+            else:
+                result_data = generate_class_vouchers_combined_pdf(
+                    job["class_id"],
+                    job["school_id"],
+                    db
+                )
         else:
             raise ValueError(f"Unknown job type: {job['job_type']}")
         

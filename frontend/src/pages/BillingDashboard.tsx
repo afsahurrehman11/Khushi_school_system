@@ -6,6 +6,7 @@ import {
   Loader2, PieChart, BarChart3, X,
   Settings, Plus
 } from 'lucide-react';
+import formatRs from '../utils/currency';
 import { 
   BillingConfig, BillingConfigCreate, BillingAnalytics, 
   Invoice, InvoiceStatus, SaaSSchool 
@@ -24,13 +25,7 @@ const formatBytes = (bytes: number): string => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
-const formatCurrency = (amount: number): string => {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-  }).format(amount);
-};
+const formatCurrency = (amount: number): string => formatRs(amount, 2);
 
 const formatDate = (dateStr: string): string => {
   return new Date(dateStr).toLocaleDateString('en-US', {

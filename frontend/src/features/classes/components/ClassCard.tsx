@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import Button from '../../../components/Button';
 import { Edit2, Trash2, DollarSign, BookOpen } from 'lucide-react';
 import Modal from '../../../components/Modal';
+import formatRs from '../../../utils/currency';
 import { classAssignmentsApi, feeCategoriesApi } from '../../accountant/services/feeApi';
 import logger from '../../../utils/logger';
 
@@ -180,7 +181,7 @@ const ClassCard: React.FC<Props> = ({
                 <option value="">Choose a category...</option>
                 {categories.map(cat => (
                   <option key={cat.id} value={cat.id}>
-                    {cat.name} - Rs. {cat.total_amount.toLocaleString()}
+                    {cat.name} - {formatRs(cat.total_amount)}
                   </option>
                 ))}
               </select>

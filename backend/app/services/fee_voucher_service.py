@@ -210,7 +210,7 @@ def _generate_single_voucher_elements(
 ) -> list:
     """
     Helper function to generate 3-column voucher elements for a single student.
-    Creates Bank Copy | Student Copy | Office Copy layout.
+    Creates Office Copy | Student Copy | Notice Copy layout.
     Returns a list of reportlab elements.
     """
     from reportlab.lib.pagesizes import A4, landscape
@@ -301,79 +301,101 @@ def _generate_single_voucher_elements(
             class_name = str(class_id) if class_id else "N/A"
 
     # Prepare student photo if available
+    logger.info(f"[FEE_VOUCHER] 📸 Loading student photo from profile")
     photo_data = None
     if student.get("profile_image_blob"):
         try:
             image_data = base64.b64decode(student["profile_image_blob"])
             image_buffer = io.BytesIO(image_data)
             photo_data = PILImage.open(image_buffer)
+            logger.info(f"[FEE_VOUCHER] ✅ Student photo loaded: {photo_data.size}")
         except Exception as e:
             logger.warning(f"[FEE_VOUCHER] ⚠️ Could not load student photo: {str(e)}")
+    else:
+        sid = student.get("_id")
+        try:
+            sid = str(sid)
+        except Exception:
+            pass
+        logger.info(f"[FEE_VOUCHER] ⚠️ No profile image blob for student {sid}")
 
     # Create the three columns: Bank Copy, Student Copy, Office Copy
+    logger.info(f"[FEE_VOUCHER] 📄 Creating 3-column layout (Office, Student, Notice)")
     columns = []
 
-    # Try different font scales to fit content
-    font_scale = 1.0
-    max_attempts = 5
+    # Use reduced font scale by default (0.85x) for compact appearance
+    font_scale = 0.85
+    max_attempts = 3
     attempt = 0
 
     while attempt < max_attempts:
         try:
-            logger.info(f"[FEE_VOUCHER] Attempting to fit with font_scale={font_scale}")
+            logger.info(f"[FEE_VOUCHER] Attempting to fit with font_scale={font_scale:.2f}")
 
             # Create each column with current font_scale
-            bank_copy = create_voucher_copy("Bank Copy", font_scale, left_image_data, right_image_data, school_name, custom_header, custom_footer, student, class_name, fee_components, total_fee, styles, inner_content_w, content_w, page_height, doc)
-            student_copy = create_voucher_copy("Student Copy", font_scale, left_image_data, right_image_data, school_name, custom_header, custom_footer, student, class_name, fee_components, total_fee, styles, inner_content_w, content_w, page_height, doc)
-            office_copy = create_voucher_copy("Office Copy", font_scale, left_image_data, right_image_data, school_name, custom_header, custom_footer, student, class_name, fee_components, total_fee, styles, inner_content_w, content_w, page_height, doc)
+            office_copy = create_voucher_copy("Office Copy", font_scale, left_image_data, right_image_data, school_name, custom_header, custom_footer, student, class_name, fee_components, total_fee, photo_data, styles, inner_content_w, content_w, page_height, doc)
+            student_copy = create_voucher_copy("Student Copy", font_scale, left_image_data, right_image_data, school_name, custom_header, custom_footer, student, class_name, fee_components, total_fee, photo_data, styles, inner_content_w, content_w, page_height, doc)
+            notice_copy = create_voucher_copy("Notice Copy", font_scale, left_image_data, right_image_data, school_name, custom_header, custom_footer, student, class_name, fee_components, total_fee, photo_data, styles, inner_content_w, content_w, page_height, doc)
 
-            columns = [bank_copy, student_copy, office_copy]
+            columns = [office_copy, student_copy, notice_copy]
 
             # Check if all columns fit
             all_fit = True
-            for col in columns:
+            max_col_h = page_height - (doc.topMargin + doc.bottomMargin) - (15 * mm)
+            for idx, col in enumerate(columns):
                 if hasattr(col, 'wrap'):
                     w, h = col.wrap(col_width, page_height)
-                    max_col_h = page_height - (doc.topMargin + doc.bottomMargin) - (20 * mm)
+                    logger.info(f"[FEE_VOUCHER] Column {idx} height: {h:.1f}mm (max: {max_col_h:.1f}mm)")
                     if h > max_col_h:
                         all_fit = False
                         break
 
             if all_fit:
-                logger.info(f"[FEE_VOUCHER] ✅ Content fits with font_scale={font_scale}")
+                logger.info(f"[FEE_VOUCHER] ✅ Content fits with font_scale={font_scale:.2f}")
                 break
             else:
-                font_scale *= 0.9  # Reduce font size by 10%
+                font_scale *= 0.92  # Reduce font size by 8%
                 attempt += 1
-                logger.info(f"[FEE_VOUCHER] ⚠️ Content too tall, trying smaller font_scale={font_scale}")
+                logger.info(f"[FEE_VOUCHER] ⚠️ Content too tall, trying smaller font_scale={font_scale:.2f}")
 
         except Exception as e:
-            logger.error(f"[FEE_VOUCHER] ❌ Error during fitting attempt {attempt}: {str(e)}")
-            font_scale *= 0.9
+            logger.error(f"[FEE_VOUCHER] ❌ Error during fitting attempt {attempt}: {str(e)}", exc_info=True)
+            font_scale *= 0.92
             attempt += 1
 
     if attempt >= max_attempts:
-        logger.warning(f"[FEE_VOUCHER] ⚠️ Could not fit content after {max_attempts} attempts, using smallest font_scale")
+        logger.warning(f"[FEE_VOUCHER] ⚠️ Could not fit content after {max_attempts} attempts, using font_scale={font_scale:.2f}")
 
-    # Create main table with 3 columns - center-aligned
+    # Create main table with 3 columns and dotted separators between them
+    logger.info(f"[FEE_VOUCHER] 🔲 Creating 3-column table with dotted separators")
     main_table = Table([columns], colWidths=[col_width, col_width, col_width])
     main_table.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),  # Center-align all columns
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        # Dotted separators between columns (no vertical lines at borders)
+        ('LINEABOVE', (0, 0), (-1, -1), 0, colors.white),
+        ('LINEBELOW', (0, 0), (-1, -1), 0, colors.white),
+        ('LINELEFT', (0, 0), (-1, -1), 0, colors.white),
+        ('LINERIGHT', (0, 0), (-1, -1), 0, colors.white),
+        # Separator between Bank Copy and Student Copy (thin grey line)
+        ('LINEAFTER', (0, 0), (0, -1), 0.5, colors.grey),
+        # Separator between Student Copy and Office Copy (thin grey line)
+        ('LINEAFTER', (1, 0), (1, -1), 0.5, colors.grey),
     ]))
 
     return [main_table]
 
 
-def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, right_image_data, school_name, custom_header, custom_footer, student, class_name, fee_components, total_fee, styles, inner_content_w, content_w, page_height, doc):
-    """Create a single voucher copy for one column. `font_scale` scales font sizes for auto-fit."""
+def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, right_image_data, school_name, custom_header, custom_footer, student, class_name, fee_components, total_fee, photo_data, styles, inner_content_w, content_w, page_height, doc):
+    """Create a single voucher copy for one column. Includes student photo, reduced spacing, and one-line signature layout. `font_scale` scales font sizes for auto-fit."""
     copy_elements = []
+    logger.info(f"[FEE_VOUCHER] Creating {copy_title} with font_scale={font_scale:.2f}, photo_available={photo_data is not None}")
 
     # Copy header (Bank Copy / Student Copy / Office Copy)
     header_style = ParagraphStyle(
         'CopyHeader',
         parent=styles['Normal'],
-        fontSize=8 * font_scale,
+        fontSize=7 * font_scale,  # Reduced from 8
         alignment=TA_CENTER,
         textColor=colors.white,
         fontName='Helvetica-Bold'
@@ -385,10 +407,11 @@ def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, rig
     )
     copy_header.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#1a365d')),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('TOPPADDING', (0, 0), (-1, -1), 1.5),  # Reduced from 3
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 1.5),  # Reduced from 3
     ]))
     copy_elements.append(copy_header)
+    logger.info(f"[FEE_VOUCHER] Added {copy_title} header")
 
     # School name with left/right images in header row
     logger.info(f"[FEE_VOUCHER_IMG] 📋 Creating header for {copy_title}: left_img={left_image_data is not None}, right_img={right_image_data is not None}, school={school_name}")
@@ -416,7 +439,7 @@ def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, rig
     school_name_style = ParagraphStyle(
         'SchoolName',
         parent=styles['Normal'],
-        fontSize=8 * font_scale,
+        fontSize=7 * font_scale,  # Reduced from 8
         alignment=TA_CENTER,
         textColor=colors.HexColor('#1a365d'),
         fontName='Helvetica-Bold',
@@ -456,31 +479,31 @@ def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, rig
         ('ALIGN', (1, 0), (1, 0), 'CENTER'),
     ]))
     copy_elements.append(header_row_table)
-    copy_elements.append(Spacer(1, 1*mm))  # Minimal space after images
+    copy_elements.append(Spacer(1, 0.5*mm))  # Further reduced from 1mm
 
     # Fee Voucher centered title - smaller font, reduced spacing
     title_style = ParagraphStyle(
         'VoucherTitle',
         parent=styles['Heading2'],
-        fontSize=8 * font_scale,
+        fontSize=7 * font_scale,  # Reduced from 8
         alignment=TA_CENTER,
         textColor=colors.HexColor('#2c5282'),
-        spaceAfter=0.5*mm,
-        spaceBefore=0.5*mm
+        spaceAfter=0.3*mm,  # Reduced from 0.5mm
+        spaceBefore=0.3*mm  # Reduced from 0.5mm
     )
     copy_elements.append(Paragraph("<b>Fee Voucher</b>", title_style))
 
     # Custom header (if provided) - directly under Fee Voucher
     if custom_header:
-        header_custom_style = ParagraphStyle('CustomHeader', parent=styles['Normal'], fontSize=6 * font_scale, alignment=TA_CENTER, textColor=colors.HexColor('#333333'), fontName='Helvetica-Bold', spaceAfter=0.5*mm, spaceBefore=0)
+        header_custom_style = ParagraphStyle('CustomHeader', parent=styles['Normal'], fontSize=5.5 * font_scale, alignment=TA_CENTER, textColor=colors.HexColor('#333333'), fontName='Helvetica-Bold', spaceAfter=0.3*mm, spaceBefore=0)
         copy_elements.append(Paragraph(custom_header, header_custom_style))
 
-    # Student photo removed - fee voucher no longer shows student photo
-    photo_element = None
+    # Student photo now shown next to student details (see info_photo_table below)
+    logger.info(f"[FEE_VOUCHER] Photo data available: {photo_data is not None}")
 
     # Student info section
-    info_style = ParagraphStyle('Info', parent=styles['Normal'], fontSize=7 * font_scale, leading=9 * font_scale)
-    bold_style = ParagraphStyle('BoldInfo', parent=styles['Normal'], fontSize=7 * font_scale, leading=9 * font_scale, fontName='Helvetica-Bold')
+    info_style = ParagraphStyle('Info', parent=styles['Normal'], fontSize=6 * font_scale, leading=7 * font_scale)  # Reduced from 7/9
+    bold_style = ParagraphStyle('BoldInfo', parent=styles['Normal'], fontSize=6 * font_scale, leading=7 * font_scale, fontName='Helvetica-Bold')  # Reduced from 7/9
 
     guardian_info = student.get("guardian_info") or {}
     father_name = guardian_info.get("father_name") or guardian_info.get("name") or "N/A"
@@ -496,15 +519,32 @@ def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, rig
         [Paragraph("<b>Roll #:</b>", bold_style), Paragraph(str(student.get("roll_number", "N/A")), info_style)],
     ]
 
-    info_table = Table(student_info_rows, colWidths=[16*mm, inner_content_w - 18*mm])
+    info_table = Table(student_info_rows, colWidths=[14*mm, inner_content_w - 18*mm])  # Reduced label column
     info_table.setStyle(TableStyle([
-        ('FONTSIZE', (0, 0), (-1, -1), 6 * font_scale),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 0.5),
-        ('TOPPADDING', (0, 0), (-1, -1), 0.5),
+        ('FONTSIZE', (0, 0), (-1, -1), 5.5 * font_scale),  # Reduced from 6
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0.2),  # Reduced from 0.5
+        ('TOPPADDING', (0, 0), (-1, -1), 0.2),  # Reduced from 0.5
     ]))
-    if photo_element:
-        info_photo_row = [[info_table, photo_element]]
-        info_photo_table = Table(info_photo_row, colWidths=[inner_content_w - (18*mm), 18*mm])
+    
+    # Include student photo if available
+    if photo_data:
+        try:
+            logger.info(f"[FEE_VOUCHER] 📸 Adding student photo to {copy_title}")
+            photo_element = _pil_image_to_reportlab_image(photo_data, label=f"student photo for {copy_title}")
+            if photo_element:
+                # Photo on the right side of student info
+                info_photo_row = [[info_table, photo_element]]
+                info_photo_table = Table(info_photo_row, colWidths=[inner_content_w - 18*mm, 18*mm])
+                logger.info(f"[FEE_VOUCHER] ✅ Student photo added to {copy_title}")
+            else:
+                # No photo, use full width
+                info_photo_row = [[info_table]]
+                info_photo_table = Table(info_photo_row, colWidths=[inner_content_w])
+                logger.warning(f"[FEE_VOUCHER] Photo creation failed for {copy_title}")
+        except Exception as e:
+            logger.error(f"[FEE_VOUCHER] ❌ Error adding photo to {copy_title}: {str(e)}", exc_info=True)
+            info_photo_row = [[info_table]]
+            info_photo_table = Table(info_photo_row, colWidths=[inner_content_w])
     else:
         info_photo_row = [[info_table]]
         info_photo_table = Table(info_photo_row, colWidths=[inner_content_w])
@@ -512,18 +552,19 @@ def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, rig
     info_photo_table.setStyle(TableStyle([
         ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('LEFTPADDING', (0, 0), (-1, -1), 2),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 1),  # Reduced from 2
+        ('RIGHTPADDING', (0, 0), (-1, -1), 1),  # Reduced from 2
+        ('TOPPADDING', (0, 0), (-1, -1), 2),  # Reduced from 4
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),  # Reduced from 4
     ]))
     copy_elements.append(info_photo_table)
-    copy_elements.append(Spacer(1, 1.5*mm))  # Reduced spacing
+    copy_elements.append(Spacer(1, 0.8*mm))  # Further reduced from 1.5mm
+    logger.info(f"[FEE_VOUCHER] Added student info section to {copy_title}")
 
-    # Fee details header - compact
-    fee_header_style = ParagraphStyle('FeeHeader', parent=styles['Normal'], fontSize=6 * font_scale, fontName='Helvetica-Bold', textColor=colors.white)
-    fee_item_style = ParagraphStyle('FeeItem', parent=styles['Normal'], fontSize=6 * font_scale)
-    fee_amount_style = ParagraphStyle('FeeAmount', parent=styles['Normal'], fontSize=6 * font_scale, alignment=TA_RIGHT)
+    # Fee details header - compact, reduced font
+    fee_header_style = ParagraphStyle('FeeHeader', parent=styles['Normal'], fontSize=5.5 * font_scale, fontName='Helvetica-Bold', textColor=colors.white)  # Reduced from 6
+    fee_item_style = ParagraphStyle('FeeItem', parent=styles['Normal'], fontSize=5.5 * font_scale)  # Reduced from 6
+    fee_amount_style = ParagraphStyle('FeeAmount', parent=styles['Normal'], fontSize=5.5 * font_scale, alignment=TA_RIGHT)  # Reduced from 6
 
     # Fee table rows
     fee_rows = [
@@ -563,24 +604,25 @@ def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, rig
 
     fee_table = Table(fee_rows, colWidths=[inner_content_w * 0.65, inner_content_w * 0.35])
 
-    # Style for fee table - compact
+    # Style for fee table - compact with reduced row spacing
     table_style = [
-        ('FONTSIZE', (0, 0), (-1, -1), 6 * font_scale),
+        ('FONTSIZE', (0, 0), (-1, -1), 5.5 * font_scale),  # Reduced from 6
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c5282')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
         ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
         ('BOX', (0, 0), (-1, -1), 0.5, colors.black),
         ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.grey),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0.8),  # Reduced from 2
+        ('TOPPADDING', (0, 0), (-1, -1), 0.8),  # Reduced from 2
         ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e6f2ff')),
     ]
     fee_table.setStyle(TableStyle(table_style))
     copy_elements.append(fee_table)
-    copy_elements.append(Spacer(1, 2*mm))  # Reduced spacing
+    copy_elements.append(Spacer(1, 0.8*mm))  # Further reduced from 2mm
+    logger.info(f"[FEE_VOUCHER] Added fee table to {copy_title} with {len(fee_components)} components")
 
     # Issue/Due date row
-    date_style = ParagraphStyle('DateInfo', parent=styles['Normal'], fontSize=5.5 * font_scale)
+    date_style = ParagraphStyle('DateInfo', parent=styles['Normal'], fontSize=5 * font_scale)  # Reduced from 5.5
     issue_dt = datetime.now()
     due_date_obj = issue_dt.replace(day=28)  # Default due date
     date_row = Table([
@@ -588,57 +630,77 @@ def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, rig
          Paragraph(f"<b>Due:</b> {due_date_obj.strftime('%d/%m/%Y')}", date_style)]
     ], colWidths=[inner_content_w / 2, inner_content_w / 2])
     date_row.setStyle(TableStyle([
-        ('FONTSIZE', (0, 0), (-1, -1), 6 * font_scale),
+        ('FONTSIZE', (0, 0), (-1, -1), 5 * font_scale),  # Reduced from 6
     ]))
     copy_elements.append(date_row)
-    copy_elements.append(Spacer(1, 1.5*mm))  # Reduced spacing
+    copy_elements.append(Spacer(1, 0.6*mm))  # Further reduced from 1.5mm
 
     # Custom footer (if provided)
     if custom_footer:
-        footer_custom_style = ParagraphStyle('CustomFooter', parent=styles['Normal'], fontSize=6 * font_scale, alignment=TA_CENTER, textColor=colors.HexColor('#444444'), fontName='Helvetica-Oblique', leading=7 * font_scale)
+        footer_custom_style = ParagraphStyle('CustomFooter', parent=styles['Normal'], fontSize=5 * font_scale, alignment=TA_CENTER, textColor=colors.HexColor('#444444'), fontName='Helvetica-Oblique', leading=6 * font_scale)  # Reduced from 6/7
         copy_elements.append(Paragraph(custom_footer, footer_custom_style))
-        copy_elements.append(Spacer(1, 1.5*mm))  # Reduced spacing
+        copy_elements.append(Spacer(1, 0.5*mm))  # Further reduced from 1.5mm
 
-    # Two separate stamp areas: Accountant and Bank - compact
-    stamp_style = ParagraphStyle('Stamp', parent=styles['Normal'], fontSize=5.5 * font_scale, alignment=TA_CENTER)
-    stamp_rows = [
-        [Paragraph("<b>Accountant Signature</b>", stamp_style)],
-        [Paragraph("<b>Bank Stamp</b>", stamp_style)]
-    ]
-    stamp_box = Table(stamp_rows, colWidths=[inner_content_w])
-    stamp_box.setStyle(TableStyle([
-        ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+    # One-line signature layout: Accountant (left) and Bank Stamp (right) with underlines
+    logger.info(f"[FEE_VOUCHER] Adding signature/stamp line to {copy_title}")
+    sig_stamp_style = ParagraphStyle('SigStamp', parent=styles['Normal'], fontSize=5 * font_scale, alignment=TA_CENTER)  # Reduced from 5.5
+    
+    # Create a single row with two cells: left for signature, right for stamp
+    sig_left_width = inner_content_w * 0.48
+    sig_right_width = inner_content_w * 0.48
+    
+    sig_label = Paragraph("<b>Accountant Signature</b>", sig_stamp_style)
+    stamp_label = Paragraph("<b>Bank Stamp</b>", sig_stamp_style)
+    
+    # Combine labels in one row
+    labels_row = Table([[sig_label, stamp_label]], colWidths=[sig_left_width, sig_right_width])
+    labels_row.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
     ]))
-    copy_elements.append(stamp_box)
+    copy_elements.append(labels_row)
+    copy_elements.append(Spacer(1, 0.3*mm))
+    
+    # Add underlines for filling
+    # Draw horizontal lines under each label using table cell borders
+    underline_table = Table([['', '']], colWidths=[sig_left_width, sig_right_width])
+    underline_table.setStyle(TableStyle([
+        ('LINEABOVE', (0, 0), (0, 0), 0.6, colors.black),
+        ('LINEABOVE', (1, 0), (1, 0), 0.6, colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+    ]))
+    copy_elements.append(underline_table)
+    logger.info(f"[FEE_VOUCHER] Added one-line signature/stamp layout to {copy_title}")
 
-    # Combine all elements into a single column table - compact padding
+    # Combine all elements into a single column table - no outer box border
     column_table = Table([[elem] for elem in copy_elements], colWidths=[content_w])
     column_table.setStyle(TableStyle([
-        ('BOX', (0, 0), (-1, -1), 2, colors.HexColor('#1a365d')),
-        ('LEFTPADDING', (0, 0), (-1, -1), 3),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        # No outer box - columns separated by dotted lines in main table
+        ('LEFTPADDING', (0, 0), (-1, -1), 2),  # Reduced from 3
+        ('RIGHTPADDING', (0, 0), (-1, -1), 2),  # Reduced from 3
+        ('TOPPADDING', (0, 0), (-1, -1), 1.5),  # Reduced from 2
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 1.5),  # Reduced from 2
     ]))
 
-    # Basic auto-fit: if column height exceeds available printable height, reduce padding
+    # Auto-fit: if column height exceeds available printable height, reduce padding
     try:
-        max_col_h = page_height - (doc.topMargin + doc.bottomMargin) - (20 * mm)
+        max_col_h = page_height - (doc.topMargin + doc.bottomMargin) - (15 * mm)
         w, h = column_table.wrap(content_w, max_col_h)
+        logger.info(f"[FEE_VOUCHER] {copy_title} wrapped height: {h:.1f}mm (max: {max_col_h:.1f}mm)")
         if h > max_col_h:
-            logger.warning(f"[FEE_VOUCHER] Column too tall ({h} > {max_col_h}), reducing paddings to fit")
+            logger.warning(f"[FEE_VOUCHER] {copy_title} too tall ({h:.1f} > {max_col_h:.1f}), reducing paddings to fit")
             column_table.setStyle(TableStyle([
-                ('TOPPADDING', (0, 0), (-1, -1), 1),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+                ('TOPPADDING', (0, 0), (-1, -1), 0.8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 0.8),
                 ('LEFTPADDING', (0, 0), (-1, -1), 1),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 1),
             ]))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"[FEE_VOUCHER] Error during auto-fit sizing: {str(e)}", exc_info=True)
 
+    logger.info(f"[FEE_VOUCHER] ✅ {copy_title} created successfully")
     return column_table
 
 

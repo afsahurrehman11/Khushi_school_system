@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import formatRs from '../utils/currency';
 import { 
   Printer, 
   ChevronRight, 
@@ -208,13 +209,7 @@ const FeeVoucherPrintPage: React.FC = () => {
     }
   }
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-PK', {
-      style: 'currency',
-      currency: 'PKR',
-      minimumFractionDigits: 0
-    }).format(amount);
-  };
+  const formatCurrency = (amount: number) => formatRs(amount, 0);
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">

@@ -546,13 +546,10 @@ class FaceRecognitionService:
         current_time: str,
         confidence: float
     ) -> Dict[str, Any]:
-        """Record student attendance"""
+        """Record student attendance with check-in/check-out tracking"""
         student_id = match.get("student_id")
         class_id = match.get("class_id")
         late_time = settings.get("late_after_time", "08:30")
-        
-        # Determine status
-        status = "present" if current_time <= late_time else "late"
         
         # Check if already marked today
         existing = await self.db.attendance.find_one({
@@ -562,19 +559,61 @@ class FaceRecognitionService:
         })
         
         if existing:
-            logger.info(f"[FACE] Attendance already marked for {student_id}")
+            # If check_out_time already set, student already left
+            if existing.get("check_out_time"):
+                logger.info(f"[FACE] Student {student_id} already checked out today")
+                return {
+                    "action": "already_checked_out",
+                    "name": match.get("name"),
+                    "student_id": student_id,
+                    "class_id": class_id,
+                    "section": match.get("section"),
+                    "check_in_time": existing.get("check_in_time"),
+                    "check_out_time": existing.get("check_out_time"),
+                    "confidence": confidence
+                }
+            
+            # Update with check-out time
+            update_result = await self.db.attendance.update_one(
+                {"_id": existing["_id"]},
+                {
+                    "$set": {
+                        "check_out_time": current_time,
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+            logger.info(f"[FACE][SUCCESS] Recorded check-out for student: {student_id} at {current_time}")
+            
+            # Log activity
+            await self._log_activity(
+                school_id=school_id,
+                person_type="student",
+                person_id=str(match["person_id"]),
+                person_name=match.get("name", "Unknown"),
+                action="check_out",
+                confidence=confidence,
+                class_id=class_id,
+                section=match.get("section")
+            )
+            
             return {
-                "already_marked": True,
+                "action": "check_out",
                 "status": existing.get("status"),
                 "name": match.get("name"),
                 "student_id": student_id,
                 "class_id": class_id,
                 "section": match.get("section"),
-                "time": current_time,
+                "roll_number": match.get("roll_number"),
+                "check_in_time": existing.get("check_in_time"),
+                "check_out_time": current_time,
                 "confidence": confidence
             }
         
-        # Insert attendance record
+        # Determine status for first scan (check-in)
+        status = "present" if current_time <= late_time else "late"
+        
+        # Insert attendance record with check-in
         attendance_doc = {
             "school_id": school_id,
             "class_id": class_id,
@@ -582,15 +621,17 @@ class FaceRecognitionService:
             "date": today,
             "status": status,
             "source": "face",
+            "check_in_time": current_time,
+            "check_out_time": None,
             "confidence": confidence,
-            "scan_time": current_time,
-            "notes": f"Face recognition at {current_time}",
+            "scan_time": current_time,  # Backward compatibility
+            "notes": f"Face recognition check-in at {current_time}",
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
         
         result = await self.db.attendance.insert_one(attendance_doc)
-        logger.info(f"[FACE][SUCCESS] Recorded {status} for student: {student_id}")
+        logger.info(f"[FACE][SUCCESS] Recorded check-in ({status}) for student: {student_id} at {current_time}")
         
         # Log activity
         await self._log_activity(
@@ -598,21 +639,22 @@ class FaceRecognitionService:
             person_type="student",
             person_id=str(match["person_id"]),
             person_name=match.get("name", "Unknown"),
-            action=status,
+            action="check_in",
             confidence=confidence,
             class_id=class_id,
             section=match.get("section")
         )
         
         return {
-            "already_marked": False,
+            "action": "check_in",
             "status": status,
             "name": match.get("name"),
             "student_id": student_id,
             "class_id": class_id,
             "section": match.get("section"),
             "roll_number": match.get("roll_number"),
-            "time": current_time,
+            "check_in_time": current_time,
+            "check_out_time": None,
             "confidence": confidence
         }
     

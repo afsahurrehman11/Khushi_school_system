@@ -25,6 +25,9 @@ const StudentList: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [showUnassigned, setShowUnassigned] = useState(false);
+  // Global school-wide search
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [globalSearchField, setGlobalSearchField] = useState<'all' | 'name' | 'rollNo' | 'registrationNumber' | 'guardianName' | 'parentCnic'>('all');
 
   // Modal states
   const [addStudentOpen, setAddStudentOpen] = useState(false);
@@ -213,26 +216,27 @@ const StudentList: React.FC = () => {
   };
 
   const columns = [
+    { key: 'avatar', label: '', render: (s: any) => {
+      if (s.profileImageBlob) {
+        const src = `data:${s.profileImageType || 'image/jpeg'};base64,${s.profileImageBlob}`;
+        return (<img src={src} alt={s.name || 'avatar'} className="w-8 h-8 rounded-full object-cover" />);
+      }
+      if (s.profileImageUrl) {
+        return (<img src={s.profileImageUrl} alt={s.name || 'avatar'} className="w-8 h-8 rounded-full object-cover" />);
+      }
+      const initial = (s.name || '').trim().charAt(0).toUpperCase() || '?';
+      return (
+        <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center text-sm font-semibold text-primary-700">
+          {initial}
+        </div>
+      );
+    } },
     { key: 'rollNo', label: 'Roll No' },
     { key: 'registrationNumber', label: 'Reg. No.' },
     { key: 'name', label: 'Name' },
+    { key: 'guardianName', label: 'Father' },
     { key: 'parentCnic', label: 'Parent CNIC' },
-    { key: 'email', label: 'Email' },
     { key: 'phone', label: 'Phone' },
-    {
-      key: 'assignedClasses',
-      label: 'Subjects',
-      render: (student: Student) => (
-        <div className="flex flex-wrap gap-1">
-          {student.assignedClasses.slice(0, 2).map((subject: string, idx: number) => (
-            <Badge key={idx} label={subject} color="primary" />
-          ))}
-          {student.assignedClasses.length > 2 && (
-            <span className="text-xs text-secondary-500 ml-1">+{student.assignedClasses.length - 2}</span>
-          )}
-        </div>
-      ),
-    },
   ];
 
   // Main view
@@ -245,6 +249,12 @@ const StudentList: React.FC = () => {
     hidden: { opacity: 0, y: 8 },
     show: { opacity: 1, y: 0, transition: { duration: 0.36 } },
   };
+
+  // human-readable class label for selected student modal
+  const selectedStudentClassLabel = selectedStudent ? (() => {
+    const cls = classesList.find(c => c.id === selectedStudent.class);
+    return cls ? `${cls.class_name}${cls.section ? ` — ${cls.section}` : ''}` : 'Unassigned';
+  })() : 'Unassigned';
 
   // Main view
   if (!selectedClass && !showUnassigned) {
@@ -272,6 +282,22 @@ const StudentList: React.FC = () => {
             </div>
           </div>
 
+          <div className="mb-6 flex flex-col md:flex-row md:items-center md:gap-4">
+            <div className="flex-1">
+              <SearchBar value={globalSearchQuery} onChange={(e) => setGlobalSearchQuery(e.target.value)} placeholder="Search entire school by name, roll, reg no, father, CNIC..." />
+            </div>
+            <div className="mt-3 md:mt-0">
+              <select value={globalSearchField} onChange={(e) => setGlobalSearchField(e.target.value as any)} className="px-3 py-2 border rounded">
+                <option value="all">All</option>
+                <option value="name">Name</option>
+                <option value="rollNo">Roll No</option>
+                <option value="registrationNumber">Reg. No.</option>
+                <option value="guardianName">Father</option>
+                <option value="parentCnic">CNIC</option>
+              </select>
+            </div>
+          </div>
+
           {unassignedStudents.length > 0 && (
             <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
               <button onClick={handleUnassignedClick} className="w-full bg-warning-50 border border-warning-200 rounded-xl p-4 hover:bg-warning-100 transition-all">
@@ -293,13 +319,51 @@ const StudentList: React.FC = () => {
 
           <MissingPhotosSection />
 
-          <motion.div variants={gridContainer} initial="hidden" animate="show" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {classStats.map((classInfo) => (
-              <motion.div key={classInfo.fullName} variants={gridItem} whileHover={{ zIndex: 1 }}>
-                <ClassCard className={classInfo.className} section={classInfo.section} studentCount={classInfo.studentCount} onClick={() => handleClassClick(classInfo.fullName)} />
-              </motion.div>
-            ))}
-          </motion.div>
+          {globalSearchQuery ? (
+            (() => {
+              const q = globalSearchQuery.trim().toLowerCase();
+              const matches = students.filter((s) => {
+                if (!q) return false;
+                const check = (val?: any) => (String(val || '').toLowerCase().includes(q));
+                switch (globalSearchField) {
+                  case 'name': return check(s.name);
+                  case 'rollNo': return check(s.rollNo);
+                  case 'registrationNumber': return check(s.registrationNumber);
+                  case 'guardianName': return check(s.guardianName);
+                  case 'parentCnic': return check(s.parentCnic);
+                  default:
+                    return check(s.name) || check(s.rollNo) || check(s.registrationNumber) || check(s.guardianName) || check(s.parentCnic) || check(s.email) || check(s.phone);
+                }
+              });
+              return (
+                <div>
+                  <div className="mb-4 text-sm text-secondary-600">Showing {matches.length} result{matches.length !== 1 ? 's' : ''} for "{globalSearchQuery}"</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {matches.map((student) => {
+                      const cls = classesList.find(c => c.id === student.class);
+                      const displayClass = cls ? `${cls.class_name}${cls.section ? ` — ${cls.section}` : ''}` : (student.class || 'Unassigned');
+                      return (
+                        <StudentCard
+                          key={student.id}
+                          {...student}
+                          class={displayClass}
+                          onClick={() => handleStudentClick(student)}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()
+          ) : (
+            <motion.div variants={gridContainer} initial="hidden" animate="show" className="flex flex-wrap gap-6">
+              {classStats.map((classInfo) => (
+                <motion.div key={classInfo.fullName} variants={gridItem} whileHover={{ zIndex: 1 }}>
+                  <ClassCard className={classInfo.className} section={classInfo.section} studentCount={classInfo.studentCount} onClick={() => handleClassClick(classInfo.fullName)} />
+                </motion.div>
+              ))}
+            </motion.div>
+          )}
         </div>
 
         <AddStudentModal isOpen={addStudentOpen} onClose={() => setAddStudentOpen(false)} classesFromParent={classesForForm} />
@@ -315,7 +379,7 @@ const StudentList: React.FC = () => {
           <div className="flex items-center gap-4">
             <Button variant="ghost" onClick={handleBackToClasses}><ArrowLeft className="w-4 h-4 mr-2" />Back</Button>
             <div>
-              <h1 className="text-3xl font-bold text-secondary-900">{showUnassigned ? 'Unassigned Students' : `Class ${selectedClass}`}</h1>
+              <h1 className="text-3xl font-bold text-secondary-900">{showUnassigned ? 'Unassigned Students' : ` ${selectedClass}`}</h1>
               <p className="text-secondary-600">{filteredStudents.length} student{filteredStudents.length !== 1 ? 's' : ''}</p>
             </div>
           </div>
@@ -342,7 +406,7 @@ const StudentList: React.FC = () => {
                   onClick={() => handleStudentClick(student)}
                   selectable={true}
                   checked={selectedIds.has(String(student.id))}
-                  onToggleSelect={() => toggleSelect(String(student.id))}
+                          onToggleSelect={(id) => toggleSelect(String(id))}
                   onAdmissionClick={() => { setAdmissionPopupStudent(student); setAdmissionPopupOpen(true); }}
                 />
               );
@@ -356,7 +420,7 @@ const StudentList: React.FC = () => {
                   <button
                     onClick={(e) => { e.stopPropagation(); setAdmissionPopupStudent(item); setAdmissionPopupOpen(true); }}
                     title="Admission Options"
-                    className="w-7 h-7 bg-white rounded flex items-center justify-center border border-secondary-200 hover:bg-white"
+                    className="w-6 h-6 bg-white rounded flex items-center justify-center border border-secondary-200 hover:bg-white"
                   >
                     <svg className="w-4 h-4 text-secondary-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" strokeLinecap="round" strokeLinejoin="round"/><polyline points="7 10 12 15 17 10" strokeLinecap="round" strokeLinejoin="round"/><line x1="12" y1="15" x2="12" y2="3" strokeLinecap="round" strokeLinejoin="round"/></svg>
                   </button>
@@ -386,7 +450,7 @@ const StudentList: React.FC = () => {
                   <h2 className="text-2xl font-bold text-secondary-900">{selectedStudent.name}</h2>
                   <p className="text-secondary-600">Roll No: {selectedStudent.rollNo}</p>
                   {selectedStudent.registrationNumber && <p className="text-sm text-primary-600 font-medium">Reg: {selectedStudent.registrationNumber}</p>}
-                  <Badge label={selectedStudent.class || 'Unassigned'} color="primary" />
+                  <Badge label={selectedStudentClassLabel} color="primary" />
                 </div>
               </div>
 

@@ -108,11 +108,37 @@ handler.setFormatter(_make_formatter(getattr(settings, "log_format", "text")))
 # Replace default handlers with our single structured handler
 root_logger.handlers = [handler]
 
-# Make sure uvicorn loggers use the same handler/level
-for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+# Make sure uvicorn and asyncio loggers use the same handler/level
+for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "asyncio"):
     lg = logging.getLogger(name)
     lg.handlers = [handler]
     lg.setLevel(log_level)
+    # Filter out noisy h11 LocalProtocolError stacktraces that occur when clients close connections
+    try:
+        import h11
+        class _H11NoiseFilter(logging.Filter):
+            def filter(self, record: logging.LogRecord) -> bool:
+                # Suppress LocalProtocolError exceptions from h11 which are benign when clients disconnect
+                try:
+                    if record.exc_info:
+                        exc_type = record.exc_info[0]
+                        if exc_type is h11._util.LocalProtocolError:
+                            return False
+                except Exception:
+                    pass
+                # Also filter specific message text
+                try:
+                    msg = record.getMessage()
+                    if isinstance(msg, str) and "Can't send data when our state is ERROR" in msg:
+                        return False
+                except Exception:
+                    pass
+                return True
+
+        lg.addFilter(_H11NoiseFilter())
+    except Exception:
+        # h11 may not be available in some environments; skip the filter
+        pass
 logger = logging.getLogger(__name__)
 
 # Memory logging function

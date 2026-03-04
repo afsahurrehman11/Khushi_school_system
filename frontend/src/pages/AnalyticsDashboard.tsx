@@ -26,6 +26,7 @@ import {
   RefreshCw,
   BarChart3
 } from 'lucide-react';
+import formatRs from '../utils/currency';
 import {
   analyticsService,
   DashboardOverview,
@@ -86,13 +87,7 @@ const AnalyticsDashboard: React.FC = () => {
     }
   }
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-PK', {
-      style: 'currency',
-      currency: 'PKR',
-      minimumFractionDigits: 0
-    }).format(amount);
-  };
+  const formatCurrency = (amount: number) => formatRs(amount, 0);
 
   const formatPercentage = (value: number) => `${(value * 100).toFixed(1)}%`;
 

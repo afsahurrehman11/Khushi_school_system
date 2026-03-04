@@ -19,6 +19,8 @@ import asyncio
 from app.database import get_db
 from bson import ObjectId
 from app.utils.validators import is_valid_pk_phone
+from io import BytesIO
+from app.services.admission_form_service import generate_admission_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +73,73 @@ async def get_student(
         raise
     except Exception as e:
         logger.error(f"❌ Failed to fetch student {student_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.get('/students/{student_id}/admission-pdf')
+async def get_student_admission_pdf(
+    student_id: str,
+    current_user: dict = Depends(check_permission("students.read"))
+):
+    """Return admission form PDF for a student (server-side generation)."""
+    try:
+        school_id = current_user.get('school_id')
+        student = get_student_by_id(student_id, school_id=school_id)
+        if not student:
+            raise HTTPException(status_code=404, detail='Student not found')
+
+        # Resolve school name - prefer tenant `schools` collection
+        try:
+            db = get_db()
+            school = None
+            try:
+                school = db.schools.find_one({"school_id": school_id})
+            except Exception:
+                school = None
+
+            if not school:
+                try:
+                    school = db.schools.find_one({"_id": ObjectId(school_id)})
+                except Exception:
+                    school = None
+
+            school_name = None
+            if school:
+                school_name = school.get('display_name') or school.get('name')
+                logger.info(f"[SCHOOL:{school_id}] Found school document; using school_name='{school_name}' (source=schools)")
+            else:
+                # Fallback: fee_voucher_settings may carry a school_name
+                try:
+                    settings = db.fee_voucher_settings.find_one({"school_id": school_id})
+                    if settings and settings.get('school_name'):
+                        school_name = settings.get('school_name')
+                        logger.info(f"[SCHOOL:{school_id}] Found school_name in fee_voucher_settings; using '{school_name}' (source=fee_voucher_settings)")
+                    else:
+                        school_name = None
+                except Exception as e:
+                    logger.warning(f"[SCHOOL:{school_id}] Error reading fee_voucher_settings: {e}")
+                    school_name = None
+
+            if not school_name:
+                school_name = 'School'
+                logger.info(f"[SCHOOL:{school_id}] No school_name found in tenants or settings; falling back to '{school_name}'")
+        except Exception:
+            school_name = 'School'
+
+        logger.info(f"[SCHOOL:{school_id}] ✅ Resolved school_name='{school_name}' for admission PDF")
+        logger.info(f"[SCHOOL:{school_id}] Generating admission PDF for student_id={student.get('student_id')} registration_number={student.get('registration_number')}")
+        pdf_bytes = generate_admission_pdf(student, school_name=school_name)
+        logger.info(f"[SCHOOL:{school_id}] ✅ Generated admission PDF ({len(pdf_bytes)} bytes)")
+        file_like = BytesIO(pdf_bytes)
+        filename = f"Admission_Form_{student.get('registration_number') or student.get('student_id')}.pdf"
+        logger.info(f"[SCHOOL:{school_id}] PDF filename: {filename}")
+        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        return StreamingResponse(file_like, media_type='application/pdf', headers=headers)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to generate admission PDF for {student_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/students/by-student-id/{student_id}", response_model=StudentInDB)

@@ -34,6 +34,8 @@ const FaceRecognition: React.FC = () => {
   const [retryCount, setRetryCount] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
   const [recentRecognitions, setRecentRecognitions] = useState<RecognitionResult[]>([]);
+  const [isLoadingEmbeddings, setIsLoadingEmbeddings] = useState(true);
+  const [embeddingsError, setEmbeddingsError] = useState('');
 
   // Camera refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -50,14 +52,22 @@ const FaceRecognition: React.FC = () => {
   useEffect(() => {
     const initializePage = async () => {
       try {
+        setIsLoadingEmbeddings(true);
+        setEmbeddingsError('');
+        logger.info('FACE RECOGNITION', 'Loading embeddings cache...');
+        
         // Load embeddings cache first for faster recognition
         await loadEmbeddingsCache();
-        logger.info('FACE RECOGNITION', 'Embeddings cache loaded on page mount');
-      } catch (err) {
-        logger.warn('FACE RECOGNITION', `Failed to preload cache: ${err}`);
+        logger.info('FACE RECOGNITION', 'Embeddings cache loaded successfully');
+        
+        // Get system status
+        await checkSystemStatus();
+        setIsLoadingEmbeddings(false);
+      } catch (err: any) {
+        logger.error('FACE RECOGNITION', `Failed to load embeddings: ${err}`);
+        setEmbeddingsError(err.message || 'Failed to load embeddings. Please refresh.');
+        setIsLoadingEmbeddings(false);
       }
-      // Get system status
-      await checkSystemStatus();
     };
     initializePage();
     return () => {
@@ -294,6 +304,37 @@ const FaceRecognition: React.FC = () => {
 
   const stateIndicator = getStateIndicator();
 
+  // Show loading screen while embeddings are being loaded
+  if (isLoadingEmbeddings) {
+    return (
+      <div className="min-h-screen bg-secondary-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-16 h-16 animate-spin text-primary-600 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-secondary-900 mb-2">Loading Recognition System</h2>
+          <p className="text-secondary-600">Preparing face embeddings database...</p>
+          <p className="text-sm text-secondary-500 mt-2">This may take a moment on first load</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error screen if embeddings failed to load
+  if (embeddingsError) {
+    return (
+      <div className="min-h-screen bg-secondary-50 flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-secondary-900 mb-2">Failed to Load System</h2>
+          <p className="text-secondary-600 mb-4">{embeddingsError}</p>
+          <Button onClick={() => window.location.reload()}>
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-secondary-50 p-6">
       <div className="max-w-6xl mx-auto">
@@ -426,12 +467,22 @@ const FaceRecognition: React.FC = () => {
                             </p>
                           </div>
                           <div className="bg-blue-50 rounded-lg p-3 text-center">
-                            <p className="text-xs text-blue-600 uppercase tracking-wide">Status</p>
-                            <p className="text-lg font-bold text-blue-700">
-                              {result.attendance?.status || 'Verified'}
+                            <p className="text-xs text-blue-600 uppercase tracking-wide">Action</p>
+                            <p className="text-lg font-bold text-blue-700 capitalize">
+                              {result.attendance?.action || 'Verified'}
                             </p>
                           </div>
                         </div>
+
+                        {/* Attendance time */}
+                        {result.attendance && (
+                          <div className="mt-3 p-3 bg-secondary-50 rounded-lg">
+                            <div className="flex justify-between text-sm">
+                              <span className="text-secondary-600">{result.attendance.action === 'check_out' ? 'Check-out:' : 'Check-in:'}</span>
+                              <span className="font-medium text-secondary-900">{new Date(result.attendance.time).toLocaleTimeString()}</span>
+                            </div>
+                          </div>
+                        )}
 
                         <motion.div
                           initial={{ width: '100%' }}

@@ -138,35 +138,45 @@ async def recognize_face(
     Process face recognition from captured image.
     Returns match or retry instruction.
     """
-    school_id = current_user.get("school_id")
-    if not school_id:
-        raise HTTPException(status_code=400, detail="School ID required")
-    
-    # Read image data
-    image_data = await file.read()
-    if not image_data:
-        raise HTTPException(status_code=400, detail="Empty image")
-    
-    logger.info(f"[FACE] Recognition request: {len(image_data)} bytes")
-    
-    # Get settings
-    settings_service = FaceSettingsService(db)
-    settings = await settings_service.get_settings(school_id)
-    
-    # Process recognition
-    face_service = FaceRecognitionService(db)
-    result = await face_service.process_recognition(image_data, school_id, settings)
-    
-    if result["status"] == "success":
-        # Record attendance
-        attendance = await face_service.record_attendance(
-            result["match"],
-            school_id,
-            settings
+    try:
+        school_id = current_user.get("school_id")
+        if not school_id:
+            raise HTTPException(status_code=400, detail="School ID required")
+        
+        # Read image data
+        image_data = await file.read()
+        if not image_data:
+            raise HTTPException(status_code=400, detail="Empty image")
+        
+        logger.info(f"[FACE] Recognition request: {len(image_data)} bytes")
+        
+        # Get settings
+        settings_service = FaceSettingsService(db)
+        settings = await settings_service.get_settings(school_id)
+        
+        # Process recognition
+        face_service = FaceRecognitionService(db)
+        result = await face_service.process_recognition(image_data, school_id, settings)
+        
+        if result["status"] == "success":
+            # Record attendance
+            attendance = await face_service.record_attendance(
+                result["match"],
+                school_id,
+                settings
+            )
+            result["attendance"] = attendance
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[FACE] Recognition endpoint error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Face recognition failed: {str(e)}"
         )
-        result["attendance"] = attendance
-    
-    return result
 
 
 @router.post("/load-cache")

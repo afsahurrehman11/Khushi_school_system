@@ -325,8 +325,13 @@ const AdmissionFormPopup: React.FC<AdmissionFormPopupProps> = ({ isOpen, onClose
             if (!mounted) return;
             logger.info('ADMISSION_POPUP', `Full student response: registration_number=\"${full?.registration_number}\", has_profile_blob=${!!full?.profile_image_blob}`);
 
-            // Merge full student data
+            // Merge full student data BUT preserve the school_name we fetched from settings
+            const preservedSchoolName = updates.school_name; // Save it before merge (from settings)
             Object.assign(updates, full);
+            if (preservedSchoolName) {
+              updates.school_name = preservedSchoolName; // Restore it after merge to prevent overwrite by backend fallback
+              logger.info('ADMISSION_POPUP', `✅ Restored school_name from settings after student merge: "${preservedSchoolName}"`);
+            }
 
             // Normalize profile image blob into a data URL for rendering
             if (full?.profile_image_blob) {
@@ -372,7 +377,7 @@ const AdmissionFormPopup: React.FC<AdmissionFormPopupProps> = ({ isOpen, onClose
         }
 
         // Apply all updates at once
-        logger.info('ADMISSION_POPUP', `Final updates: school_name=\"${updates.school_name}\", registration_number=\"${updates.registration_number}\", has_logo=${!!updates.school_logo}, has_profile=${!!updates.profile_image_blob}`);
+        logger.info('ADMISSION_POPUP', `Final updates: school_name="${updates.school_name}" (preserved from settings), registration_number="${updates.registration_number}", has_logo=${!!updates.school_logo}, has_profile=${!!updates.profile_image_blob}`);
         setStudentFields(updates);
 
         // Mark ready when registration number is available
@@ -447,7 +452,7 @@ const AdmissionFormPopup: React.FC<AdmissionFormPopupProps> = ({ isOpen, onClose
                 {/* Registration number box centered under subtitle */}
                 <div style={{ marginTop: 12, display: 'inline-block', backgroundColor: '#f3f7fb', border: '1px solid #d0e2f0', padding: '10px 16px', textAlign: 'center', borderRadius: 6 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: '#153142', letterSpacing: 1 }}>REGISTRATION NUMBER</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: '#153142', letterSpacing: 1, marginTop: 6 }}>{studentFields.registration_number || 'N/A'}</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: '#153142', letterSpacing: 1, marginTop: 6 }}>{studentFields.registration_number || studentFields.student_id || 'N/A'}</div>
                 </div>
               </div>
 

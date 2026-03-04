@@ -54,6 +54,7 @@ const FeePage: React.FC = () => {
   const [downloadingVoucher, setDownloadingVoucher] = useState(false);
   const [downloadingClassVouchers, setDownloadingClassVouchers] = useState<string | null>(null);
   const [jobProgress, setJobProgress] = useState<{ jobId: string, status: string, progress: number, type: string } | null>(null);
+  const [classDetails, setClassDetails] = useState<Record<string, { loading: boolean; student_count?: number; fee_category?: any; fee_summary?: any }>>({});
 
   // Cash session for validating payments are only recorded with active session
   const { session: cashSession } = useCashSession();
@@ -62,6 +63,74 @@ const FeePage: React.FC = () => {
   useEffect(() => {
     loadClasses();
   }, []);
+
+  // Lazy-load per-class details (student count, fee category) when card is hovered
+  const loadClassCardDetails = async (classId: string) => {
+    // Only skip if we already have loaded student_count (i.e. details present)
+    if (classDetails[classId]?.student_count !== undefined) return;
+
+    setClassDetails(prev => ({ ...prev, [classId]: { loading: true } }));
+
+    try {
+      const [feeDataResp, studentsResp] = await Promise.allSettled([
+        api.get(`/class-fee-assignments/classes/${classId}/active`).catch(() => null),
+        api.get(`/students?class_id=${classId}`).catch(() => []),
+      ]);
+
+      let student_count = 0;
+      let studentsList: any[] = [];
+      if (studentsResp.status === 'fulfilled') {
+        studentsList = Array.isArray(studentsResp.value) ? studentsResp.value : [];
+        student_count = studentsList.length;
+      }
+
+      let fee_category = null;
+      if (feeDataResp.status === 'fulfilled' && feeDataResp.value?.category_id) {
+        try {
+          const cat = await api.get(`/fee-categories/${feeDataResp.value.category_id}`);
+          fee_category = cat || null;
+        } catch (e) {
+          fee_category = null;
+        }
+      }
+
+      // Fetch per-student payment summary to compute paid/partial/unpaid counts.
+      let fee_summary = null;
+      try {
+        if (studentsList.length > 0) {
+          // Limit concurrency by batching
+          const BATCH = 50;
+          const chunks: any[][] = [];
+          for (let i = 0; i < studentsList.length; i += BATCH) chunks.push(studentsList.slice(i, i + BATCH));
+
+          let paid = 0, partial = 0, unpaid = 0;
+          for (const chunk of chunks) {
+            const promises = chunk.map((s: any) => api.get(`/fee-payments/student/${s.id}/summary`).catch(() => ({ status: 'unpaid' })));
+            const results = await Promise.allSettled(promises);
+            for (const r of results) {
+              if (r.status === 'fulfilled') {
+                const s = r.value;
+                if (s?.status === 'paid') paid++;
+                else if (s?.status === 'partial') partial++;
+                else unpaid++;
+              } else {
+                unpaid++;
+              }
+            }
+          }
+          fee_summary = { paid, partial, unpaid };
+        } else {
+          fee_summary = { paid: 0, partial: 0, unpaid: 0 };
+        }
+      } catch (e) {
+        fee_summary = null;
+      }
+
+      setClassDetails(prev => ({ ...prev, [classId]: { loading: false, student_count, fee_category, fee_summary } }));
+    } catch (e) {
+      setClassDetails(prev => ({ ...prev, [classId]: { loading: false } }));
+    }
+  };
 
   // Poll job status
   const pollJobStatus = async (jobId: string, jobType: string) => {
@@ -369,75 +438,29 @@ const FeePage: React.FC = () => {
   const loadClasses = async () => {
     setLoading(true);
     try {
-      // Fetch classes with fee assignments and student counts
+      // Fetch basic classes list quickly. Detailed info is loaded lazily per-card.
       const classesData = await api.get('/classes');
+      const minimal = classesData.map((cls: any) => ({
+        id: cls.id,
+        class_name: cls.class_name,
+        section: cls.section,
+        fee_category: null,
+        student_count: null,
+        fee_summary: null,
+      }));
+      setClasses(minimal);
+      // Initialize inline loaders for each card and start background fetches (staggered)
+      const initialDetails: Record<string, any> = {};
+      minimal.forEach((c: any) => { initialDetails[c.id] = { loading: true }; });
+      setClassDetails(initialDetails);
 
-      // Enrich with fee categories and student counts
-      const enrichedClasses = await Promise.all(
-        classesData.map(async (cls: any) => {
-          // Parallel fetch fee assignment and students
-          const [feeData, studentsData] = await Promise.allSettled([
-            api.get(`/class-fee-assignments/classes/${cls.id}/active`).catch(() => null),
-            api.get(`/students?class_id=${cls.id}`).catch(() => []),
-          ]);
-
-          let feeCategory = null;
-          if (feeData.status === 'fulfilled' && feeData.value?.category_id) {
-            try {
-              const catData = await api.get(`/fee-categories/${feeData.value.category_id}`);
-              // compute total amount from components if not directly provided
-              let totalAmount = 0;
-              if (typeof catData.total_amount === 'number') totalAmount = catData.total_amount;
-              else if (Array.isArray(catData.components)) {
-                totalAmount = catData.components.reduce((s: number, c: any) => s + (c.amount || 0), 0);
-              }
-              feeCategory = {
-                id: catData.id,
-                name: catData.name,
-                total_amount: totalAmount,
-                components: catData.components || [],
-              };
-            } catch (e) {
-              // No active category
-            }
-          }
-
-          let studentCount = 0;
-          let feeSummary = { paid: 0, partial: 0, unpaid: 0 };
-          if (studentsData.status === 'fulfilled') {
-            const students = studentsData.value || [];
-            studentCount = students.length;
-
-            // Parallel fetch payment summaries for all students
-            const summaryPromises = students.map((student: any) =>
-              api.get(`/fee-payments/student/${student.id}/summary`).catch(() => ({ status: 'unpaid' }))
-            );
-            const summaries = await Promise.allSettled(summaryPromises);
-
-            summaries.forEach(result => {
-              if (result.status === 'fulfilled') {
-                const summary = result.value;
-                if (summary.status === 'paid') feeSummary.paid++;
-                else if (summary.status === 'partial') feeSummary.partial++;
-                else feeSummary.unpaid++;
-              } else {
-                feeSummary.unpaid++;
-              }
-            });
-          }
-
-          return {
-            id: cls.id,
-            class_name: cls.class_name,
-            section: cls.section,
-            fee_category: feeCategory,
-            student_count: studentCount,
-            fee_summary: feeSummary,
-          };
-        })
-      );
-
-      setClasses(enrichedClasses);
+      minimal.forEach((c: any, idx: number) => {
+        // stagger requests to avoid bursting the backend
+        setTimeout(() => {
+          // fire-and-forget; loadClassCardDetails will update classDetails when done
+          loadClassCardDetails(c.id).catch(() => { });
+        }, idx * 150);
+      });
     } catch (error) {
       InAppNotificationService.error('Failed to load classes');
     } finally {
@@ -831,9 +854,16 @@ const FeePage: React.FC = () => {
                     className="p-2 hover:bg-blue-50 rounded-full transition-colors group relative"
                     title="Download all vouchers as ZIP"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
+                    {downloadingClassVouchers === cls.id ? (
+                      <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    )}
                   </button>
                   <button
                     onClick={(e) => handlePrintClassVouchers(cls, e)}
@@ -841,37 +871,73 @@ const FeePage: React.FC = () => {
                     className="p-2 hover:bg-green-50 rounded-full transition-colors group relative"
                     title="Print all vouchers"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                    </svg>
+                    {downloadingClassVouchers === cls.id ? (
+                      <svg className="animate-spin h-5 w-5 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                      </svg>
+                    )}
                   </button>
                 </div>
 
                 {/* Clickable area for viewing students */}
                 <div
                   className="cursor-pointer"
+                  onMouseEnter={() => loadClassCardDetails(cls.id)}
                   onClick={() => loadStudentsForClass(cls)}
                 >
                   <h3 className="text-xl font-semibold mb-2 pr-16">{cls.class_name} {cls.section || ''}</h3>
                   <p className="text-gray-600 mb-2">
-                    Fee Category: {cls.fee_category?.name || 'Not Assigned'}
+                    Fee Category: {classDetails[cls.id]?.loading ? (
+                      <span className="inline-flex items-center gap-1">
+                        <svg className="animate-spin inline-block h-3 w-3 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                      </span>
+                    ) : (classDetails[cls.id]?.fee_category?.name || cls.fee_category?.name || 'Not Assigned')}
                   </p>
-                  <p className="text-gray-600 mb-4">Students: {cls.student_count}</p>
+                  <p className="text-gray-600 mb-4">Students: {classDetails[cls.id]?.loading ? (
+                    <svg className="animate-spin inline-block h-3 w-3 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                  ) : (classDetails[cls.id]?.student_count ?? '—')}</p>
 
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between">
                       <span>Paid:</span>
-                      <span className="text-green-600">{cls.fee_summary.paid}</span>
+                      <span className="text-green-600">{classDetails[cls.id]?.loading ? (
+                        <svg className="animate-spin inline-block h-3 w-3 text-green-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                      ) : (classDetails[cls.id]?.fee_summary?.paid ?? cls.fee_summary?.paid ?? '—')}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Partial:</span>
-                      <span className="text-yellow-600">{cls.fee_summary.partial}</span>
+                      <span className="text-yellow-600">{classDetails[cls.id]?.loading ? (
+                        <svg className="animate-spin inline-block h-3 w-3 text-yellow-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                      ) : (classDetails[cls.id]?.fee_summary?.partial ?? cls.fee_summary?.partial ?? '—')}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Unpaid:</span>
-                      <span className="text-red-600">{cls.fee_summary.unpaid}</span>
+                      <span className="text-red-600">{classDetails[cls.id]?.loading ? (
+                        <svg className="animate-spin inline-block h-3 w-3 text-red-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                      ) : (classDetails[cls.id]?.fee_summary?.unpaid ?? cls.fee_summary?.unpaid ?? '—')}</span>
                     </div>
                   </div>
+                  
                 </div>
               </div>
             ))}

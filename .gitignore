@@ -20,6 +20,8 @@ pip-delete-this-directory.txt
 .coverage
 htmlcov/
 
+
+
 # =========================
 # NODE (Frontend)
 # =========================
@@ -65,3 +67,25 @@ Thumbs.db
 # =========================
 *.zip
 *.tar.gz
+
+# =========================
+# MODEL CACHE / ARTIFACTS
+# Ignore model caches and large model files produced by training or downloads
+# Include both top-level and backend-specific model cache folders
+# =========================
+model_cache/
+backend/model_cache/
+**/model_cache/
+
+# Common model artifact extensions
+*.onnx
+*.npy
+*.pt
+*.pth
+
+# =========================
+# Sample data folder
+# By default do NOT commit sample face data to the repo; ignore it here.
+# If the folder was previously committed, untrack it with the git command below.
+# =========================
+face-sample-data/

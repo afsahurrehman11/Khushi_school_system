@@ -66,9 +66,11 @@ READY = False
 
 # Configuration from environment
 API_KEY = os.getenv('API_KEY')
-FACE_MATCH_THRESHOLD = float(os.getenv('FACE_MATCH_THRESHOLD', '0.30'))  # Very low threshold for high sensitivity
+FACE_MATCH_THRESHOLD = float(os.getenv('FACE_MATCH_THRESHOLD', '0.90'))  # 90% threshold for high accuracy
 USE_MTCNN_DETECTION = os.getenv('USE_MTCNN_DETECTION', '0').lower() in ('1', 'true', 'yes')
-MIN_FACE_SIZE = 40  # Minimum face size in pixels
+MIN_FACE_SIZE = 60  # Minimum face size in pixels (increased for better quality)
+USE_TTA = True  # Test-Time Augmentation for better accuracy
+TTA_FLIPS = [False, True]  # Horizontal flip augmentation
 
 # If facenet is available, move to CUDA if present
 DEVICE = None
@@ -107,23 +109,53 @@ def check_image_quality(img_array, face_box=None):
     """Check if image quality is sufficient for recognition."""
     try:
         # Check if image is too small
-        if img_array.shape[0] < 50 or img_array.shape[1] < 50:
+        if img_array.shape[0] < 80 or img_array.shape[1] < 80:
             logger.warning('Image too small')
             return False
-        # Check blur using Laplacian variance
+        # Check blur using Laplacian variance (stricter threshold)
         gray = cv2.cvtColor(img_array, cv2.COLOR_BGR2GRAY) if len(img_array.shape) == 3 else img_array
         laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-        if laplacian_var < 50:  # Very lenient threshold
-            logger.warning(f'Image might be blurry (variance: {laplacian_var:.2f})')
-        # Check face size if provided
+        if laplacian_var < 100:  # Stricter blur threshold
+            logger.warning(f'Image too blurry (variance: {laplacian_var:.2f}, need > 100)')
+            return False
+        # Check brightness variance
+        mean_brightness = np.mean(gray)
+        if mean_brightness < 30 or mean_brightness > 225:
+            logger.warning(f'Poor lighting (brightness: {mean_brightness:.1f})')
+            return False
+        # Check face size if provided (stricter)
         if face_box is not None:
             x, y, w, h = face_box
             if w < MIN_FACE_SIZE or h < MIN_FACE_SIZE:
-                logger.warning(f'Face too small: {w}x{h}')
+                logger.warning(f'Face too small: {w}x{h} (minimum: {MIN_FACE_SIZE})')
                 return False
         return True
-    except Exception:
+    except Exception as e:
+        logger.warning(f'Quality check error: {e}')
         return True  # Don't fail on quality check errors
+
+def apply_tta_embedding(img, model_fn):
+    """Apply Test-Time Augmentation: compute embeddings for original + flipped, then average.
+    This significantly improves robustness and accuracy.
+    """
+    embeddings = []
+    
+    for flip in TTA_FLIPS:
+        img_aug = img.copy()
+        if flip:
+            img_aug = img_aug.transpose(PILImage.FLIP_LEFT_RIGHT) if hasattr(img_aug, 'transpose') else cv2.flip(np.array(img_aug), 1)
+            if isinstance(img_aug, np.ndarray):
+                img_aug = PILImage.fromarray(img_aug)
+        
+        # Get embedding for this augmentation
+        emb = model_fn(img_aug)
+        embeddings.append(emb)
+    
+    # Average all augmented embeddings
+    avg_emb = np.mean(embeddings, axis=0)
+    # Re-normalize
+    norm = np.linalg.norm(avg_emb)
+    return avg_emb / (norm if norm != 0 else 1.0)
 
 def image_bytes_to_embedding(data: bytes) -> np.ndarray:
     """Return a normalized embedding vector. Uses FaceNet (if available) or a demo grayscale vector.
@@ -206,30 +238,40 @@ def image_bytes_to_embedding(data: bytes) -> np.ndarray:
 
         # Resize to 160x160 (FaceNet input size) using high-quality Lanczos resampling
         from PIL import Image as PILImage
-        img = img.resize((160, 160), PILImage.Resampling.LANCZOS)
-        # transform to tensor
-        try:
-            import torchvision.transforms as transforms
-            trans = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5,0.5,0.5],[0.5,0.5,0.5])])
-            t = trans(img).unsqueeze(0)
-        except Exception:
-            # minimal manual transform
-            arr = np.asarray(img).astype(np.float32) / 255.0
-            arr = (arr - 0.5) / 0.5
-            if TORCH is None:
-                raise RuntimeError('Torch is required for FaceNet transforms')
-            t = TORCH.tensor(arr).permute(2,0,1).unsqueeze(0)
-        if DEVICE is not None and TORCH is not None:
-            t = t.to(DEVICE)
-        if TORCH is not None:
-            with TORCH.no_grad():
-                emb = FACENET_MODEL(t)
+        img_resized = img.resize((160, 160), PILImage.Resampling.LANCZOS)
+        
+        # Define embedding function for TTA
+        def get_single_embedding(pil_img):
+            try:
+                import torchvision.transforms as transforms
+                trans = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5,0.5,0.5],[0.5,0.5,0.5])])
+                t = trans(pil_img).unsqueeze(0)
+            except Exception:
+                # minimal manual transform
+                arr = np.asarray(pil_img).astype(np.float32) / 255.0
+                arr = (arr - 0.5) / 0.5
+                if TORCH is None:
+                    raise RuntimeError('Torch is required for FaceNet transforms')
+                t = TORCH.tensor(arr).permute(2,0,1).unsqueeze(0)
+            if DEVICE is not None and TORCH is not None:
+                t = t.to(DEVICE)
+            if TORCH is not None:
+                with TORCH.no_grad():
+                    emb = FACENET_MODEL(t)
+            else:
+                raise RuntimeError('Torch is required for FaceNet inference')
+            vec = emb.detach().cpu().numpy().flatten().astype(np.float32)
+            # normalize
+            norm = np.linalg.norm(vec)
+            return vec / (norm if norm != 0 else 1.0)
+        
+        # Apply Test-Time Augmentation if enabled
+        if USE_TTA:
+            logger.info('Using TTA for robust embedding')\n            vec = apply_tta_embedding(img_resized, get_single_embedding)
         else:
-            raise RuntimeError('Torch is required for FaceNet inference')
-        vec = emb.detach().cpu().numpy().flatten().astype(np.float32)
-        # normalize
-        norm = np.linalg.norm(vec)
-        return vec / (norm if norm != 0 else 1.0)
+            vec = get_single_embedding(img_resized)
+        
+        return vec
 
     # Fallback demo embedding: grayscale 64x64
     arr = np.frombuffer(data, np.uint8)
@@ -500,11 +542,17 @@ async def recognize(file: UploadFile = File(...), auto_clock: str = Form('false'
     except Exception as e:
         logger.exception('Failed to compute similarity — possible embedding dimensionality mismatch')
         return JSONResponse({"error": "Embedding dimensionality mismatch between stored embeddings and the recognition model. Re-enroll persons or rebuild embeddings."}, status_code=500)
+    
     best_idx = int(np.argmax(sims))
     best_sim = float(sims[best_idx])
     threshold = float(os.getenv('FACE_MATCH_THRESHOLD', FACE_MATCH_THRESHOLD))
-    logger.info(f'Best match: idx={best_idx}, similarity={best_sim:.4f}, threshold={threshold:.4f}')
-    if best_sim >= threshold:
+    
+    # Log top 10 matches for debugging (helps identify if correct person is in top results)
+    top10_idx = np.argsort(sims)[-10:][::-1]
+    logger.info(f'🎯 Best match: idx={best_idx}, similarity={best_sim:.4f}, threshold={threshold:.4f}')\n    logger.info(f'📊 Top 10 matches:')\n    for i, idx in enumerate(top10_idx, 1):
+        r = registry[idx]
+        logger.info(f'   #{i}: {r.get(\"name\")} ({r.get(\"role\", \"student\")}) - {sims[idx]:.4f} ({sims[idx]*100:.2f}%)')
+    \n    if best_sim >= threshold:
         r = registry[best_idx]
         logger.info(f"✓ MATCH: {r.get('name')} (ID={r.get('student_id')}) score={best_sim:.4f}")
         # Log top 3 matches for debugging

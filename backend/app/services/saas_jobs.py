@@ -356,7 +356,14 @@ async def start_background_jobs():
     asyncio.create_task(snapshot_job.start_scheduled_job(interval_hours=24))
     asyncio.create_task(cleanup_job.start_scheduled_job(interval_hours=48))
     asyncio.create_task(billing_job.start_scheduled_job(interval_hours=24))
-    
+    # Start embedding sync job (polling fallback for change-stream updates)
+    try:
+        embedding_job = EmbeddingSyncJob()
+        asyncio.create_task(embedding_job.start_scheduled_job())
+        logger.info("[BACKGROUND_JOBS] ✅ Embedding sync job started")
+    except Exception as e:
+        logger.warning(f"[BACKGROUND_JOBS] ⚠️ Failed to start embedding sync job: {e}")
+
     logger.info("[BACKGROUND_JOBS] ✅ Background jobs started")
 
 
@@ -368,8 +375,147 @@ async def stop_background_jobs():
         _cleanup_job.stop()
     if _billing_job:
         _billing_job.stop()
-    
+    # Note: EmbeddingSyncJob stop handled by event loop shutdown
     # Give jobs time to stop gracefully
     await asyncio.sleep(1)
     
     logger.info("[BACKGROUND_JOBS] 🛑 Background jobs stopped")
+
+
+class EmbeddingSyncJob:
+    """Background job to keep face embedding in-memory cache in sync with MongoDB.
+
+    Uses lightweight polling to detect new/updated embeddings and applies
+    per-person updates to the FaceRecognitionService cache. This is a safe
+    fallback when change-streams are not available in the Mongo deployment.
+    """
+
+    def __init__(self, poll_interval_seconds: int = 5):
+        from datetime import datetime
+        self.poll_interval = int(poll_interval_seconds)
+        self._stop = False
+        self._last_seen = {}  # school_id -> datetime
+        self._root_db = get_saas_root_db()
+
+    async def start_scheduled_job(self, interval_seconds: int = None):
+        import asyncio
+        from datetime import datetime
+
+        if interval_seconds is None:
+            interval_seconds = self.poll_interval
+
+        logger.info(f"[EMBEDDING_SYNC] Starting embedding sync (poll interval={interval_seconds}s)")
+
+        while not self._stop:
+            try:
+                await self.sync_once()
+            except Exception as e:
+                logger.error(f"[EMBEDDING_SYNC] Sync error: {e}")
+            try:
+                await asyncio.sleep(interval_seconds)
+            except asyncio.CancelledError:
+                break
+
+        logger.info("[EMBEDDING_SYNC] Stopped embedding sync job")
+
+    async def sync_once(self):
+        from datetime import datetime
+        import numpy as np
+        from app.services.saas_db import get_school_database
+        from app.services.face_service import FaceRecognitionService
+
+        # fetch active schools
+        schools = list(self._root_db.schools.find({}))
+
+        for school in schools:
+            try:
+                school_id = school.get("school_id")
+                db_name = school.get("database_name")
+                if not school_id or not db_name:
+                    continue
+
+                last = self._last_seen.get(school_id)
+                if not last:
+                    # default: now (will only pick up future changes)
+                    last = datetime.utcnow()
+
+                # Connect to school database
+                try:
+                    school_db = get_school_database(db_name)
+                except Exception as e:
+                    logger.warning(f"[EMBEDDING_SYNC] Cannot connect to DB {db_name}: {e}")
+                    continue
+
+                face_service = FaceRecognitionService(school_db)
+
+                # Query updated students
+                try:
+                    student_query = {"school_id": school_id, "embedding_generated_at": {"$gt": last}}
+                    cursor = school_db.students.find(student_query)
+                    for student in cursor:
+                        # If embedding removed, remove from cache
+                        pid = str(student.get("_id"))
+                        if not student.get("face_embedding"):
+                            face_service.remove_from_cache("student", pid)
+                            logger.info(f"[EMBEDDING_SYNC] Removed student from cache: {pid}")
+                            continue
+
+                        try:
+                            emb = np.array(student.get("face_embedding"), dtype=np.float32)
+                        except Exception:
+                            logger.warning(f"[EMBEDDING_SYNC] Invalid embedding for student {pid}")
+                            continue
+
+                        cache_data = {
+                            "embedding": emb,
+                            "name": student.get("full_name") or student.get("student_id"),
+                            "has_image": bool(student.get("profile_image_blob") or student.get("profile_image_url")),
+                            "student_id": student.get("student_id"),
+                            "class_id": student.get("class_id"),
+                            "section": student.get("section"),
+                            "roll_number": student.get("roll_number"),
+                            "school_id": school_id
+                        }
+                        face_service.refresh_cache_entry("student", pid, cache_data)
+                        logger.info(f"[EMBEDDING_SYNC] Updated student cache: {pid}")
+                except Exception as e:
+                    logger.debug(f"[EMBEDDING_SYNC] Student query error for {school_id}: {e}")
+
+                # Query updated teachers
+                try:
+                    teacher_query = {"school_id": school_id, "embedding_generated_at": {"$gt": last}}
+                    cursor = school_db.teachers.find(teacher_query)
+                    for teacher in cursor:
+                        pid = str(teacher.get("_id"))
+                        if not teacher.get("face_embedding"):
+                            face_service.remove_from_cache("employee", pid)
+                            logger.info(f"[EMBEDDING_SYNC] Removed teacher from cache: {pid}")
+                            continue
+
+                        try:
+                            emb = np.array(teacher.get("face_embedding"), dtype=np.float32)
+                        except Exception:
+                            logger.warning(f"[EMBEDDING_SYNC] Invalid embedding for teacher {pid}")
+                            continue
+
+                        cache_data = {
+                            "embedding": emb,
+                            "name": teacher.get("name") or teacher.get("teacher_id"),
+                            "has_image": bool(teacher.get("profile_image_blob") or teacher.get("profile_image_url")),
+                            "teacher_id": teacher.get("teacher_id"),
+                            "email": teacher.get("email"),
+                            "school_id": school_id
+                        }
+                        face_service.refresh_cache_entry("employee", pid, cache_data)
+                        logger.info(f"[EMBEDDING_SYNC] Updated teacher cache: {pid}")
+                except Exception as e:
+                    logger.debug(f"[EMBEDDING_SYNC] Teacher query error for {school_id}: {e}")
+
+                # Update last seen timestamp for this school
+                self._last_seen[school_id] = datetime.utcnow()
+
+            except Exception as e:
+                logger.error(f"[EMBEDDING_SYNC] Unexpected error while processing school: {e}")
+
+    def stop(self):
+        self._stop = True

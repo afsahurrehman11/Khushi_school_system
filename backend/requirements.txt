@@ -1,9 +1,9 @@
 # ============================================
 # CMS Backend - Heroku Optimized (CPU-Only)
 # ============================================
-# Last updated: 2026-02-27
-# Using: ONNX Runtime + MobileFaceNet for lightweight face recognition
-# Total ML footprint: ~20MB (vs ~400MB with PyTorch)
+# Last updated: 2026-03-05
+# Using: ONNX Runtime + ArcFace ResNet100 for accurate face recognition
+# Total ML footprint: ~186MB (vs ~400MB with PyTorch)
 
 # --- Core Framework ---
 pydantic==1.10.12
@@ -41,16 +41,17 @@ psutil>=5.9.0
 opencv-python-headless==4.8.0.76
 
 # ============================================
-# FACE RECOGNITION - MOBILEFACENET (LIGHTWEIGHT)
+# FACE RECOGNITION - ARCFACE RESNET100 (ACCURATE)
 # ============================================
 # ONNX Runtime CPU (~15MB) - Much lighter than PyTorch (~280MB)
 onnxruntime==1.17.0
 
 # ============================================
-# MODEL: MobileFaceNet (downloaded at runtime)
-# - Size: ~4MB (vs FaceNet's 107MB)
-# - Accuracy: 99.28% on LFW (vs 99.63% for FaceNet)
-# - Speed: 4x faster inference
+# MODEL: ArcFace ResNet100 (downloaded at runtime)
+# - Size: ~170MB (high accuracy)
+# - Accuracy: 99.77% on LFW (better than FaceNet)
+# - 512-dimensional embeddings with L2 normalization
+# - Uses <0.5GB RAM for real-time recognition
 # ============================================
 
 # ============================================

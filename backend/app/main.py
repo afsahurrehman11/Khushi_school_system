@@ -388,11 +388,8 @@ async def startup_event():
         else:
             logger.warning("⚠️ Skipping background jobs - database not connected")
         
-        logger.info("=" * 60)
-        logger.info("✅ Server is now READY and accepting requests!")
-        logger.info(f"📡 Allowed origins: {settings.allowed_origins}")
-        logger.info("=" * 60)
-        
+        # NOTE: Server READY log moved after optional ML preload below
+        pass
     except Exception as startup_exc:
         logger.error("💥 Critical error during startup")
         logger.error(f"   Error: {startup_exc}")
@@ -400,38 +397,76 @@ async def startup_event():
         logger.warning("⚠️ Server continuing in degraded mode...")
         # Don't sys.exit() - let the server run even if startup has issues
     
-    # ============ BACKGROUND ML MODEL LOADING ============
-    # Start ML model loading in background AFTER server is up
-    # This ensures the server binds to port immediately while models load in background
-    if getattr(settings, "skip_ml_on_startup", True):
-        logger.info("🔕 ML model loading skipped on startup (SKIP_ML_ON_STARTUP=true)")
-        logger.info("   Face recognition models will load lazily on first use")
-    else:
-        asyncio.create_task(_load_ml_models_background(db_connected))
-
-    # Start self-ping background task if enabled and URL provided
+    # ============ MODEL PRELOAD (blocking startup when enabled) ============
+    # When SKIP_ML_ON_STARTUP is false, preload ONNX models and only mark
+    # the server as READY after models successfully load. This prevents the
+    # application from accepting traffic until face models are ready.
     try:
-        if getattr(settings, "enable_self_ping", False) and settings.self_ping_url:
-            stop_event = asyncio.Event()
-            task = asyncio.create_task(_self_ping_loop(settings.self_ping_url, settings.self_ping_interval_minutes, stop_event))
-            app.state.self_ping_task = task
-            app.state.self_ping_stop_event = stop_event
-            logger.info(f"🔁 Self-ping background task started (every {settings.self_ping_interval_minutes} minutes) -> {settings.self_ping_url}")
+        if not getattr(settings, "skip_ml_on_startup", True):
+            logger.info("🚀 ML model preloading enabled - loading face recognition models (blocking startup)...")
+            from app.services.embedding_background_tasks import preload_models_at_startup
+            result = await preload_models_at_startup()
+            if result.get("success"):
+                logger.info("✅ ML models preloaded successfully. Proceeding to start server.")
+            else:
+                # Do NOT abort entire application when model preload fails. Instead,
+                # continue startup and rely on lazy loading on first use. This
+                # prevents transient network issues or download failures from
+                # making the whole service unavailable.
+                logger.error("❌ ML model preload failed. Continuing without preloaded models.")
+                logger.warning("   Models will load lazily on first use (may add a short delay)")
+                logger.warning("   Check network connectivity or set SKIP_ML_ON_STARTUP=true to skip preload")
         else:
-            logger.info("🔕 Self-ping disabled (no SELF_PING_URL or explicitly disabled)")
+            logger.info("🔕 ML model preloading disabled (SKIP_ML_ON_STARTUP=true)")
+            logger.info("   Face recognition models will load on first use (may add 2-3s delay)")
+
+        # Now the server is ready
+        logger.info("=" * 60)
+        logger.info("✅ Server is now READY and accepting requests!")
+        logger.info(f"📡 Allowed origins: {settings.allowed_origins}")
+        logger.info("=" * 60)
+
     except Exception as e:
-        logger.error(f"❌ Failed to start self-ping background task: {e}")
-        logger.error(f"   Traceback: {traceback.format_exc()}")
-        logger.warning("⚠️ Continuing without self-ping...")
+        logger.critical(f"💥 Startup aborted due to ML preload error: {e}")
+        raise
 
 
-# --- Background ML Model Loading Task ---------------------------------
-async def _load_ml_models_background(db_connected: bool) -> None:
-    """Load heavy ML models in background after server is up.
+# --- Background Face Model Preloading Task ---------------------------------
+async def _preload_face_models_background() -> None:
+    """
+    Preload lightweight face recognition models (ONNX-based, ~20MB total)
     
-    This runs AFTER the server has started and bound to a port,
-    ensuring deployment platforms don't timeout waiting for the port.
-    ML models (PyTorch, TensorFlow, FaceNet) can take 2-5 minutes to load.
+    This runs in background after server is up, ensuring fast model availability
+    for face recognition and embedding generation. Unlike old PyTorch models
+    (~400MB), ONNX models are small enough to preload without memory concerns.
+    """
+    try:
+        # Give the server a moment to fully initialize
+        await asyncio.sleep(1)
+        
+        # Import preload function
+        from app.services.embedding_background_tasks import preload_models_at_startup
+        
+        # Preload models
+        result = await preload_models_at_startup()
+        
+        if result.get("success"):
+            logger.info("=" * 60)
+            logger.info("🎉 Face recognition system ready!")
+            logger.info("=" * 60)
+        else:
+            logger.warning("⚠️ Model preload completed with warnings - see logs above")
+            
+    except Exception as e:
+        logger.error(f"❌ Model preload error: {str(e)}", exc_info=True)
+        logger.warning("   Face recognition will still work with lazy loading")
+
+
+# --- Legacy ML Model Loading (deprecated, kept for reference) --------------
+async def _load_ml_models_background(db_connected: bool) -> None:
+    """
+    DEPRECATED: Old PyTorch-based model loading
+    Kept for reference but no longer used. New system uses lightweight ONNX models.
     """
     try:
         logger.info("=" * 60)
@@ -519,32 +554,7 @@ async def _load_ml_models_background(db_connected: bool) -> None:
 
 
 # --- Self-ping (keep-alive) background task ---------------------------------
-async def _self_ping_loop(url: str, interval_minutes: int, stop_event: asyncio.Event) -> None:
-    """Periodically ping the given `url` every `interval_minutes` minutes.
-
-    Runs until `stop_event` is set. Logs success (status code) or failure.
-    """
-    interval_seconds = max(1, int(interval_minutes)) * 60
-    client = httpx.AsyncClient(timeout=10.0)
-    try:
-        while not stop_event.is_set():
-            try:
-                resp = await client.get(url)
-                # Avoid passing `extra` keys that conflict with LogRecord internals
-                logger.info(f"SELF-PING: Ping {url} -> {resp.status_code}")
-                logger.debug(f"SELF-PING response headers: {resp.headers}")
-            except Exception as e:
-                # Log warning instead of full stack trace for self-ping timeouts
-                logger.warning(f"SELF-PING failed for {url}: {type(e).__name__}")
-
-            # Wait for the interval or until stop_event is set
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
-            except asyncio.TimeoutError:
-                # timeout expired -> continue loop
-                continue
-    finally:
-        await client.aclose()
+# Self-ping feature removed per configuration - no background self-ping tasks
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -559,19 +569,7 @@ async def shutdown_event():
     except Exception as e:
         logger.warning(f"⚠️ Error stopping SaaS background jobs: {e}")
     
-    # Stop self-ping task if running
-    try:
-        task = getattr(app.state, "self_ping_task", None)
-        stop_event = getattr(app.state, "self_ping_stop_event", None)
-        if task and stop_event:
-            stop_event.set()
-            try:
-                await asyncio.wait_for(task, timeout=10.0)
-            except asyncio.TimeoutError:
-                task.cancel()
-            logger.info("🔁 Self-ping background task stopped")
-    except Exception as e:
-        logger.warning(f"⚠️ Error stopping self-ping task: {e}")
+    # Self-ping feature removed; nothing to stop here
 
 @app.get("/")
 async def root():

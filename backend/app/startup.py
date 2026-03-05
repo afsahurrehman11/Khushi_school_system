@@ -4,6 +4,9 @@ from pathlib import Path
 from datetime import datetime
 from app.database import get_db
 from app.services.saas_db import get_mongo_client, SAAS_ROOT_DB
+from app.utils.indexes import ensure_performance_indexes
+import threading
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -107,22 +110,34 @@ def ensure_collections_exist():
                 logger.error("❌ Failed to create collection %s: %s", name, exc)
                 raise
 
-    # Attempt to run index creation script (if present) so collections have expected indexes
-    script_path = Path(__file__).resolve().parents[1] / "scripts" / "create_indexes.py"
-    # Run index creation only if enabled via settings
+    # Attempt to ensure indexes using the centralized helper
     from app.config import settings
     if settings.create_indexes:
-        if script_path.exists():
-            try:
-                logger.info("🔧 Running index creation script")
-                # run_path logs more details; keep our message concise
-                runpy.run_path(str(script_path), run_name="__main__")
-                logger.info("✅ Index creation completed")
-            except Exception as exc:
-                logger.error("❌ Index creation script failed: %s", exc)
-                raise
-        else:
-            logger.debug("No index creation script found at %s", script_path)
+        try:
+            logger.info("🔧 Ensuring performance indexes (startup)")
+            ensure_performance_indexes(db)
+            logger.info("✅ Index creation/ensure completed on startup")
+
+            # Start a background thread to periodically re-run the index ensure
+            interval = getattr(settings, "index_recheck_interval_seconds", 86400)
+
+            def _periodic_index_ensure():
+                logger.info("⏳ Background index re-check thread started (interval=%s seconds)", interval)
+                while True:
+                    try:
+                        time.sleep(interval)
+                        logger.info("🔁 Periodic index ensure triggered")
+                        ensure_performance_indexes(db)
+                        logger.info("✅ Periodic index ensure completed")
+                    except Exception as e:
+                        logger.warning("⚠️ Periodic index ensure failed: %s", e)
+
+            t = threading.Thread(target=_periodic_index_ensure, daemon=True)
+            t.start()
+
+        except Exception as exc:
+            logger.error("❌ Index creation failed at startup: %s", exc)
+            # Do not raise - indexes are best-effort but should not prevent startup
     else:
         logger.info("⚠️ Skipping index creation (CREATE_INDEXES=false)")
 

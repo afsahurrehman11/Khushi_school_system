@@ -3,7 +3,7 @@ Face Recognition Service
 Handles embedding generation, face matching, and attendance recording.
 Integrated with existing CMS attendance collections.
 
-Now uses ONNX Runtime + MobileFaceNet (~20MB) instead of PyTorch (~400MB).
+Now uses ONNX Runtime + ArcFace ResNet100 (~170MB) instead of PyTorch (~400MB).
 """
 import logging
 import io
@@ -37,7 +37,7 @@ def _init_ml_libs():
     Only called when actually needed for face recognition operations,
     not at module import time to avoid slow server startup.
     
-    Uses ONNX Runtime (~15MB) + MobileFaceNet (~4MB) instead of
+    Uses ONNX Runtime (~15MB) + ArcFace ResNet100 (~170MB) instead of
     PyTorch (~280MB) + FaceNet (~107MB).
     """
     global _ml_libs_initialized, USE_ONNX, _ONNX_SESSION, Image, CV2_AVAILABLE, cv2
@@ -48,20 +48,20 @@ def _init_ml_libs():
     _ml_libs_initialized = True
     logger.info("📦 Initializing ML libraries for face recognition...")
     
-    # Try to load ONNX Runtime with MobileFaceNet
+    # Try to load ONNX Runtime with ArcFace ResNet100
     try:
         from PIL import Image as _Image
         Image = _Image
         
         # Import EmbeddingGenerator which handles ONNX model loading
-        from .embedding_service import EmbeddingGenerator, _init_mobilefacenet
-        
+        from .embedding_service import EmbeddingGenerator, _init_arcface
+
         # Initialize the ONNX model
-        if _init_mobilefacenet():
+        if _init_arcface():
             USE_ONNX = True
-            logger.info("✅ MobileFaceNet ONNX loaded")
+            logger.info("✅ ArcFace ResNet100 ONNX loaded")
         else:
-            logger.info("MobileFaceNet ONNX not available")
+            logger.info("ArcFace ResNet100 ONNX not available")
             
     except Exception as e:
         logger.info(f"ONNX face recognition not available: {e}")
@@ -80,7 +80,7 @@ def _init_ml_libs():
 def _get_embedding_version():
     """Get embedding version based on available libraries."""
     _init_ml_libs()
-    return "mobilefacenet_onnx_v1" if USE_ONNX else "fallback_v1"
+    return "arcface_resnet100_onnx_v1" if USE_ONNX else "fallback_v1"
 
 # In-memory embedding cache
 _embedding_cache: Dict[str, Dict[str, Any]] = {
@@ -184,7 +184,9 @@ class FaceRecognitionService:
         student_count = 0
         employee_count = 0
         
-        logger.info(f"Loading embeddings for school: {school_id}")
+        logger.info("=" * 60)
+        logger.info(f"🔄 LOADING FACE EMBEDDINGS FOR SCHOOL: {school_id}")
+        logger.info("=" * 60)
         
         # Load student embeddings
         cursor = self.db.students.find({
@@ -233,7 +235,13 @@ class FaceRecognitionService:
                 logger.error(f"Failed to load embedding for teacher {teacher.get('teacher_id')}: {e}")
         
         _cache_loaded = True
-        logger.info(f"Loaded {student_count} students, {employee_count} employees into cache")
+        
+        logger.info("=" * 60)
+        logger.info(f"✅ EMBEDDINGS LOADED SUCCESSFULLY!")
+        logger.info(f"   👨‍🎓 Students: {student_count}")
+        logger.info(f"   👨‍🏫 Teachers: {employee_count}")
+        logger.info(f"   📊 Total: {student_count + employee_count}")
+        logger.info("=" * 60)
         
         return {"students": student_count, "employees": employee_count}
     
@@ -323,7 +331,7 @@ class FaceRecognitionService:
             return None, str(e)
     
     def _image_bytes_to_embedding(self, data: bytes) -> Optional[np.ndarray]:
-        """Convert image bytes to normalized embedding vector using MobileFaceNet ONNX"""
+        """Convert image bytes to normalized embedding vector using ArcFace ResNet100 ONNX"""
         # Lazily initialize ML libraries when first needed
         _init_ml_libs()
         
@@ -378,21 +386,29 @@ class FaceRecognitionService:
         Compare query embedding against all cached embeddings using vectorized operations.
         This is 10-50x faster than loop-based comparison for large caches.
         Returns best match if confidence >= threshold, else None.
+        
+        Enhanced with detailed logging to debug matching issues.
         """
         best_match = None
         best_confidence = 0.0
         best_person_id = None
         best_person_type = None
         
-        # Normalize query embedding once
+        # Log query embedding stats for debugging
         query_norm = np.linalg.norm(query_embedding)
+        query_mean = np.mean(query_embedding)
+        query_std = np.std(query_embedding)
+        logger.info(f"[COMPARE] Query embedding: norm={query_norm:.4f}, mean={query_mean:.6f}, std={query_std:.6f}, shape={query_embedding.shape}")
+        
         if query_norm == 0:
+            logger.error("[COMPARE] Query embedding has zero norm!")
             return None
         query_normalized = query_embedding / query_norm
         
         # Vectorized search for students
         if _embedding_cache["students"]:
             student_ids = list(_embedding_cache["students"].keys())
+            logger.info(f"[COMPARE] Comparing against {len(student_ids)} students")
             student_embeddings = np.array([
                 _embedding_cache["students"][pid]["embedding"] 
                 for pid in student_ids
@@ -406,6 +422,12 @@ class FaceRecognitionService:
             # Vectorized cosine similarity (dot product of normalized vectors)
             similarities = np.dot(student_embeddings_normalized, query_normalized)
             
+            # Log top 3 student matches
+            top_3_indices = np.argsort(similarities)[-3:][::-1]
+            for idx in top_3_indices:
+                student_name = _embedding_cache["students"][student_ids[idx]].get("name", "Unknown")
+                logger.info(f"[COMPARE] Student: {student_name} -> {similarities[idx]:.4f}")
+            
             # Find best match among students
             best_student_idx = np.argmax(similarities)
             if similarities[best_student_idx] > best_confidence:
@@ -416,6 +438,7 @@ class FaceRecognitionService:
         # Vectorized search for employees
         if _embedding_cache["employees"]:
             employee_ids = list(_embedding_cache["employees"].keys())
+            logger.info(f"[COMPARE] Comparing against {len(employee_ids)} employees")
             employee_embeddings = np.array([
                 _embedding_cache["employees"][pid]["embedding"] 
                 for pid in employee_ids
@@ -428,6 +451,12 @@ class FaceRecognitionService:
             
             # Vectorized cosine similarity
             similarities = np.dot(employee_embeddings_normalized, query_normalized)
+            
+            # Log top 3 employee matches
+            top_3_indices = np.argsort(similarities)[-3:][::-1]
+            for idx in top_3_indices:
+                employee_name = _embedding_cache["employees"][employee_ids[idx]].get("name", "Unknown")
+                logger.info(f"[COMPARE] Employee: {employee_name} -> {similarities[idx]:.4f}")
             
             # Check if any employee beats current best
             best_employee_idx = np.argmax(similarities)
@@ -446,15 +475,15 @@ class FaceRecognitionService:
                 "confidence": float(best_confidence),
                 **{k: v for k, v in data.items() if k != "embedding"}
             }
-            logger.info(f"[MATCH] {best_match.get('name', 'Unknown')} | Confidence: {best_confidence:.2f}")
+            logger.info(f"[MATCH] ✅ {best_match.get('name', 'Unknown')} | Confidence: {best_confidence:.4f} (threshold: {threshold})")
             return best_match
         
         if best_person_id:
             cache_key = "students" if best_person_type == "student" else "employees"
             name = _embedding_cache[cache_key][best_person_id].get("name", "Unknown")
-            logger.info(f"[RETRY] Low confidence: {best_confidence:.2f} for {name}")
+            logger.info(f"[RETRY] ❌ Low confidence: {best_confidence:.4f} for {name} (threshold: {threshold})")
         else:
-            logger.info("[RETRY] No match found in cache")
+            logger.info("[RETRY] ❌ No match found in cache")
         
         return None
     
@@ -552,7 +581,7 @@ class FaceRecognitionService:
         late_time = settings.get("late_after_time", "08:30")
         
         # Check if already marked today
-        existing = await self.db.attendance.find_one({
+        existing = self.db.attendance.find_one({
             "school_id": school_id,
             "student_id": student_id,
             "date": today
@@ -574,7 +603,7 @@ class FaceRecognitionService:
                 }
             
             # Update with check-out time
-            update_result = await self.db.attendance.update_one(
+            update_result = self.db.attendance.update_one(
                 {"_id": existing["_id"]},
                 {
                     "$set": {
@@ -586,7 +615,7 @@ class FaceRecognitionService:
             logger.info(f"[FACE][SUCCESS] Recorded check-out for student: {student_id} at {current_time}")
             
             # Log activity
-            await self._log_activity(
+            self._log_activity(
                 school_id=school_id,
                 person_type="student",
                 person_id=str(match["person_id"]),
@@ -630,11 +659,11 @@ class FaceRecognitionService:
             "updated_at": datetime.utcnow()
         }
         
-        result = await self.db.attendance.insert_one(attendance_doc)
+        result = self.db.attendance.insert_one(attendance_doc)
         logger.info(f"[FACE][SUCCESS] Recorded check-in ({status}) for student: {student_id} at {current_time}")
         
         # Log activity
-        await self._log_activity(
+        self._log_activity(
             school_id=school_id,
             person_type="student",
             person_id=str(match["person_id"]),
@@ -672,7 +701,7 @@ class FaceRecognitionService:
         late_time = settings.get("employee_late_after", "08:30")
         
         # Check existing record for today
-        existing = await self.db.employee_attendance.find_one({
+        existing = self.db.employee_attendance.find_one({
             "school_id": school_id,
             "teacher_id": teacher_id,
             "date": today
@@ -685,13 +714,13 @@ class FaceRecognitionService:
                     "action": "already_checked_out",
                     "name": match.get("name"),
                     "teacher_id": teacher_id,
-                    "check_in": existing.get("check_in_time"),
-                    "check_out": existing.get("check_out_time"),
+                    "check_in_time": existing.get("check_in_time"),
+                    "check_out_time": existing.get("check_out_time"),
                     "confidence": confidence
                 }
             
             # Record check-out
-            await self.db.employee_attendance.update_one(
+            self.db.employee_attendance.update_one(
                 {"_id": existing["_id"]},
                 {
                     "$set": {
@@ -703,7 +732,7 @@ class FaceRecognitionService:
             )
             logger.info(f"[FACE][SUCCESS] Check-out recorded for employee: {teacher_id}")
             
-            await self._log_activity(
+            self._log_activity(
                 school_id=school_id,
                 person_type="employee",
                 person_id=str(match["person_id"]),
@@ -716,6 +745,7 @@ class FaceRecognitionService:
                 "action": "check_out",
                 "name": match.get("name"),
                 "teacher_id": teacher_id,
+                "check_out_time": current_time,
                 "time": current_time,
                 "confidence": confidence
             }
@@ -735,10 +765,10 @@ class FaceRecognitionService:
             "updated_at": datetime.utcnow()
         }
         
-        await self.db.employee_attendance.insert_one(attendance_doc)
+        self.db.employee_attendance.insert_one(attendance_doc)
         logger.info(f"[FACE][SUCCESS] Check-in recorded for employee: {teacher_id} ({status})")
         
-        await self._log_activity(
+        self._log_activity(
             school_id=school_id,
             person_type="employee",
             person_id=str(match["person_id"]),
@@ -752,6 +782,7 @@ class FaceRecognitionService:
             "status": status,
             "name": match.get("name"),
             "teacher_id": teacher_id,
+            "check_in_time": current_time,
             "time": current_time,
             "confidence": confidence
         }
@@ -768,7 +799,7 @@ class FaceRecognitionService:
         section: Optional[str] = None
     ):
         """Log face activity for dashboard"""
-        await self.db.face_activity_logs.insert_one({
+        self.db.face_activity_logs.insert_one({
             "school_id": school_id,
             "person_type": person_type,
             "person_id": person_id,
@@ -868,6 +899,463 @@ class FaceRecognitionService:
             })
         
         return activities
+    
+    async def get_today_summary(self, school_id: str) -> Dict[str, Any]:
+        """Get today's check-in/check-out summary statistics"""
+        today = date.today().strftime("%Y-%m-%d")
+        
+        # Student statistics
+        student_checkins = self.db.attendance.count_documents({
+            "school_id": school_id,
+            "date": today,
+            "check_in_time": {"$ne": None}
+        })
+        
+        student_checkouts = self.db.attendance.count_documents({
+            "school_id": school_id,
+            "date": today,
+            "check_out_time": {"$ne": None}
+        })
+        
+        student_present = self.db.attendance.count_documents({
+            "school_id": school_id,
+            "date": today,
+            "status": "present"
+        })
+        
+        student_late = self.db.attendance.count_documents({
+            "school_id": school_id,
+            "date": today,
+            "status": "late"
+        })
+        
+        # Teacher statistics
+        teacher_checkins = self.db.employee_attendance.count_documents({
+            "school_id": school_id,
+            "date": today,
+            "check_in_time": {"$ne": None}
+        })
+        
+        teacher_checkouts = self.db.employee_attendance.count_documents({
+            "school_id": school_id,
+            "date": today,
+            "check_out_time": {"$ne": None}
+        })
+        
+        teacher_present = self.db.employee_attendance.count_documents({
+            "school_id": school_id,
+            "date": today,
+            "status": "present"
+        })
+        
+        teacher_late = self.db.employee_attendance.count_documents({
+            "school_id": school_id,
+            "date": today,
+            "status": "late"
+        })
+        
+        # Get total counts for percentage calculation
+        total_students = self.db.students.count_documents({
+            "school_id": school_id,
+            "status": "active"
+        })
+        
+        total_teachers = self.db.teachers.count_documents({
+            "school_id": school_id
+        })
+        
+        return {
+            "students": {
+                "total": total_students,
+                "checked_in": student_checkins,
+                "checked_out": student_checkouts,
+                "present": student_present,
+                "late": student_late,
+                "absent": max(0, total_students - student_checkins),
+                "attendance_rate": round((student_checkins / total_students * 100) if total_students > 0 else 0, 1)
+            },
+            "teachers": {
+                "total": total_teachers,
+                "checked_in": teacher_checkins,
+                "checked_out": teacher_checkouts,
+                "present": teacher_present,
+                "late": teacher_late,
+                "absent": max(0, total_teachers - teacher_checkins),
+                "attendance_rate": round((teacher_checkins / total_teachers * 100) if total_teachers > 0 else 0, 1)
+            }
+        }
+    
+    async def get_today_student_details(self, school_id: str) -> List[Dict[str, Any]]:
+        """Get detailed student attendance records for today"""
+        today = date.today().strftime("%Y-%m-%d")
+        
+        pipeline = [
+            {
+                "$match": {
+                    "school_id": school_id,
+                    "date": today
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "students",
+                    "localField": "student_id",
+                    "foreignField": "student_id",
+                    "as": "student_info"
+                }
+            },
+            {
+                "$unwind": {
+                    "path": "$student_info",
+                    "preserveNullAndEmptyArrays": True
+                }
+            },
+            {
+                "$sort": {"check_in_time": 1}
+            }
+        ]
+        
+        details = []
+        for record in self.db.attendance.aggregate(pipeline):
+            student_info = record.get("student_info", {})
+            details.append({
+                "student_id": record.get("student_id"),
+                "name": student_info.get("full_name", "Unknown"),
+                "father_name": student_info.get("father_name", "N/A"),
+                "class_id": record.get("class_id", "N/A"),
+                "section": student_info.get("section", "N/A"),
+                "roll_number": student_info.get("roll_number", "N/A"),
+                "registration_number": student_info.get("registration_number", "N/A"),
+                "check_in_time": record.get("check_in_time"),
+                "check_out_time": record.get("check_out_time"),
+                "status": record.get("status"),
+                "confidence": record.get("confidence", 0)
+            })
+        
+        return details
+    
+    async def get_today_teacher_details(self, school_id: str) -> List[Dict[str, Any]]:
+        """Get detailed teacher attendance records for today"""
+        today = date.today().strftime("%Y-%m-%d")
+        
+        pipeline = [
+            {
+                "$match": {
+                    "school_id": school_id,
+                    "date": today
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "teachers",
+                    "localField": "teacher_id",
+                    "foreignField": "teacher_id",
+                    "as": "teacher_info"
+                }
+            },
+            {
+                "$unwind": {
+                    "path": "$teacher_info",
+                    "preserveNullAndEmptyArrays": True
+                }
+            },
+            {
+                "$sort": {"check_in_time": 1}
+            }
+        ]
+        
+        details = []
+        for record in self.db.employee_attendance.aggregate(pipeline):
+            teacher_info = record.get("teacher_info", {})
+            details.append({
+                "teacher_id": record.get("teacher_id"),
+                "name": teacher_info.get("name", "Unknown"),
+                "email": teacher_info.get("email", "N/A"),
+                "phone": teacher_info.get("phone", "N/A"),
+                "department": teacher_info.get("department", "N/A"),
+                "check_in_time": record.get("check_in_time"),
+                "check_out_time": record.get("check_out_time"),
+                "status": record.get("status"),
+                "confidence": record.get("check_in_confidence", 0)
+            })
+        
+        return details
+    
+    async def get_hourly_checkin_stats(self, school_id: str) -> Dict[str, Any]:
+        """Get hourly check-in distribution for charts"""
+        today = date.today().strftime("%Y-%m-%d")
+        
+        # Get all student check-ins and group by hour
+        student_checkins = list(self.db.attendance.find({
+            "school_id": school_id,
+            "date": today,
+            "check_in_time": {"$ne": None}
+        }))
+        
+        teacher_checkins = list(self.db.employee_attendance.find({
+            "school_id": school_id,
+            "date": today,
+            "check_in_time": {"$ne": None}
+        }))
+        
+        # Create hourly buckets (6 AM to 12 PM)
+        hours = [f"{h:02d}:00" for h in range(6, 13)]
+        student_counts = {hour: 0 for hour in hours}
+        teacher_counts = {hour: 0 for hour in hours}
+        
+        for record in student_checkins:
+            check_in = record.get("check_in_time", "")
+            if check_in:
+                hour = check_in.split(":")[0]
+                hour_key = f"{hour}:00"
+                if hour_key in student_counts:
+                    student_counts[hour_key] += 1
+        
+        for record in teacher_checkins:
+            check_in = record.get("check_in_time", "")
+            if check_in:
+                hour = check_in.split(":")[0]
+                hour_key = f"{hour}:00"
+                if hour_key in teacher_counts:
+                    teacher_counts[hour_key] += 1
+        
+        return {
+            "hours": hours,
+            "students": [student_counts[h] for h in hours],
+            "teachers": [teacher_counts[h] for h in hours]
+        }
+    
+    async def get_late_arrivals_students(self, school_id: str) -> List[Dict[str, Any]]:
+        """Get all students who arrived late today with details"""
+        today = date.today().strftime("%Y-%m-%d")
+        
+        pipeline = [
+            {
+                "$match": {
+                    "school_id": school_id,
+                    "date": today,
+                    "status": "late"
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "students",
+                    "localField": "student_id",
+                    "foreignField": "student_id",
+                    "as": "student_info"
+                }
+            },
+            {
+                "$unwind": {
+                    "path": "$student_info",
+                    "preserveNullAndEmptyArrays": True
+                }
+            },
+            {
+                "$sort": {"check_in_time": 1}
+            }
+        ]
+        
+        late_students = []
+        for record in self.db.attendance.aggregate(pipeline):
+            student_info = record.get("student_info", {})
+            late_students.append({
+                "student_id": record.get("student_id"),
+                "name": student_info.get("full_name", "Unknown"),
+                "father_name": student_info.get("father_name", "N/A"),
+                "class_id": student_info.get("class_id", "N/A"),
+                "section": student_info.get("section", "N/A"),
+                "roll_number": student_info.get("roll_number", "N/A"),
+                "registration_number": student_info.get("registration_number", "N/A"),
+                "check_in_time": record.get("check_in_time"),
+                "confidence": record.get("confidence", 0)
+            })
+        
+        return late_students
+    
+    async def get_late_arrivals_teachers(self, school_id: str) -> List[Dict[str, Any]]:
+        """Get all teachers who arrived late today with details"""
+        today = date.today().strftime("%Y-%m-%d")
+        
+        pipeline = [
+            {
+                "$match": {
+                    "school_id": school_id,
+                    "date": today,
+                    "status": "late"
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "teachers",
+                    "localField": "teacher_id",
+                    "foreignField": "teacher_id",
+                    "as": "teacher_info"
+                }
+            },
+            {
+                "$unwind": {
+                    "path": "$teacher_info",
+                    "preserveNullAndEmptyArrays": True
+                }
+            },
+            {
+                "$sort": {"check_in_time": 1}
+            }
+        ]
+        
+        late_teachers = []
+        for record in self.db.employee_attendance.aggregate(pipeline):
+            teacher_info = record.get("teacher_info", {})
+            late_teachers.append({
+                "teacher_id": record.get("teacher_id"),
+                "name": teacher_info.get("name", "Unknown"),
+                "email": teacher_info.get("email", "N/A"),
+                "phone": teacher_info.get("phone", "N/A"),
+                "department": teacher_info.get("department", "N/A"),
+                "check_in_time": record.get("check_in_time"),
+                "confidence": record.get("check_in_confidence", 0)
+            })
+        
+        return late_teachers
+    
+    async def get_absent_students_grouped(self, school_id: str) -> List[Dict[str, Any]]:
+        """Get all students who haven't checked in today, grouped by class"""
+        today = date.today().strftime("%Y-%m-%d")
+        
+        # Get all active students
+        all_students = list(self.db.students.find({
+            "school_id": school_id,
+            "status": "active"
+        }))
+        
+        # Get students who checked in today
+        checked_in_ids = set()
+        for record in self.db.attendance.find({
+            "school_id": school_id,
+            "date": today,
+            "check_in_time": {"$ne": None}
+        }):
+            checked_in_ids.add(record.get("student_id"))
+        
+        # Group absent students by class
+        absent_by_class = {}
+        for student in all_students:
+            student_id = student.get("student_id")
+            if student_id not in checked_in_ids:
+                class_key = f"{student.get('class_id', 'Unknown')}-{student.get('section', '')}"
+                if class_key not in absent_by_class:
+                    absent_by_class[class_key] = {
+                        "class_id": student.get("class_id", "Unknown"),
+                        "section": student.get("section", ""),
+                        "absent_count": 0,
+                        "students": []
+                    }
+                
+                absent_by_class[class_key]["absent_count"] += 1
+                absent_by_class[class_key]["students"].append({
+                    "student_id": student_id,
+                    "name": student.get("full_name", "Unknown"),
+                    "father_name": student.get("father_name", "N/A"),
+                    "roll_number": student.get("roll_number", "N/A"),
+                    "registration_number": student.get("registration_number", "N/A")
+                })
+        
+        # Convert to list and sort by class
+        result = sorted(absent_by_class.values(), key=lambda x: (x["class_id"], x["section"]))
+        return result
+    
+    def get_embedding_rankings(self, image_data: bytes) -> List[Dict[str, Any]]:
+        """
+        Get all embedding comparisons ranked by confidence for debugging.
+        Returns list of all matches with confidence scores.
+        """
+        # Generate embedding from input image
+        embedding, error = self._generate_embedding_from_bytes(image_data)
+        
+        if error:
+            return []
+        
+        rankings = []
+        
+        # Normalize query embedding once
+        query_norm = np.linalg.norm(embedding)
+        if query_norm == 0:
+            return []
+        query_normalized = embedding / query_norm
+        
+        # Compare against all students
+        for student_id, data in _embedding_cache["students"].items():
+            student_embedding = data["embedding"]
+            
+            # Normalize and calculate similarity
+            norm = np.linalg.norm(student_embedding)
+            if norm > 0:
+                normalized = student_embedding / norm
+                similarity = float(np.dot(normalized, query_normalized))
+                
+                rankings.append({
+                    "person_type": "student",
+                    "person_id": student_id,
+                    "name": data.get("name", "Unknown"),
+                    "student_id": data.get("student_id", "N/A"),
+                    "class_id": data.get("class_id", "N/A"),
+                    "section": data.get("section", "N/A"),
+                    "confidence": similarity
+                })
+        
+        # Compare against all teachers
+        for teacher_id, data in _embedding_cache["employees"].items():
+            teacher_embedding = data["embedding"]
+            
+            # Normalize and calculate similarity
+            norm = np.linalg.norm(teacher_embedding)
+            if norm > 0:
+                normalized = teacher_embedding / norm
+                similarity = float(np.dot(normalized, query_normalized))
+                
+                rankings.append({
+                    "person_type": "teacher",
+                    "person_id": teacher_id,
+                    "name": data.get("name", "Unknown"),
+                    "teacher_id": data.get("teacher_id", "N/A"),
+                    "email": data.get("email", "N/A"),
+                    "confidence": similarity
+                })
+        
+        # Sort by confidence descending
+        rankings.sort(key=lambda x: x["confidence"], reverse=True)
+        
+        return rankings
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get statistics about loaded embeddings cache"""
+        return {
+            "cache_loaded": _cache_loaded,
+            "students_count": len(_embedding_cache["students"]),
+            "teachers_count": len(_embedding_cache["employees"]),
+            "total_embeddings": len(_embedding_cache["students"]) + len(_embedding_cache["employees"]),
+            "students": [
+                {
+                    "id": sid,
+                    "name": data.get("name"),
+                    "student_id": data.get("student_id"),
+                    "class_id": data.get("class_id"),
+                    "has_image": data.get("has_image", False)
+                }
+                for sid, data in list(_embedding_cache["students"].items())[:50]  # Limit to first 50
+            ],
+            "teachers": [
+                {
+                    "id": tid,
+                    "name": data.get("name"),
+                    "teacher_id": data.get("teacher_id"),
+                    "email": data.get("email"),
+                    "has_image": data.get("has_image", False)
+                }
+                for tid, data in list(_embedding_cache["employees"].items())[:50]  # Limit to first 50
+            ]
+        }
 
 
 class EmbeddingGenerationService:
@@ -922,14 +1410,14 @@ class EmbeddingGenerationService:
             embedding, error = await self.face_service.generate_embedding_from_url(image_url)
             
             if embedding:
-                await collection.update_one(
+                collection.update_one(
                     {"_id": record["_id"]},
                     {
                         "$set": {
                             "face_embedding": embedding,
                             "embedding_status": "generated",
                             "embedding_generated_at": datetime.utcnow(),
-                            "embedding_model": "mobilefacenet_onnx" if USE_ONNX else "fallback",
+                            "embedding_model": "arcface_resnet100_onnx" if USE_ONNX else "fallback",
                             "embedding_version": _get_embedding_version()
                         }
                     }
@@ -963,7 +1451,7 @@ class EmbeddingGenerationService:
                 )
                 success_count += 1
             else:
-                await collection.update_one(
+                collection.update_one(
                     {"_id": record["_id"]},
                     {
                         "$set": {
@@ -998,7 +1486,7 @@ class EmbeddingGenerationService:
             query["class_id"] = class_id
         
         # Clear existing embeddings first
-        await collection.update_many(
+        collection.update_many(
             query,
             {
                 "$set": {
@@ -1028,7 +1516,7 @@ class EmbeddingGenerationService:
         """Regenerate embedding for a single person"""
         collection = self.db.students if person_type == "student" else self.db.teachers
         
-        record = await collection.find_one({"_id": ObjectId(person_id), "school_id": school_id})
+        record = collection.find_one({"_id": ObjectId(person_id), "school_id": school_id})
         
         if not record:
             return {"success": False, "error": "Record not found"}
@@ -1043,14 +1531,14 @@ class EmbeddingGenerationService:
         embedding, error = await self.face_service.generate_embedding_from_url(image_url)
         
         if embedding:
-            await collection.update_one(
+            collection.update_one(
                 {"_id": ObjectId(person_id)},
                 {
                     "$set": {
                         "face_embedding": embedding,
                         "embedding_status": "generated",
                         "embedding_generated_at": datetime.utcnow(),
-                        "embedding_model": "mobilefacenet_onnx" if USE_ONNX else "fallback",
+                        "embedding_model": "arcface_resnet100_onnx" if USE_ONNX else "fallback",
                         "embedding_version": _get_embedding_version()
                     }
                 }
@@ -1085,7 +1573,7 @@ class EmbeddingGenerationService:
             
             return {"success": True}
         else:
-            await collection.update_one(
+            collection.update_one(
                 {"_id": ObjectId(person_id)},
                 {
                     "$set": {
@@ -1107,7 +1595,7 @@ class FaceSettingsService:
     
     async def get_settings(self, school_id: str) -> Dict[str, Any]:
         """Get settings for school, create default if not exists"""
-        settings = await self.db.face_settings.find_one({"school_id": school_id})
+        settings = self.db.face_settings.find_one({"school_id": school_id})
         
         if not settings:
             default_settings = {
@@ -1125,17 +1613,25 @@ class FaceSettingsService:
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             }
-            await self.db.face_settings.insert_one(default_settings)
+            self.db.face_settings.insert_one(default_settings)
             settings = default_settings
         
-        settings["id"] = str(settings.get("_id", ""))
+        # Convert ObjectId to string and remove _id field to avoid serialization errors
+        settings["id"] = str(settings.pop("_id", ""))
+        
+        # Convert datetime objects to ISO strings for JSON serialization
+        if "created_at" in settings and settings["created_at"]:
+            settings["created_at"] = settings["created_at"].isoformat()
+        if "updated_at" in settings and settings["updated_at"]:
+            settings["updated_at"] = settings["updated_at"].isoformat()
+        
         return settings
     
     async def update_settings(self, school_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         """Update settings"""
         updates["updated_at"] = datetime.utcnow()
         
-        await self.db.face_settings.update_one(
+        self.db.face_settings.update_one(
             {"school_id": school_id},
             {"$set": updates},
             upsert=True

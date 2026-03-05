@@ -1,13 +1,13 @@
 """
-Face Embedding Generation Service (ONNX Runtime, MobileFaceNet)
+Face Embedding Generation Service (ONNX Runtime, ArcFace ResNet100)
 
 This service generates face embeddings using:
 - ONNX Runtime for inference (~15MB)
-- MobileFaceNet model (~4MB) for embeddings
+- ArcFace ResNet100 model (~170MB) for high-accuracy embeddings
 - OpenCV Haar Cascade for face detection (~1MB)
 
-Total: ~20MB vs ~400MB for PyTorch+FaceNet
-Optimized for Heroku deployment (well under 500MB slug limit).
+Total: ~186MB - significantly more accurate than MobileFaceNet while staying under 500MB.
+Optimized for deployment with <0.5GB RAM usage.
 """
 import numpy as np
 import logging
@@ -27,41 +27,85 @@ except ImportError:
     HAS_CV2 = False
     logger.warning("OpenCV not available - face detection will be limited")
 
-# Lazy-load MobileFaceNet ONNX model
+# Lazy-load ArcFace ResNet100 ONNX model
 _ONNX_SESSION = None
 _ONNX_INITIALIZED = False
 _MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "model_cache")
 
-# MobileFaceNet ONNX model URL (pre-trained on VGGFace2/MS-Celeb)
-_MOBILEFACENET_URL = "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/arcface/model/arcfaceresnet100-8.onnx"
-# Fallback: smaller MobileFaceNet from InsightFace
-_MOBILEFACENET_FALLBACK_URL = "https://huggingface.co/minchul/cvt-face-onnx/resolve/main/cvt_face_112.onnx"
+# ArcFace ResNet100 ONNX model URL (pre-trained on MS1MV2, very high accuracy)
+_ARCFACE_RESNET100_URL = "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/arcface/model/arcfaceresnet100-8.onnx"
+# Fallback: Alternative ArcFace model
+_ARCFACE_FALLBACK_URL = "https://huggingface.co/onnx/ArcFace/resolve/main/arcfaceresnet100-8.onnx"
 
 
 def _download_model(url: str, path: str) -> bool:
     """Download ONNX model from URL."""
-    try:
-        logger.info(f"📥 Downloading face model to {path}...")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        response = requests.get(url, timeout=120, stream=True)
-        response.raise_for_status()
-        
-        with open(path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        
-        logger.info(f"✅ Model downloaded: {os.path.getsize(path) / 1024 / 1024:.1f}MB")
-        return True
-    except Exception as e:
-        logger.error(f"Model download failed: {e}")
-        return False
+    # Robust download with retries and exponential backoff. If the download
+    # fails part-way, the partial file is removed so that subsequent attempts
+    # start from a clean state.
+    attempts = 3
+    backoff_base = 2
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    for attempt in range(1, attempts + 1):
+        try:
+            logger.info(f"📥 Downloading face model to {path} (attempt {attempt}/{attempts})...")
+            response = requests.get(url, timeout=120, stream=True)
+            response.raise_for_status()
+
+            # Write to a temporary file first
+            tmp_path = path + ".part"
+            with open(tmp_path, 'wb') as f:
+                total_written = 0
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        total_written += len(chunk)
+
+            # If server provided a content-length header, verify we got everything
+            content_len = response.headers.get('Content-Length')
+            if content_len is not None:
+                try:
+                    expected = int(content_len)
+                    if total_written < expected:
+                        raise IOError(f"Incomplete download: {total_written} of {expected} bytes")
+                except ValueError:
+                    # ignore non-integer headers
+                    pass
+
+            # Move temp file into final path
+            os.replace(tmp_path, path)
+            logger.info(f"✅ Model downloaded: {os.path.getsize(path) / 1024 / 1024:.1f}MB")
+            return True
+
+        except Exception as e:
+            logger.error(f"Model download failed (attempt {attempt}): {e}")
+            # Clean up partial file if exists
+            try:
+                if os.path.exists(path + ".part"):
+                    os.remove(path + ".part")
+            except Exception:
+                pass
+
+            if attempt < attempts:
+                sleep_sec = backoff_base ** (attempt - 1)
+                logger.info(f"Retrying download in {sleep_sec}s...")
+                try:
+                    import time
+                    time.sleep(sleep_sec)
+                except Exception:
+                    pass
+                continue
+            else:
+                logger.error("Failed to download face model after multiple attempts")
+                return False
 
 
-def _init_mobilefacenet() -> bool:
+def _init_arcface() -> bool:
     """
-    Lazily initialize MobileFaceNet ONNX model.
+    Lazily initialize ArcFace ResNet100 ONNX model.
     Called on first embedding request, not at module import.
-    Downloads model if not present (~4-10MB depending on variant).
+    Downloads model if not present (~170MB, high accuracy).
     
     Returns True if model is available.
     """
@@ -82,19 +126,19 @@ def _init_mobilefacenet() -> bool:
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         
         # Model path
-        model_path = os.path.join(_MODEL_DIR, "mobilefacenet.onnx")
+        model_path = os.path.join(_MODEL_DIR, "arcface_resnet100.onnx")
         
         # Download model if not exists
         if not os.path.exists(model_path):
-            logger.info("📦 MobileFaceNet model not found, downloading...")
+            logger.info("📦 ArcFace ResNet100 model not found, downloading (~170MB)...")
             # Try primary URL first, then fallback
-            if not _download_model(_MOBILEFACENET_FALLBACK_URL, model_path):
-                if not _download_model(_MOBILEFACENET_URL, model_path):
+            if not _download_model(_ARCFACE_RESNET100_URL, model_path):
+                if not _download_model(_ARCFACE_FALLBACK_URL, model_path):
                     logger.error("Failed to download face model")
                     return False
         
         # Load ONNX model
-        logger.info(f"📦 Loading MobileFaceNet ONNX model...")
+        logger.info(f"📦 Loading ArcFace ResNet100 ONNX model...")
         _ONNX_SESSION = ort.InferenceSession(
             model_path,
             sess_options=sess_options,
@@ -104,7 +148,7 @@ def _init_mobilefacenet() -> bool:
         # Log model info
         input_info = _ONNX_SESSION.get_inputs()[0]
         output_info = _ONNX_SESSION.get_outputs()[0]
-        logger.info(f"✅ MobileFaceNet loaded - Input: {input_info.shape}, Output: {output_info.shape}")
+        logger.info(f"✅ ArcFace ResNet100 loaded - Input: {input_info.shape}, Output: {output_info.shape}")
         
         return True
         
@@ -112,7 +156,7 @@ def _init_mobilefacenet() -> bool:
         logger.error(f"ONNX Runtime not available: {e}")
         return False
     except Exception as e:
-        logger.error(f"MobileFaceNet initialization failed: {e}")
+        logger.error(f"ArcFace ResNet100 initialization failed: {e}")
         return False
 
 
@@ -123,15 +167,15 @@ class FaceDetectionError(Exception):
 
 class EmbeddingGenerator:
     """
-    Face embedding generator using MobileFaceNet (ONNX Runtime).
+    Face embedding generator using ArcFace ResNet100 (ONNX Runtime).
     
     Produces 512-dimensional normalized embeddings.
     Uses OpenCV Haar Cascade for face detection.
-    ~20MB total vs ~400MB for PyTorch stack.
+    ~186MB total, much higher accuracy than MobileFaceNet.
     """
     
-    # MobileFaceNet produces 512-dimensional embeddings
-    EMBEDDING_MODEL = "MobileFaceNet-ONNX"
+    # ArcFace ResNet100 produces 512-dimensional embeddings
+    EMBEDDING_MODEL = "ArcFace-ResNet100-ONNX"
     EMBEDDING_DIMENSION = 512
     
     @staticmethod
@@ -256,7 +300,7 @@ class EmbeddingGenerator:
     @staticmethod
     def _preprocess_for_onnx(face_image: Image.Image) -> np.ndarray:
         """
-        Preprocess face image for ONNX MobileFaceNet inference.
+        Preprocess face image for ONNX ArcFace ResNet100 inference.
         
         Args:
             face_image: PIL Image of cropped face
@@ -286,7 +330,7 @@ class EmbeddingGenerator:
     @staticmethod
     def generate_embedding(cropped_face: Image.Image) -> Optional[list]:
         """
-        Generate face embedding from cropped face image using MobileFaceNet ONNX.
+        Generate face embedding from cropped face image using ArcFace ResNet100 ONNX.
         
         Args:
             cropped_face: PIL Image of cropped face
@@ -294,8 +338,8 @@ class EmbeddingGenerator:
         Returns:
             Normalized 512-dim embedding vector as list, or None if failed
         """
-        if not _init_mobilefacenet():
-            logger.error("MobileFaceNet ONNX not available for embedding generation")
+        if not _init_arcface():
+            logger.error("ArcFace ResNet100 ONNX not available for embedding generation")
             return None
         
         try:

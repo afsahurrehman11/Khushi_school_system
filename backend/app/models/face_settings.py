@@ -2,6 +2,7 @@
 Face Recognition Settings Model
 Stores school-specific settings for face recognition attendance
 """
+
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime

@@ -8,14 +8,13 @@ import { motion } from 'framer-motion';
 import {
   ArrowLeft,
   Clock,
-  Settings,
   Save,
   Loader2,
   CheckCircle,
   AlertCircle,
   Users,
   Briefcase,
-  Gauge,
+  
 } from 'lucide-react';
 import { getFaceSettings, updateFaceSettings } from '../services/faceApi';
 import type { FaceSettings } from '../types';
@@ -72,11 +71,7 @@ const FaceSettingsPage: React.FC = () => {
     }
   };
 
-  const handleNumberChange = (field: keyof FaceSettings, value: number) => {
-    if (settings) {
-      setSettings({ ...settings, [field]: value });
-    }
-  };
+  
 
   if (loading) {
     return (
@@ -273,68 +268,7 @@ const FaceSettingsPage: React.FC = () => {
             </div>
           </motion.div>
 
-          {/* Recognition Settings */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-white rounded-xl shadow-soft p-6"
-          >
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                <Settings className="w-5 h-5 text-purple-600" />
-              </div>
-              <div>
-                <h2 className="font-semibold text-secondary-900">Recognition Settings</h2>
-                <p className="text-sm text-secondary-500">Configure face recognition parameters</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-secondary-700 mb-2">
-                  <Gauge className="w-4 h-4 inline mr-1" />
-                  Confidence Threshold
-                </label>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="0.99"
-                    step="0.01"
-                    value={settings.confidence_threshold}
-                    onChange={(e) => handleNumberChange('confidence_threshold', parseFloat(e.target.value))}
-                    className="flex-1 h-2 bg-secondary-200 rounded-lg appearance-none cursor-pointer"
-                  />
-                  <span className="text-lg font-semibold text-secondary-900 w-16 text-right">
-                    {Math.round(settings.confidence_threshold * 100)}%
-                  </span>
-                </div>
-                <p className="text-xs text-secondary-500 mt-1">
-                  Minimum confidence required for a match (recommended: 85%)
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-secondary-700 mb-2">
-                  Max Retry Attempts
-                </label>
-                <select
-                  value={settings.max_retry_attempts}
-                  onChange={(e) => handleNumberChange('max_retry_attempts', parseInt(e.target.value))}
-                  className="w-full px-4 py-3 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-                >
-                  <option value={3}>3 attempts</option>
-                  <option value={5}>5 attempts</option>
-                  <option value={7}>7 attempts</option>
-                  <option value={10}>10 attempts</option>
-                </select>
-                <p className="text-xs text-secondary-500 mt-1">
-                  How many times to auto-retry on failure
-                </p>
-              </div>
-            </div>
-          </motion.div>
+          {/* Recognition Settings removed per request */}
 
           {/* Info Card */}
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">

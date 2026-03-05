@@ -11,7 +11,7 @@ import { ChalanList } from './features/chalans';
 import { AccountantDashboard, FeePage } from './features/accountant';
 import { AdminDashboard } from './features/admin';
 import { WhatsAppDashboard } from './features/whatsapp';
-import { FaceDashboard, FaceStudents, FaceEmployees, FaceRecognition, FaceSettings } from './features/face';
+import { FaceDashboard, FaceStudents, FaceEmployees, FaceRecognition, MultiCameraFaceRecognition, MultiCameraSessionView, FaceSettings } from './features/face';
 import ImportNotificationToast from './features/students/components/ImportNotificationToast';
 import NotificationToast from './components/NotificationToast';
 // import startNotificationSSE from './features/accountant/services/NotificationSSE';
@@ -259,6 +259,14 @@ function App() {
                 <Route
                   path="/face-app/recognition"
                   element={<ProtectedRoute element={<FaceRecognition />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
+                />
+                <Route
+                  path="/face-app/multi-camera"
+                  element={<ProtectedRoute element={<MultiCameraFaceRecognition />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
+                />
+                <Route
+                  path="/face-app/multi-camera/session"
+                  element={<ProtectedRoute element={<MultiCameraSessionView />} requiredRoles={['Admin', 'Root', 'Accountant']} />}
                 />
                 <Route
                   path="/face-app/settings"

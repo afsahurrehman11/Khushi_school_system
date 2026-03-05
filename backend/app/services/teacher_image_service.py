@@ -10,6 +10,7 @@ import asyncio
 
 from app.services.image_service import ImageService
 from app.services.face_enrollment_service import FaceEnrollmentService
+from app.services.embedding_background_tasks import EmbeddingBackgroundTask
 from app.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -87,8 +88,8 @@ class TeacherImageService:
             
             logger.info(f"🟢 [UPLOAD] Image stored for teacher {teacher_id}")
             
-            # === AUTO-ENROLLMENT: Face Recognition App & Embedding Generation ===
-            # Get teacher details for enrollment
+            # === AUTO-ENROLLMENT: Start Background Embedding Generation ===
+            # Get teacher details for logging
             teacher = teacher_collection.find_one(
                 query,
                 {"name": 1, "teacher_id": 1, "cnic": 1}
@@ -98,80 +99,26 @@ class TeacherImageService:
                 teacher_name = teacher.get("name", "Unknown Teacher")
                 teacher_reg_id = teacher.get("teacher_id") or teacher.get("cnic") or str(teacher_id)
                 
-                # 1. Enroll in external face recognition app (OPTIONAL, non-blocking)
-                # This is for the standalone face-recognition-app which may not be running
-                try:
-                    enrollment_result = await FaceEnrollmentService.enroll_person(
-                        person_id=teacher_reg_id,
-                        name=teacher_name,
-                        role='teacher',
-                        image_blob=image_blob,
-                        image_type=image_type,
-                        school_id=school_id  # Pass school_id for unique ID
-                    )
-                    
-                    if enrollment_result.get("success"):
-                        logger.info(f"✅ [FACE-EXT] Teacher {teacher_id} enrolled in external face service")
-                    elif enrollment_result.get("skipped_external"):
-                        # External service not running - this is OK, local embedding still works
-                        logger.debug(f"ℹ️ [FACE-EXT] External service skipped for {teacher_id} (not running)")
-                    else:
-                        logger.warning(f"⚠️ [FACE-EXT] External enrollment warning: {enrollment_result.get('error', 'Unknown')}")
-                except Exception as e:
-                    logger.debug(f"ℹ️ [FACE-EXT] External enrollment skipped: {str(e)}")
+                logger.info(f"🔄 [EMBEDDING] Scheduling background embedding generation for {teacher_name} ({teacher_reg_id})")
                 
-                # 2. Generate embedding for main database (PRIMARY - this is what matters)
-                try:
-                    embedding, emb_status = await FaceEnrollmentService.generate_embedding_for_person(
-                        image_blob=image_blob,
-                        person_id=teacher_reg_id,
-                        person_type='teacher'
+                # Trigger background embedding generation
+                # This runs asynchronously and doesn't block the response
+                asyncio.create_task(
+                    EmbeddingBackgroundTask.generate_embedding_for_person(
+                        person_id=teacher_id,
+                        person_type='teacher',
+                        school_id=school_id,
+                        image_blob=image_blob
                     )
-                    
-                    if emb_status == "generated" and embedding:
-                        # Update teacher with embedding
-                        teacher_collection.update_one(
-                            {"_id": ObjectId(teacher_id)},
-                            {
-                                "$set": {
-                                    "face_embedding": embedding,
-                                    "embedding_model": "VGGFace",
-                                    "embedding_generated_at": datetime.utcnow(),
-                                    "embedding_status": "generated",
-                                    "updated_at": datetime.utcnow()
-                                }
-                            }
-                        )
-                        logger.info(f"✅ [EMBEDDING] Generated and stored embedding for teacher {teacher_id}")
-                    else:
-                        # Update status to reflect failure
-                        teacher_collection.update_one(
-                            {"_id": ObjectId(teacher_id)},
-                            {
-                                "$set": {
-                                    "embedding_status": emb_status,
-                                    "updated_at": datetime.utcnow()
-                                }
-                            }
-                        )
-                        logger.warning(f"⚠️ [EMBEDDING] Embedding generation {emb_status} for teacher {teacher_id}")
-                except Exception as e:
-                    logger.error(f"🔴 [EMBEDDING] Exception for teacher {teacher_id}: {str(e)}")
-                    teacher_collection.update_one(
-                        {"_id": ObjectId(teacher_id)},
-                        {
-                            "$set": {
-                                "embedding_status": "failed",
-                                "updated_at": datetime.utcnow()
-                            }
-                        }
-                    )
+                )
+                
+                logger.info(f"✅ [EMBEDDING] Background task scheduled for {teacher_reg_id}")
             
             return {
                 "success": True,
-                "image_type": image_type,
-                "message": "Image uploaded successfully. Face registration initiated."
+                "message": "Image uploaded successfully, embedding generation started in background"
             }
+            
             
         except Exception as e:
             logger.error(f"Error uploading image for teacher {teacher_id}: {str(e)}")

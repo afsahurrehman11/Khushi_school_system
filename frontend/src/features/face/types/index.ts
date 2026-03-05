@@ -45,6 +45,134 @@ export interface DashboardStats {
   employees: EmployeeStats;
 }
 
+export interface TodaySummary {
+  students: {
+    total: number;
+    checked_in: number;
+    checked_out: number;
+    present: number;
+    late: number;
+    absent: number;
+    attendance_rate: number;
+  };
+  teachers: {
+    total: number;
+    checked_in: number;
+    checked_out: number;
+    present: number;
+    late: number;
+    absent: number;
+    attendance_rate: number;
+  };
+}
+
+export interface StudentAttendanceDetail {
+  student_id: string;
+  name: string;
+  father_name: string;
+  class_id: string;
+  section: string;
+  roll_number: string;
+  registration_number: string;
+  check_in_time: string | null;
+  check_out_time: string | null;
+  status: string;
+  confidence: number;
+}
+
+export interface TeacherAttendanceDetail {
+  teacher_id: string;
+  name: string;
+  email: string;
+  phone: string;
+  department: string;
+  check_in_time: string | null;
+  check_out_time: string | null;
+  status: string;
+  confidence: number;
+}
+
+export interface HourlyStats {
+  hours: string[];
+  students: number[];
+  teachers: number[];
+}
+
+export interface CombinedDashboardData {
+  summary: TodaySummary;
+  students: StudentAttendanceDetail[];
+  teachers: TeacherAttendanceDetail[];
+  hourly_stats: HourlyStats;
+  late_students: LateArrival[];
+  late_teachers: LateArrival[];
+  absent_groups: AbsentGroup[];
+  total_absent: number;
+  cached_at: string | null;
+  cache_ttl: number;
+}
+
+export interface LateArrival {
+  student_id?: string;
+  teacher_id?: string;
+  name: string;
+  father_name?: string;
+  class_id?: string;
+  section?: string;
+  roll_number?: string;
+  registration_number?: string;
+  email?: string;
+  phone?: string;
+  department?: string;
+  check_in_time: string;
+  confidence: number;
+}
+
+export interface AbsentGroup {
+  class_id: string;
+  section: string;
+  absent_count: number;
+  students: Array<{
+    student_id: string;
+    name: string;
+    father_name: string;
+    roll_number: string;
+    registration_number: string;
+  }>;
+}
+
+export interface DebugRanking {
+  person_type: 'student' | 'teacher';
+  person_id: string;
+  name: string;
+  student_id?: string;
+  teacher_id?: string;
+  class_id?: string;
+  section?: string;
+  email?: string;
+  confidence: number;
+}
+
+export interface CacheStats {
+  cache_loaded: boolean;
+  students_count: number;
+  teachers_count: number;
+  total_embeddings: number;
+  students: Array<{
+    id: string;
+    name: string;
+    student_id: string;
+    class_id: string;
+    has_image: boolean;
+  }>;
+  teachers: Array<{
+    id: string;
+    name: string;
+    teacher_id: string;
+    email: string;
+    has_image: boolean;
+  }>;
+}
+
 export interface FaceActivity {
   id: string;
   person_type: 'student' | 'employee';
@@ -122,7 +250,9 @@ export interface AttendanceResult {
   class_id?: string;
   section?: string;
   roll_number?: string;
-  time: string;
+  check_in_time?: string;
+  check_out_time?: string;
+  time?: string;
   confidence: number;
 }
 

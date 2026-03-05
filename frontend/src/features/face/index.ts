@@ -8,6 +8,8 @@ export { default as FaceDashboard } from './pages/FaceDashboard';
 export { default as FaceStudents } from './pages/FaceStudents';
 export { default as FaceEmployees } from './pages/FaceEmployees';
 export { default as FaceRecognition } from './pages/FaceRecognition';
+export { default as MultiCameraFaceRecognition } from './pages/MultiCameraFaceRecognition';
+export { default as MultiCameraSessionView } from './pages/MultiCameraSessionView';
 export { default as FaceSettings } from './pages/FaceSettings';
 
 // Services

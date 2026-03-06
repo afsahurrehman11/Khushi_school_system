@@ -30,6 +30,7 @@ interface FormData {
   phone: string;
   address: string;
   arrears: string; // Per-student arrears (PKR) - stored as string for input
+  scholarship: string; // Scholarship percentage (0-100) as string for input
 }
 
 const initialFormData: FormData = {
@@ -45,6 +46,7 @@ const initialFormData: FormData = {
   phone: '',
   address: '',
   arrears: '',
+  scholarship: '',
 };
 
 const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onStudentAdded, student, onStudentUpdated, classesFromParent }) => {
@@ -112,6 +114,16 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
       return;
     }
 
+    // Validate scholarship percent if provided
+    if (formData.scholarship) {
+      const sp = parseFloat(formData.scholarship);
+      if (isNaN(sp) || sp < 0 || sp > 100) {
+        setError('Scholarship percent must be a number between 0 and 100');
+        setSubmitting(false);
+        return;
+      }
+    }
+
     try {
       const payload = {
         full_name: formData.full_name.trim(),
@@ -130,6 +142,7 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
         contact_info: {
           phone: formData.phone || null,
         },
+        scholarship_percent: formData.scholarship ? parseFloat(formData.scholarship) : 0,
       };
 
       if (student && student.id) {
@@ -246,6 +259,7 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
         phone: student.phone || (student.contact_info?.phone) || '',
         address: student.address || (student.guardian_info?.address) || '',
         arrears: student.arrears ? String(student.arrears) : '',
+        scholarship: student.scholarship_percent != null ? String(student.scholarship_percent) : '',
       });
     } else {
       setFormData({ ...initialFormData });
@@ -533,6 +547,25 @@ const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSt
                 className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-all text-sm"
               />
               <p className="text-xs text-secondary-500 mt-1">Per-student outstanding fee amount</p>
+            </div>
+
+            {/* Row 9: Scholarship Percent */}
+            <div>
+              <label className="block text-sm font-medium text-secondary-700 mb-1">
+                Scholarship (%)
+              </label>
+              <input
+                type="number"
+                name="scholarship"
+                value={formData.scholarship}
+                onChange={handleChange}
+                placeholder="0"
+                min="0"
+                max="100"
+                step="0.01"
+                className="w-full px-3 py-2 border border-secondary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-all text-sm"
+              />
+              <p className="text-xs text-secondary-500 mt-1">Enter discount percentage (0-100)</p>
             </div>
           </div>
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, AlertCircle, ChevronDown, UserPlus } from 'lucide-react';
 import Modal from '../../../components/Modal';
@@ -17,8 +17,7 @@ import { apiCallJSON, getAuthHeaders } from '../../../utils/api';
 import { entitySync, useEntitySync } from '../../../utils/entitySync';
 import { Student } from '../studentsData';
 
-// Lazy load StudentFeeTab for M8 performance optimization
-const StudentFeeTab = lazy(() => import('../components/StudentFeeTab'));
+// Student fee tab moved to the centralized Fees page to avoid duplicate locations
 
 const StudentList: React.FC = () => {
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
@@ -538,10 +537,12 @@ const StudentList: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="min-h-[500px]">
-                <Suspense fallback={<div className="flex items-center justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div><span className="ml-3 text-secondary-600">Loading fee management...</span></div>}>
-                  <StudentFeeTab studentId={String(selectedStudent.id)} studentName={selectedStudent.name} />
-                </Suspense>
+              <div className="min-h-[200px] flex flex-col items-center justify-center space-y-4">
+                <p className="text-gray-600">Fee management has moved to the central Fees page.</p>
+                <div className="flex gap-2">
+                  <Button variant="primary" onClick={() => { window.location.href = `/#/fees?studentId=${encodeURIComponent(String(selectedStudent.id))}`; }}>Open Fees Page</Button>
+                  <Button variant="ghost" onClick={() => setStudentDetailTab('profile')}>Back to Profile</Button>
+                </div>
               </div>
             )}
           </Modal>

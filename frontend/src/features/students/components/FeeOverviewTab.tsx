@@ -7,6 +7,10 @@ import React, { useState, useEffect } from 'react';
 import { StudentFeeOverview, PaymentMethodType } from '../../../types';
 import studentFeeService from '../../../services/studentFees';
 import Button from '../../../components/Button';
+import { authService } from '../../../services/auth';
+import { InAppNotificationService } from '../../accountant/services';
+import { useCashSession } from '../../accountant/hooks/useCashSession';
+import PastPaymentModal from './PastPaymentModal';
 
 interface FeeOverviewTabProps {
   studentId: string;
@@ -34,6 +38,7 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
   // Payment form state
   const [paymentAmount, setPaymentAmount] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodType>('CASH');
+  const [paymentMethodName, setPaymentMethodName] = useState('');
   const [transactionRef, setTransactionRef] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -42,6 +47,7 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
   // Scholarship edit state
   const [editingScholarship, setEditingScholarship] = useState(false);
   const [scholarshipValue, setScholarshipValue] = useState('');
+  const [showPastPaymentModal, setShowPastPaymentModal] = useState(false);
 
   const loadOverview = async () => {
     try {
@@ -61,6 +67,8 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
     loadOverview();
   }, [studentId]);
 
+  const { session: cashSession } = useCashSession();
+
   const handlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!overview?.current_month_fee || !paymentAmount) return;
@@ -76,27 +84,48 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
       return;
     }
 
+    // Role check: only 'accountant' or 'admin' allowed
+    const user = authService.getUser();
+    const role = user?.role?.toLowerCase();
+    if (!(role === 'accountant' || role === 'admin')) {
+      InAppNotificationService.error('Only users with Accountant or Admin role can record payments');
+      return;
+    }
+
+    // Cash session check
+    const isSessionActive = cashSession?.status === 'active';
+    if (!isSessionActive) {
+      InAppNotificationService.error('Please activate your accounting session first from the Accountant Dashboard');
+      return;
+    }
+
     try {
       setSubmitting(true);
       setPaymentError(null);
-      
+
+      // Compose notes: include method name when provided
+      const notesParts: string[] = [];
+      if (paymentMethod !== 'CASH' && paymentMethodName) notesParts.push(`method_name=${paymentMethodName}`);
+
       await studentFeeService.createPayment(
         studentId,
         overview.current_month_fee.id,
         amount,
         paymentMethod,
-        transactionRef || undefined
+        transactionRef || undefined,
+        notesParts.join(';') || undefined
       );
-      
+
       setPaymentSuccess(true);
       setPaymentAmount('');
       setTransactionRef('');
-      
+      setPaymentMethodName('');
+
       // Refresh data
       await loadOverview();
       onRefresh?.();
       onPaymentSuccess?.();
-      
+
       setTimeout(() => setPaymentSuccess(false), 3000);
     } catch (err: any) {
       setPaymentError(err.message || 'Failed to record payment');
@@ -164,6 +193,11 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
 
   const currentFee = overview.current_month_fee;
 
+  // Try to derive fee category components from overview or current fee
+  const feeCategoryComponents: { component_name: string; amount: number }[] | null = (
+    (overview as any)?.fee_category?.components || (currentFee as any)?.components || null
+  );
+
   return (
     <div className="space-y-6">
       {/* Student Information Card */}
@@ -194,8 +228,8 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
                   onChange={(e) => setScholarshipValue(e.target.value)}
                   className="w-20 px-2 py-1 border rounded text-sm"
                 />
-                <button onClick={handleScholarshipUpdate} className="text-green-600 hover:text-green-800">✓</button>
-                <button onClick={() => setEditingScholarship(false)} className="text-red-600 hover:text-red-800">✕</button>
+                <button onClick={handleScholarshipUpdate} className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">Save</button>
+                <button onClick={() => setEditingScholarship(false)} className="px-3 py-1 bg-gray-200 text-gray-800 rounded text-sm hover:bg-gray-300">Cancel</button>
               </div>
             ) : (
               <div className="flex items-center gap-2">
@@ -237,6 +271,20 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
           </div>
           
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            {/* If fee category components are provided, show them */}
+            {feeCategoryComponents && feeCategoryComponents.length > 0 && (
+              <div className="col-span-2 md:col-span-3">
+                <h4 className="text-sm text-gray-600 mb-2">Assigned Fee Category Breakdown</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
+                  {feeCategoryComponents.map((c, idx) => (
+                    <div key={idx} className="bg-gray-50 rounded p-3">
+                      <p className="text-sm text-gray-500">{c.component_name}</p>
+                      <p className="font-semibold text-gray-900">{formatCurrency(c.amount)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="bg-gray-50 rounded p-3">
               <p className="text-sm text-gray-500">Base Fee</p>
               <p className="font-semibold text-gray-900">{formatCurrency(currentFee.base_fee)}</p>
@@ -318,6 +366,12 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
                 <option value="OTHER">Other</option>
               </select>
             </div>
+            {paymentMethod !== 'CASH' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Method Name (e.g., Bank/Service)</label>
+                <input type="text" value={paymentMethodName} onChange={(e) => setPaymentMethodName(e.target.value)} placeholder="e.g., Bank of ABC" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Reference (Optional)</label>
               <input
@@ -338,7 +392,15 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
               </button>
             </div>
           </form>
+
+          <div className="mt-4">
+            <button onClick={() => setShowPastPaymentModal(true)} className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">Record Past Payment</button>
+          </div>
         </div>
+      )}
+
+      {showPastPaymentModal && (
+        <PastPaymentModal studentId={studentId} onClose={() => setShowPastPaymentModal(false)} onRecorded={async () => { await loadOverview(); onRefresh?.(); onPaymentSuccess?.(); }} />
       )}
 
       {/* Summary Stats */}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import Button from '../../../components/Button';
 import FeeCategoryModal from '../components/FeeCategoryModal';
 import FeeVoucherSettingsModal from '../components/FeeVoucherSettingsModal';
@@ -6,7 +6,7 @@ import { InAppNotificationService } from '../services';
 import { api } from '../../../utils/api';
 import { config } from '../../../config';
 import { authService } from '../../../services/auth';
-import { useCashSession } from '../hooks/useCashSession';
+
 
 interface ClassData {
   id: string;
@@ -45,20 +45,20 @@ const FeePage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showVoucherSettingsModal, setShowVoucherSettingsModal] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('cash');
-  const [customPaymentMethod, setCustomPaymentMethod] = useState('');
-  const [savedPaymentMethods, setSavedPaymentMethods] = useState<string[]>([]);
-  const [transactionRef, setTransactionRef] = useState('');
-  const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [, setSavedPaymentMethods] = useState<string[]>([]);
   const [downloadingVoucher, setDownloadingVoucher] = useState(false);
   const [downloadingClassVouchers, setDownloadingClassVouchers] = useState<string | null>(null);
   const [jobProgress, setJobProgress] = useState<{ jobId: string, status: string, progress: number, type: string } | null>(null);
   const [classDetails, setClassDetails] = useState<Record<string, { loading: boolean; student_count?: number; fee_category?: any; fee_summary?: any }>>({});
+  const [selectedFeeTab, setSelectedFeeTab] = useState<'overview' | 'history' | 'records' | 'record'>('overview');
 
-  // Cash session for validating payments are only recorded with active session
-  const { session: cashSession } = useCashSession();
-  const isSessionActive = cashSession?.status === 'active';
+  // Lazy-load student fee components
+  const FeeOverviewTab = lazy(() => import('../../../features/students/components/FeeOverviewTab'));
+  const MonthlyHistoryTab = lazy(() => import('../../../features/students/components/MonthlyHistoryTab'));
+  const PaymentRecordsTab = lazy(() => import('../../../features/students/components/PaymentRecordsTab'));
+  const RecordPaymentTab = lazy(() => import('../../../features/students/components/RecordPaymentTab'));
+
+  // Cash session hook removed (not needed in this view)
 
   useEffect(() => {
     loadClasses();
@@ -536,81 +536,14 @@ const FeePage: React.FC = () => {
     }
   };
 
-  const handlePaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedStudent || !selectedClass) return;
-
-    // Check if accounting session is active before allowing payment
-    if (!isSessionActive) {
-      InAppNotificationService.error('Please activate your accounting session first. Go to Accountant Dashboard to activate.');
-      return;
-    }
-
-    const amount = parseFloat(paymentAmount);
-    if (isNaN(amount) || amount <= 0) {
-      InAppNotificationService.error('Please enter a valid payment amount');
-      return;
-    }
-
-    // Validate payment amount doesn't exceed remaining due
-    if (amount > selectedStudent.remaining_amount) {
-      InAppNotificationService.error('Payment amount cannot exceed remaining due amount');
-      return;
-    }
-
-    const finalPaymentMethod = paymentMethod === 'cash' ? 'cash' : customPaymentMethod;
-
-    setSubmittingPayment(true);
-    try {
-      await api.post('/fee-payments', {
-        school_id: authService.getSchoolId(),
-        student_id: selectedStudent.id,
-        class_id: selectedClass.id,
-        amount_paid: amount,
-        payment_method: finalPaymentMethod,
-        transaction_reference: transactionRef || undefined,
-      });
-
-      InAppNotificationService.success('Payment recorded successfully');
-
-      // Reset form
-      setPaymentAmount('');
-      setCustomPaymentMethod('');
-      setTransactionRef('');
-
-      // Refresh student data
-      if (selectedClass) {
-        await loadStudentsForClass(selectedClass);
-      }
-
-      // Refresh current student data
-      try {
-        const summary = await api.get(`/fee-payments/student/${selectedStudent.id}/summary`);
-        setSelectedStudent(prev => prev ? {
-          ...prev,
-          fee_status: summary.status as 'paid' | 'partial' | 'unpaid',
-          paid_amount: summary.paid_amount,
-          remaining_amount: summary.remaining_amount,
-        } : null);
-      } catch (e) {
-        // Ignore
-      }
-
-    } catch (error) {
-      InAppNotificationService.error('Failed to record payment');
-    } finally {
-      setSubmittingPayment(false);
-    }
-  };
+  
 
   if (selectedStudent) {
     return (
       <div className="min-h-screen p-8 bg-secondary-50">
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-bold text-primary-900">
-              Fee Management - {selectedStudent.full_name}
-            </h1>
+            <h1 className="text-2xl font-bold text-primary-900">Fee Management - {selectedStudent.full_name}</h1>
             <div className="flex items-center gap-2">
               <button
                 onClick={handleDownloadVoucher}
@@ -632,138 +565,33 @@ const FeePage: React.FC = () => {
                 </svg>
                 {downloadingVoucher ? 'Loading...' : 'Print Voucher'}
               </button>
-              <button
-                onClick={() => setSelectedStudent(null)}
-                className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors"
-              >
-                Back to Students
-              </button>
+              <button onClick={() => setSelectedStudent(null)} className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors">Back to Students</button>
             </div>
           </div>
 
-          {/* Fee Management Modal Content */}
           <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <h3 className="text-lg font-semibold mb-4">Student Information</h3>
-                <div className="space-y-2">
-                  <p><strong>Name:</strong> {selectedStudent.full_name}</p>
-                  <p><strong>Student ID:</strong> {selectedStudent.student_id}</p>
-                  <p><strong>Class:</strong> {selectedClass?.class_name}</p>
-                  <p><strong>Fee Category:</strong> {selectedStudent.fee_category}</p>
-                  {selectedClass?.fee_category?.components && selectedClass.fee_category.components.length > 0 && (
-                    <div className="mt-2">
-                      <h4 className="font-medium">Category Components</h4>
-                      <ul className="text-sm list-disc list-inside">
-                        {selectedClass.fee_category.components.map((c: any, idx: number) => (
-                          <li key={idx}>{c.name || 'Component'}: ${Number(c.amount || 0).toFixed(2)}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <h3 className="text-lg font-semibold mb-4">Fee Summary</h3>
-                <div className="space-y-2">
-                  <p><strong>Total Fee:</strong> ${selectedStudent.total_fee}</p>
-                  <p><strong>Paid Amount:</strong> ${selectedStudent.paid_amount}</p>
-                  <p><strong>Remaining:</strong> ${selectedStudent.remaining_amount}</p>
-                  <p><strong>Status:</strong>
-                    <span className={`ml-2 px-2 py-1 rounded text-sm ${getStatusColor(selectedStudent.fee_status)}`}>
-                      {getStatusText(selectedStudent.fee_status)}
-                    </span>
-                  </p>
-                </div>
-              </div>
+            <div className="flex border-b border-secondary-200 -mt-2 mb-4">
+              <button onClick={() => setSelectedFeeTab('overview')} className={`px-4 py-3 text-sm font-medium ${selectedFeeTab === 'overview' ? 'border-b-2 border-primary-500 text-primary-600' : 'text-secondary-500 hover:text-secondary-700'}`}>Overview</button>
+              <button onClick={() => setSelectedFeeTab('record')} className={`px-4 py-3 text-sm font-medium ${selectedFeeTab === 'record' ? 'border-b-2 border-primary-500 text-primary-600' : 'text-secondary-500 hover:text-secondary-700'}`}>Record Payment</button>
+              
+              <button onClick={() => setSelectedFeeTab('history')} className={`px-4 py-3 text-sm font-medium ${selectedFeeTab === 'history' ? 'border-b-2 border-primary-500 text-primary-600' : 'text-secondary-500 hover:text-secondary-700'}`}>Monthly History</button>
+              <button onClick={() => setSelectedFeeTab('records')} className={`px-4 py-3 text-sm font-medium ${selectedFeeTab === 'records' ? 'border-b-2 border-primary-500 text-primary-600' : 'text-secondary-500 hover:text-secondary-700'}`}>Payment Records</button>
             </div>
 
-            {/* Payment Form */}
-            <div className="mt-6">
-              <h3 className="text-lg font-semibold mb-4">Record Payment</h3>
-              <form onSubmit={handlePaymentSubmit} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Payment Amount *</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={paymentAmount}
-                      onChange={(e) => setPaymentAmount(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter amount"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Payment Method *</label>
-                    <select
-                      value={paymentMethod}
-                      onChange={(e) => {
-                        setPaymentMethod(e.target.value);
-                        if (e.target.value === 'cash') {
-                          setCustomPaymentMethod('');
-                        }
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      <option value="cash">Cash</option>
-                      <option value="bank_transfer">Bank Transfer</option>
-                      <option value="online">Online Payment</option>
-                      <option value="cheque">Cheque</option>
-                      <option value="other">Other</option>
-                    </select>
-                  </div>
-
-                  {/* Specific payment method input handled below with datalist (avoid duplicate) */}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-1">Transaction Reference</label>
-                  <input
-                    type="text"
-                    value={transactionRef}
-                    onChange={(e) => setTransactionRef(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Optional transaction reference"
-                  />
-                </div>
-
-                {/* When non-cash, show specific payment method name input with suggestions */}
-                {paymentMethod !== 'cash' && (
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Specific Payment Method *</label>
-                    <input
-                      type="text"
-                      list="savedPaymentMethods"
-                      value={customPaymentMethod}
-                      onChange={(e) => setCustomPaymentMethod(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="e.g., JazzCash, EasyPaisa, HBL Online"
-                      required
-                    />
-                    <datalist id="savedPaymentMethods">
-                      {savedPaymentMethods.map((m) => (
-                        <option key={m} value={m} />
-                      ))}
-                    </datalist>
-                  </div>
+            <div>
+              <Suspense fallback={<div className="py-8 text-center text-gray-600">Loading...</div>}>
+                {selectedFeeTab === 'overview' && (
+                  <FeeOverviewTab studentId={String(selectedStudent.id)} studentName={selectedStudent.full_name} studentCode={selectedStudent.student_id} className={selectedClass?.class_name} onPrintVoucher={handlePrintVoucher} onRefresh={async () => { if (selectedClass) await loadStudentsForClass(selectedClass); }} />
                 )}
 
-                <div className="flex justify-end">
-                  <Button
-                    type="submit"
-                    disabled={submittingPayment}
-                    className="px-6 py-2"
-                  >
-                    {submittingPayment ? 'Recording...' : 'Record Payment'}
-                  </Button>
-                </div>
-              </form>
+                {selectedFeeTab === 'record' && (
+                  <RecordPaymentTab studentId={String(selectedStudent.id)} onRecorded={async () => { if (selectedClass) await loadStudentsForClass(selectedClass); }} />
+                )}
+
+                {selectedFeeTab === 'history' && <MonthlyHistoryTab studentId={String(selectedStudent.id)} />}
+
+                {selectedFeeTab === 'records' && <PaymentRecordsTab studentId={String(selectedStudent.id)} />}
+              </Suspense>
             </div>
           </div>
         </div>

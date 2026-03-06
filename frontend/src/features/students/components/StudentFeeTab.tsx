@@ -20,17 +20,20 @@ const PaymentRecordsTab = lazy(() => import('./PaymentRecordsTab'));
 interface StudentFeeTabProps {
   studentId: string;
   studentName?: string;
+  onPaymentSuccess?: () => void;
 }
 
 type TabType = 'overview' | 'history' | 'payments';
 
-const StudentFeeTab: React.FC<StudentFeeTabProps> = ({ studentId, studentName }) => {
+const StudentFeeTab: React.FC<StudentFeeTabProps> = ({ studentId, studentName, onPaymentSuccess }) => {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Callback to refresh tabs after payment/update
   const handleRefresh = () => {
     setRefreshKey(k => k + 1);
+    // Notify parent if provided
+    try { onPaymentSuccess?.(); } catch (e) { /* safe noop */ }
   };
 
   const tabs = [

@@ -98,13 +98,13 @@ const PaymentCharts: React.FC<PaymentChartsProps> = ({ studentId, year }) => {
 
   return (
     <div className="bg-white rounded-lg shadow p-6">
-      <h3 className="text-lg font-semibold text-gray-800 mb-6">Payment Analytics - {year}</h3>
+      <h3 className="text-base font-medium text-gray-800 mb-4">Payment Analytics - {year}</h3>
       
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Pie Chart */}
         <div className="bg-gray-50 rounded-lg p-4">
           <h4 className="text-sm font-medium text-gray-700 text-center mb-2">Payment Status Distribution</h4>
-          <div className="h-64">
+          <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -113,7 +113,7 @@ const PaymentCharts: React.FC<PaymentChartsProps> = ({ studentId, year }) => {
                   cy="50%"
                   labelLine={false}
                   label={({ name, percent }) => `${name}: ${((percent ?? 0) * 100).toFixed(0)}%`}
-                  outerRadius={80}
+                  outerRadius={56}
                   fill="#8884d8"
                   dataKey="value"
                 >
@@ -122,7 +122,7 @@ const PaymentCharts: React.FC<PaymentChartsProps> = ({ studentId, year }) => {
                   ))}
                 </Pie>
                 <Tooltip formatter={(value) => [`${value} months`, '']} />
-                <Legend />
+                <Legend wrapperStyle={{ fontSize: '11px' }} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -131,14 +131,14 @@ const PaymentCharts: React.FC<PaymentChartsProps> = ({ studentId, year }) => {
         {/* Bar Chart */}
         <div className="bg-gray-50 rounded-lg p-4">
           <h4 className="text-sm font-medium text-gray-700 text-center mb-2">Monthly Payment Trend</h4>
-          <div className="h-64">
+          <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={barData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="month" tick={{ fontSize: 10 }} />
                 <YAxis tickFormatter={(value) => `Rs. ${(value / 1000).toFixed(0)}k`} tick={{ fontSize: 10 }} />
                 <Tooltip formatter={(value) => formatCurrency(Number(value ?? 0))} />
-                <Legend wrapperStyle={{ fontSize: '12px' }} />
+                <Legend wrapperStyle={{ fontSize: '11px' }} />
                 <Bar dataKey="Total Fee" fill="#3b82f6" />
                 <Bar dataKey="Paid" fill="#22c55e" />
                 <Bar dataKey="Remaining" fill="#ef4444" />
@@ -149,29 +149,21 @@ const PaymentCharts: React.FC<PaymentChartsProps> = ({ studentId, year }) => {
       </div>
 
       {/* Quick Stats below charts */}
-      <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="text-center p-3 bg-green-50 rounded-lg">
-          <p className="text-2xl font-bold text-green-600">
-            {chartData.status_pie_chart.data[0] || 0}
-          </p>
+      <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="text-center p-2 bg-green-50 rounded-lg">
+          <p className="text-xl font-semibold text-green-600">{chartData.status_pie_chart.data[0] || 0}</p>
           <p className="text-sm text-gray-600">Paid Months</p>
         </div>
-        <div className="text-center p-3 bg-yellow-50 rounded-lg">
-          <p className="text-2xl font-bold text-yellow-600">
-            {chartData.status_pie_chart.data[1] || 0}
-          </p>
+        <div className="text-center p-2 bg-yellow-50 rounded-lg">
+          <p className="text-xl font-semibold text-yellow-600">{chartData.status_pie_chart.data[1] || 0}</p>
           <p className="text-sm text-gray-600">Partial Months</p>
         </div>
-        <div className="text-center p-3 bg-red-50 rounded-lg">
-          <p className="text-2xl font-bold text-red-600">
-            {chartData.status_pie_chart.data[2] || 0}
-          </p>
+        <div className="text-center p-2 bg-red-50 rounded-lg">
+          <p className="text-xl font-semibold text-red-600">{chartData.status_pie_chart.data[2] || 0}</p>
           <p className="text-sm text-gray-600">Unpaid Months</p>
         </div>
-        <div className="text-center p-3 bg-red-100 rounded-lg">
-          <p className="text-2xl font-bold text-red-700">
-            {chartData.status_pie_chart.data[3] || 0}
-          </p>
+        <div className="text-center p-2 bg-red-100 rounded-lg">
+          <p className="text-xl font-semibold text-red-700">{chartData.status_pie_chart.data[3] || 0}</p>
           <p className="text-sm text-gray-600">Overdue Months</p>
         </div>
       </div>

@@ -30,10 +30,6 @@ numpy>=1.26.4
 requests==2.31.0
 httpx>=0.24.0
 
-# --- PDF/Reports ---
-reportlab>=4.0.0
-matplotlib>=3.8.0
-
 # --- System Monitoring ---
 psutil>=5.9.0
 

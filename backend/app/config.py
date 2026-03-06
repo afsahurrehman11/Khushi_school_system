@@ -80,9 +80,10 @@ class Settings(BaseSettings):
     face_recognition_url: str = os.environ.get("FACE_RECOGNITION_URL", "http://localhost:5000")
     face_recognition_api_key: Optional[str] = os.environ.get("FACE_RECOGNITION_API_KEY", None)
     face_recognition_enabled: bool = os.environ.get("FACE_RECOGNITION_ENABLED", "true").lower() in ("1", "true", "yes")
-    # ONNX Face Recognition Models (~20MB) - Safe to preload on 512MB RAM
-    # Set to 'true' to skip preloading and use lazy loading instead
-    skip_ml_on_startup: bool = os.environ.get("SKIP_ML_ON_STARTUP", "false").lower() in ("1", "true", "yes")
+    # ONNX Face Recognition Models (~170MB) - Changed default to TRUE for production safety
+    # On constrained environments (Heroku 512MB RAM), lazy load models on first request
+    # Set to 'false' to preload models at startup (requires 1GB+ RAM per worker)
+    skip_ml_on_startup: bool = os.environ.get("SKIP_ML_ON_STARTUP", "true").lower() in ("1", "true", "yes")
 
     # Cloudinary Configuration
     cloudinary_cloud_name: str = os.environ.get("CLOUDINARY_CLOUD_NAME", "")

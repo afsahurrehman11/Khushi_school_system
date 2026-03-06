@@ -25,22 +25,25 @@ if not logger.handlers:
 
 # Lazy loading flags for ML libraries
 _ml_libs_initialized = False
-USE_ONNX = False
-_ONNX_SESSION = None
+USE_FACENET = False  # Using FaceNet PyTorch, not ONNX
+_FACENET_MODEL = None
 Image = None
 CV2_AVAILABLE = False
 cv2 = None
 
+# Track which schools have loaded embeddings to avoid reloading
+_school_embeddings_loaded: set = set()
+
 def _init_ml_libs():
-    """Lazily initialize ML libraries (ONNX Runtime, OpenCV).
+    """Lazily initialize ML libraries (FaceNet PyTorch, OpenCV).
     
     Only called when actually needed for face recognition operations,
     not at module import time to avoid slow server startup.
     
-    Uses ONNX Runtime (~15MB) + ArcFace ResNet100 (~170MB) instead of
-    PyTorch (~280MB) + FaceNet (~107MB).
+    FaceNet loads on-demand from model file (~280MB); not loaded until
+    user clicks 'Start Integration' button or first recognition request.
     """
-    global _ml_libs_initialized, USE_ONNX, _ONNX_SESSION, Image, CV2_AVAILABLE, cv2
+    global _ml_libs_initialized, USE_FACENET, _FACENET_MODEL, Image, CV2_AVAILABLE, cv2
     
     if _ml_libs_initialized:
         return
@@ -48,24 +51,34 @@ def _init_ml_libs():
     _ml_libs_initialized = True
     logger.info("📦 Initializing ML libraries for face recognition...")
     
-    # Try to load ONNX Runtime with ArcFace ResNet100
+    # Set BLAS/LAPACK thread limits to avoid CPU thrashing
+    # These must be set BEFORE importing torch/numpy
+    import os
+    os.environ['OMP_NUM_THREADS'] = '1'
+    os.environ['MKL_NUM_THREADS'] = '1'
+    os.environ['OPENBLAS_NUM_THREADS'] = '1'
+    os.environ['VECLIB_MAXIMUM_THREADS'] = '1'
+    os.environ['NUMEXPR_NUM_THREADS'] = '1'
+    logger.info("🔧 BLAS thread limits set to 1 (single-threaded, low RAM)")
+    
+    # Try to load FaceNet PyTorch model
     try:
         from PIL import Image as _Image
         Image = _Image
         
-        # Import EmbeddingGenerator which handles ONNX model loading
-        from .embedding_service import EmbeddingGenerator, _init_arcface
+        # Import FaceNet embedding generator
+        from .embedding_service import EmbeddingGenerator, _init_facenet
 
-        # Initialize the ONNX model
-        if _init_arcface():
-            USE_ONNX = True
-            logger.info("✅ ArcFace ResNet100 ONNX loaded")
+        # Initialize the FaceNet model
+        if _init_facenet():
+            USE_FACENET = True
+            logger.info("✅ FaceNet PyTorch loaded")
         else:
-            logger.info("ArcFace ResNet100 ONNX not available")
+            logger.info("FaceNet PyTorch not available")
             
     except Exception as e:
-        logger.info(f"ONNX face recognition not available: {e}")
-        USE_ONNX = False
+        logger.info(f"FaceNet face recognition not available: {e}")
+        USE_FACENET = False
 
     # Try OpenCV for face detection
     try:
@@ -79,8 +92,8 @@ def _init_ml_libs():
 
 def _get_embedding_version():
     """Get embedding version based on available libraries."""
-    _init_ml_libs()
-    return "arcface_resnet100_onnx_v1" if USE_ONNX else "fallback_v1"
+    # Don't auto-init; FaceNet loads on-demand
+    return "facenet_pytorch_v1" if USE_FACENET else "fallback_v1"
 
 # In-memory embedding cache
 _embedding_cache: Dict[str, Dict[str, Any]] = {
@@ -244,6 +257,30 @@ class FaceRecognitionService:
         logger.info("=" * 60)
         
         return {"students": student_count, "employees": employee_count}
+    
+    async def ensure_school_embeddings_loaded(self, school_id: str) -> Dict[str, int]:
+        """Lazy-load embeddings for a school only once.
+        
+        Tracks which schools have been loaded to avoid reloading.
+        Preserves _embedding_cache structure and disk caching.
+        
+        Returns: {"students": count, "employees": count}
+        """
+        global _school_embeddings_loaded
+        
+        if school_id in _school_embeddings_loaded:
+            logger.info(f"✅ Embeddings already loaded for school: {school_id}")
+            return {
+                "students": len(_embedding_cache.get("students", {})), 
+                "employees": len(_embedding_cache.get("employees", {}))
+            }
+        
+        logger.info(f"🔄 Lazy-loading embeddings for school: {school_id}")
+        counts = await self.load_embeddings_to_cache(school_id)
+        _school_embeddings_loaded.add(school_id)
+        
+        logger.info(f"✅ School {school_id} embeddings loaded: {counts}")
+        return counts
     
     def refresh_cache_entry(self, person_type: str, person_id: str, data: Dict[str, Any]):
         """Update a single entry in cache"""

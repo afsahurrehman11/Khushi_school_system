@@ -194,6 +194,12 @@ try:
     )
     logger.info("✅ CORS middleware added")
 
+    # Gzip compression middleware (reduce response sizes by 50-70%)
+    # Use Starlette's GZipMiddleware (FastAPI may not export it directly)
+    from starlette.middleware.gzip import GZipMiddleware
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+    logger.info("✅ GZip compression middleware added (min_size=1000 bytes)")
+
     # Normalize incoming paths: handle accidental duplicate '/api/api' prefixes
     @app.middleware("http")
     async def _normalize_api_prefix(request: Request, call_next):
@@ -404,6 +410,7 @@ async def startup_event():
     try:
         if not getattr(settings, "skip_ml_on_startup", True):
             logger.info("🚀 ML model preloading enabled - loading face recognition models (blocking startup)...")
+            logger.warning("⚠️  WARNING: This requires 1GB+ RAM per worker. For Heroku (512MB), set SKIP_ML_ON_STARTUP=true")
             from app.services.embedding_background_tasks import preload_models_at_startup
             result = await preload_models_at_startup()
             if result.get("success"):
@@ -415,10 +422,11 @@ async def startup_event():
                 # making the whole service unavailable.
                 logger.error("❌ ML model preload failed. Continuing without preloaded models.")
                 logger.warning("   Models will load lazily on first use (may add a short delay)")
-                logger.warning("   Check network connectivity or set SKIP_ML_ON_STARTUP=true to skip preload")
+                logger.warning("   For future starts, set SKIP_ML_ON_STARTUP=true to skip preload")
         else:
-            logger.info("🔕 ML model preloading disabled (SKIP_ML_ON_STARTUP=true)")
-            logger.info("   Face recognition models will load on first use (may add 2-3s delay)")
+            logger.info("✅ ML model preloading disabled (SKIP_ML_ON_STARTUP=true)")
+            logger.info("   Face recognition models will load on first use (may add 3-5s to first request)")
+            logger.info("   This is the recommended setting for production on Heroku (512MB dyno)")
 
         # Now the server is ready
         logger.info("=" * 60)

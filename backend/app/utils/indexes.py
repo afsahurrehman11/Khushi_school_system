@@ -20,6 +20,9 @@ def _student_indexes() -> List[Any]:
         ([("student_id", 1)], {}),
         ([("class_id", 1)], {}),
         ([("registration_number", 1)], {}),
+        # Face recognition indexes: speed up embedding cache loading
+        ([("school_id", 1), ("embedding_status", 1)], {}),
+        ([("school_id", 1), ("embedding_status", 1), ("face_embedding", 1)], {}),
     ]
 
 
@@ -43,6 +46,9 @@ def _teachers_indexes() -> List[Any]:
     return [
         ([("school_id", 1)], {}),
         ([("teacher_id", 1)], {}),
+        # Face recognition indexes: speed up embedding cache loading
+        ([("school_id", 1), ("embedding_status", 1)], {}),
+        ([("school_id", 1), ("embedding_status", 1), ("face_embedding", 1)], {}),
     ]
 
 

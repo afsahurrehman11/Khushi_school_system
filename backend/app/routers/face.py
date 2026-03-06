@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Backgro
 from typing import Optional, List
 from pydantic import BaseModel
 import logging
+import asyncio
 
 from ..database import get_db
 from ..dependencies.auth import get_current_user, get_current_admin
@@ -18,6 +19,46 @@ from ..services.face_service import (
 logger = logging.getLogger('face')
 
 router = APIRouter(prefix="/api/face", tags=["Face Recognition"])
+
+# ===== Concurrency & Rate Control =====
+# Limit concurrent face recognition inferences to control RAM/CPU spikes
+# Allows up to 2 simultaneous inferences; excess requests get 429 (Too Many Requests)
+_inference_semaphore = asyncio.Semaphore(2)
+_max_queue_size = 50  # Additional requests beyond semaphore are rejected
+
+_inference_queue_size = 0
+
+async def _acquire_inference_slot():
+    """Acquire slot for face inference with backpressure.
+    
+    Raises HTTPException 429 if queue is full.
+    Otherwise waits for semaphore (up to 2 concurrent inferences).
+    """
+    global _inference_queue_size
+    
+    if _inference_queue_size >= _max_queue_size:
+        logger.warning(f"⚠️ Inference queue full ({_inference_queue_size}), rejecting request")
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "Face recognition service overloaded",
+                "message": "Too many pending requests. Please retry in a few seconds.",
+                "retry_after": 5
+            }
+        )
+    
+    _inference_queue_size += 1
+    try:
+        await _inference_semaphore.acquire()
+    except Exception:
+        _inference_queue_size -= 1
+        raise
+
+def _release_inference_slot():
+    """Release inference slot after processing."""
+    global _inference_queue_size
+    _inference_semaphore.release()
+    _inference_queue_size = max(0, _inference_queue_size - 1)
 
 
 # Request/Response models
@@ -92,6 +133,58 @@ async def get_status(db=Depends(get_db)):
         "cached_employees": len(embedding_cache.get("employees", {})),
         "ready": True
     }
+
+
+@router.post("/init-models")
+async def init_models(
+    current_user: dict = Depends(get_current_user)
+):
+    """Initialize FaceNet model on-demand (called when user clicks 'Start Integration').
+    
+    Loads the model into RAM for fast face recognition. First call may take 5-10s.
+    Subsequent calls return immediately (model cached in memory).
+    
+    Returns: {"success": bool, "message": str, "load_time_seconds": float}
+    """
+    import time
+    start_time = time.time()
+    
+    try:
+        logger.info("🚀 User clicked 'Start Integration' - initializing FaceNet model...")
+        
+        from ..services.face_service import _init_ml_libs
+        from ..services import face_service as fs
+        
+        # Call the lazy init function (loads model if not already loaded)
+        _init_ml_libs()
+        
+        elapsed = time.time() - start_time
+        facenet_available = getattr(fs, 'USE_FACENET', False)
+        
+        if facenet_available:
+            logger.info(f"✅ FaceNet model initialized in {elapsed:.2f}s")
+            return {
+                "success": True,
+                "message": "FaceNet model loaded successfully. Face recognition ready.",
+                "load_time_seconds": round(elapsed, 2),
+                "model": "FaceNet PyTorch"
+            }
+        else:
+            logger.warning("⚠️ FaceNet model init returned but USE_FACENET=False")
+            return {
+                "success": False,
+                "message": "FaceNet model failed to initialize. Check server logs.",
+                "load_time_seconds": round(elapsed, 2)
+            }
+            
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(f"❌ Model init failed: {str(e)}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"Failed to initialize FaceNet: {str(e)}",
+            "load_time_seconds": round(elapsed, 2)
+        }
 
 
 # ============ Dashboard ============
@@ -369,6 +462,11 @@ async def recognize_face(
     """
     Process face recognition from captured image.
     Returns match or retry instruction.
+    
+    Implements lazy embedding loading and concurrency control:
+    - Loads embeddings for this school on first access
+    - Limits concurrent inferences to 2 to prevent memory spikes
+    - Returns 429 if queue is full (client should retry)
     """
     try:
         # Check database connection
@@ -388,26 +486,45 @@ async def recognize_face(
         if not image_data:
             raise HTTPException(status_code=400, detail="Empty image")
         
-        logger.info(f"[FACE] Recognition request: {len(image_data)} bytes")
+        logger.info(f"[FACE] Recognition request: {len(image_data)} bytes, school={school_id}")
         
-        # Get settings
-        settings_service = FaceSettingsService(db)
-        settings = await settings_service.get_settings(school_id)
-        
-        # Process recognition
+        # ===== LAZY EMBEDDING LOAD (first access) =====
         face_service = FaceRecognitionService(db)
-        result = await face_service.process_recognition(image_data, school_id, settings)
+        logger.info(f"[FACE] Ensuring embeddings loaded for school: {school_id}")
+        embed_counts = await face_service.ensure_school_embeddings_loaded(school_id)
+        logger.info(f"[FACE] Embeddings ready: {embed_counts}")
         
-        if result["status"] == "success":
-            # Record attendance
-            attendance = await face_service.record_attendance(
-                result["match"],
-                school_id,
-                settings
+        # ===== CONCURRENCY CONTROL =====
+        # Acquire inference slot with backpressure
+        await _acquire_inference_slot()
+        logger.info(f"[FACE] Acquired inference slot (queue_size={_inference_queue_size})")
+        
+        try:
+            # Get settings
+            settings_service = FaceSettingsService(db)
+            settings = await settings_service.get_settings(school_id)
+            
+            # ===== RUN INFERENCE IN THREAD POOL (non-blocking) =====
+            # This prevents CPU-bound face matching from blocking the async event loop
+            result = await asyncio.to_thread(
+                lambda: asyncio.run(face_service.process_recognition(image_data, school_id, settings))
             )
-            result["attendance"] = attendance
-        
-        return result
+            
+            if result["status"] == "success":
+                # Record attendance
+                attendance = await face_service.record_attendance(
+                    result["match"],
+                    school_id,
+                    settings
+                )
+                result["attendance"] = attendance
+            
+            return result
+            
+        finally:
+            # Always release the inference slot
+            _release_inference_slot()
+            logger.info(f"[FACE] Released inference slot (queue_size={_inference_queue_size})")
         
     except HTTPException:
         raise

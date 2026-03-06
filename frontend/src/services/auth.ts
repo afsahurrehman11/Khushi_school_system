@@ -32,26 +32,36 @@ class AuthService {
       });
 
       if (!response.ok) {
-        // Try JSON first, otherwise capture response text (HTML error pages)
+        // Handle non-JSON responses gracefully (HTML error pages from Heroku/proxy)
         const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const error = await response.json().catch(() => null);
-          logger.error('AUTH', `[API] ❌ Login failed: ${error?.detail || 'Unknown error'}`);
-          throw new Error(error?.detail || 'Login failed');
-        } else {
-          const text = await response.text().catch(() => '');
-          logger.error('AUTH', `[API] ❌ Login failed (non-JSON response): ${text.slice(0, 1000)}`);
-          throw new Error('Login failed: server returned non-JSON response');
+        let errorMsg = 'Login failed';
+        
+        try {
+          if (contentType.includes('application/json')) {
+            const error = await response.json().catch(() => null);
+            errorMsg = error?.detail || errorMsg;
+          } else {
+            // Non-JSON response; provide helpful message
+            if (response.status === 503) {
+              errorMsg = 'Backend service temporarily unavailable (loading). Please try again in 30 seconds.';
+            } else if (response.status >= 500) {
+              errorMsg = `Backend error (${response.status}). Please try again later.`;
+            }
+          }
+        } catch (e) {
+          // ignore parsing error
         }
+        
+        logger.error('AUTH', `[API] ❌ Login failed: ${errorMsg}`);
+        throw new Error(errorMsg);
       }
 
       let data: any;
       try {
         data = await response.json();
       } catch (parseErr) {
-        const text = await response.text().catch(() => '');
-        logger.error('AUTH', `[API] ❌ Login parse error: ${String(parseErr)}, response: ${text.slice(0, 1000)}`);
-        throw new Error('Login failed: invalid server response');
+        logger.error('AUTH', `[API] ❌ Login response parse error: ${String(parseErr)}`);
+        throw new Error('Login failed: invalid server response format');
       }
       // backend returns { access_token, token_type, user }
       const token = data.access_token || data.token;

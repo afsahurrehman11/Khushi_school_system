@@ -56,23 +56,35 @@ export const apiCallJSON = async <T = any>(
   }
   
   if (!response.ok) {
-    // Try to parse JSON error body; if it's not JSON (e.g., HTML error page), capture text for debugging
+    // Handle error responses with robustness against non-JSON payloads
     const contentType = response.headers.get('content-type') || '';
+    let errorMessage = `Request failed with status ${response.status}`;
+    
     if (contentType.includes('application/json')) {
       try {
         const error = await response.json();
-        logger.error('API', `Request failed: ${error.detail || `Status ${response.status}`}`);
-        throw new Error(error.detail || `Request failed with status ${response.status}`);
+        errorMessage = error.detail || errorMessage;
       } catch (parseErr) {
-        logger.error('API', `Request failed: Status ${response.status}, JSON parse error: ${String(parseErr)}`);
-        throw new Error(`Request failed with status ${response.status}`);
+        // Ignore JSON parse error; use generic message
       }
     } else {
-      // Non-JSON response (commonly HTML error pages); read text for diagnostics
-      const text = await response.text();
-      logger.error('API', `Request failed: Status ${response.status}, non-JSON response: ${text.slice(0, 1000)}`);
-      throw new Error(`Request failed with status ${response.status}: non-JSON response`);
+      // Non-JSON response (HTML error page from backend/proxy)
+      try {
+        const text = await response.text();
+        if (text.includes('Application Error')) {
+          errorMessage = 'Backend service error - server may be restarting. Please try again in a moment.';
+        } else if (text.includes('502') || text.includes('Bad Gateway')) {
+          errorMessage = 'Backend temporarily unavailable (502). Please retry.';
+        } else {
+          errorMessage = `Server error: ${response.status}. Please try again.`;
+        }
+      } catch (e) {
+        // Ignore any error reading response text
+      }
     }
+    
+    logger.error('API', `Endpoint ${endpoint} failed: ${errorMessage}`);
+    throw new Error(errorMessage);
   }
   
   // Ensure we actually received JSON

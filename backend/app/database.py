@@ -57,6 +57,9 @@ def _create_client(uri: str) -> MongoClient:
             'serverSelectionTimeoutMS': 30000,
             'connectTimeoutMS': 30000,
             'socketTimeoutMS': 30000,
+            'maxPoolSize': 8,      # Reduced from default 50 to save ~20MB per worker
+            'minPoolSize': 1,      # Minimal idle connections
+            'maxIdleTimeMS': 30000  # Close idle connections after 30s
         }
 
         if use_tls:

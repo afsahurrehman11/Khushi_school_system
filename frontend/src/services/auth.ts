@@ -32,12 +32,27 @@ class AuthService {
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        logger.error('AUTH', `[API] ❌ Login failed: ${error.detail || 'Unknown error'}`);
-        throw new Error(error.detail || 'Login failed');
+        // Try JSON first, otherwise capture response text (HTML error pages)
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const error = await response.json().catch(() => null);
+          logger.error('AUTH', `[API] ❌ Login failed: ${error?.detail || 'Unknown error'}`);
+          throw new Error(error?.detail || 'Login failed');
+        } else {
+          const text = await response.text().catch(() => '');
+          logger.error('AUTH', `[API] ❌ Login failed (non-JSON response): ${text.slice(0, 1000)}`);
+          throw new Error('Login failed: server returned non-JSON response');
+        }
       }
 
-      const data = await response.json();
+      let data: any;
+      try {
+        data = await response.json();
+      } catch (parseErr) {
+        const text = await response.text().catch(() => '');
+        logger.error('AUTH', `[API] ❌ Login parse error: ${String(parseErr)}, response: ${text.slice(0, 1000)}`);
+        throw new Error('Login failed: invalid server response');
+      }
       // backend returns { access_token, token_type, user }
       const token = data.access_token || data.token;
       const user = data.user;

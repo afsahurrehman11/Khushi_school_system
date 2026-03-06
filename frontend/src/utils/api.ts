@@ -56,16 +56,33 @@ export const apiCallJSON = async <T = any>(
   }
   
   if (!response.ok) {
-    try {
-      const error = await response.json();
-      logger.error('API', `Request failed: ${error.detail || `Status ${response.status}`}`);
-      throw new Error(error.detail || `Request failed with status ${response.status}`);
-    } catch (parseErr) {
-      logger.error('API', `Request failed: Status ${response.status}, parse error: ${parseErr}`);
-      throw new Error(`Request failed with status ${response.status}`);
+    // Try to parse JSON error body; if it's not JSON (e.g., HTML error page), capture text for debugging
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      try {
+        const error = await response.json();
+        logger.error('API', `Request failed: ${error.detail || `Status ${response.status}`}`);
+        throw new Error(error.detail || `Request failed with status ${response.status}`);
+      } catch (parseErr) {
+        logger.error('API', `Request failed: Status ${response.status}, JSON parse error: ${String(parseErr)}`);
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+    } else {
+      // Non-JSON response (commonly HTML error pages); read text for diagnostics
+      const text = await response.text();
+      logger.error('API', `Request failed: Status ${response.status}, non-JSON response: ${text.slice(0, 1000)}`);
+      throw new Error(`Request failed with status ${response.status}: non-JSON response`);
     }
   }
   
+  // Ensure we actually received JSON
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const text = await response.text();
+    logger.error('API', `Expected JSON but got: ${text.slice(0, 1000)}`);
+    throw new Error('Invalid server response: expected JSON');
+  }
+
   const data = await response.json();
   logger.info('API', `JSON success ${endpoint}`);
   // Log the actual response data for debugging

@@ -7,7 +7,9 @@ export class AudioFeedback {
   private failureAvailable = false;
 
   // public path where sound files are expected
-  private basePath = '/sounds/';
+  // Use a relative path (no leading slash) so assets resolve correctly
+  // both when served over HTTP and when loaded from file:// (Electron builds)
+  private basePath = './sounds/';
 
   constructor() {
     if (typeof window !== 'undefined') {

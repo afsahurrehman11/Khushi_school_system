@@ -28,10 +28,6 @@ import {
 import type { RecognitionResult, FaceStatus, DebugRanking, CacheStats } from '../types';
 import Button from '../../../components/Button';
 import logger from '../../../utils/logger';
-import { AudioFeedback } from '../../../utils/audioFeedback';
-
-// Initialize audio feedback singleton
-const audioFeedback = new AudioFeedback();
 
 // Recognition states
 type RecognitionState = 'idle' | 'detecting' | 'stabilizing' | 'capturing' | 'processing' | 'success' | 'failed' | 'no_match';
@@ -140,7 +136,6 @@ const FaceRecognition: React.FC = () => {
       }
       setErrorMessage(errorMsg);
       setRecognitionState('failed');
-      audioFeedback.playFailure();
     }
   };
 
@@ -276,8 +271,7 @@ const FaceRecognition: React.FC = () => {
           setResult(recognitionResult);
           setRecognitionState('success');
           
-          // Play success audio
-          audioFeedback.playSuccess();
+          // audio feedback removed
           
           logger.info(
             'FACE RECOGNITION',
@@ -316,8 +310,7 @@ const FaceRecognition: React.FC = () => {
       setRecognitionState('no_match');
       setErrorMessage(message);
       
-      // Play failure audio when max retries reached
-      audioFeedback.playFailure();
+      // audio feedback removed
       
       logger.error('FACE RECOGNITION', `Max retries reached: ${message}`);
 

@@ -23,8 +23,6 @@ import {
   Code,
   Plus,
   X,
-  Volume2,
-  VolumeX,
   User,
   ChevronDown,
   ChevronUp,
@@ -41,7 +39,6 @@ import {
 import type { RecognitionResult, DebugRanking, CacheStats } from '../types';
 import Button from '../../../components/Button';
 import logger from '../../../utils/logger';
-import { audioFeedback } from '../../../utils/audioFeedback';
 
 // Recognition states
 type RecognitionState = 'idle' | 'detecting' | 'stabilizing' | 'capturing' | 'processing' | 'success' | 'failed' | 'no_match';
@@ -72,7 +69,6 @@ const STABILITY_THRESHOLD = 10;
 const MultiCameraFaceRecognition: React.FC = () => {
   const [isLoadingEmbeddings, setIsLoadingEmbeddings] = useState(true);
   const [embeddingsError, setEmbeddingsError] = useState('');
-  const [audioEnabled, setAudioEnabled] = useState(true);
 
   // Camera devices
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>([]);
@@ -442,13 +438,7 @@ const MultiCameraFaceRecognition: React.FC = () => {
 
         addToDebugHistory(session.name, result, rankings);
 
-        if (audioEnabled) {
-          if (result.match && result.match.confidence >= MATCH_THRESHOLD) {
-            audioFeedback.playSuccess();
-          } else {
-            audioFeedback.playFailure();
-          }
-        }
+              // audio feedback removed
 
         setTimeout(() => {
           setSessions(prev => 
@@ -598,16 +588,7 @@ const MultiCameraFaceRecognition: React.FC = () => {
                 Add Camera
               </Button>
 
-              <button
-                onClick={() => setAudioEnabled(!audioEnabled)}
-                className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  audioEnabled
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : 'bg-secondary-200 text-secondary-600'
-                }`}
-              >
-                {audioEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-              </button>
+              {/* Audio control removed per request */}
 
               <button
                 onClick={() => setDevMode(!devMode)}

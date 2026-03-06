@@ -1,1 +1,0 @@
-"use strict";const{ipcRenderer:r,contextBridge:t}=require("electron"),c={on(...e){const[n,o]=e;return r.on(n,(i,...s)=>o(i,...s))},off(...e){const[n,...o]=e;return r.off(n,...o)},send(...e){const[n,...o]=e;return r.send(n,...o)},invoke(...e){const[n,...o]=e;return r.invoke(n,...o)}};t.exposeInMainWorld("ipcRenderer",c);t.exposeInMainWorld("electron",{ipcRenderer:c});

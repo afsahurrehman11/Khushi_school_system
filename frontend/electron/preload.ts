@@ -26,3 +26,28 @@ contextBridge.exposeInMainWorld('ipcRenderer', exposed)
 contextBridge.exposeInMainWorld('electron', { ipcRenderer: exposed })
 
 // You can expose other APIs you need here.
+
+// Expose a runtimeConfig object by reading a JSON file placed next to the executable.
+// This allows the packaged EXE to use a runtime override for things like the API URL
+// without rebuilding the app.
+try {
+  const fs = require('fs')
+  const path = require('path')
+  const execPath = process.execPath
+  const execDir = path.dirname(execPath)
+  const cfgName = 'khushi-runtime-config.json'
+  const cfgPath = path.join(execDir, cfgName)
+  let runtimeConfig = {}
+  if (fs.existsSync(cfgPath)) {
+    try {
+      const raw = fs.readFileSync(cfgPath, 'utf8')
+      runtimeConfig = JSON.parse(raw)
+    } catch (e) {
+      // ignore parse errors
+      runtimeConfig = {}
+    }
+  }
+  contextBridge.exposeInMainWorld('runtimeConfig', runtimeConfig)
+} catch (e) {
+  // If not running in Electron or fs not available, skip exposing runtimeConfig
+}

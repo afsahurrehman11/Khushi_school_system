@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import { ArrowLeft, AlertCircle, CheckCircle2 } from 'lucide-react';
 import logger from '../../../utils/logger';
-import { audioFeedback } from '../../../utils/audioFeedback';
 
 // Simple single-session view that accepts deviceId and name via query params
 const useQuery = () => {
@@ -23,7 +22,7 @@ const MultiCameraSessionView: React.FC = () => {
   const [status, setStatus] = useState<string>('idle');
   const [resultText, setResultText] = useState<string>('');
   const [confidence, setConfidence] = useState<number>(0);
-  const [audioEnabled, setAudioEnabled] = useState(true);
+  // audio feature removed
 
   useEffect(() => {
     const start = async () => {
@@ -59,11 +58,10 @@ const MultiCameraSessionView: React.FC = () => {
               // lightweight: POST to /api/face/recognize - but here we'll just set demo
               // TODO: integrate with existing recognizeFace service
               // For now show a fake success every now and then for demo
-              if (Math.random() > 0.98) {
+                if (Math.random() > 0.98) {
                 setResultText(name + ' (Demo User)');
                 setConfidence(0.91);
                 setStatus('success');
-                if (audioEnabled) audioFeedback.playSuccess();
                 setTimeout(() => {
                   setStatus('detecting');
                   setResultText('');
@@ -113,12 +111,7 @@ const MultiCameraSessionView: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => setAudioEnabled(e => !e)}
-                className={`px-3 py-2 rounded-lg text-sm ${audioEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-secondary-200 text-secondary-600'}`}
-              >
-                {audioEnabled ? 'Audio On' : 'Audio Off'}
-              </button>
+              {/* Audio feature removed */}
             </div>
           </div>
 

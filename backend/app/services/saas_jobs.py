@@ -255,34 +255,33 @@ class DataCleanupJob:
         }))
         
         removed_count = 0
+
+        # Process deleted schools sequentially and safely delete them.
+        # We avoid heavy concurrency here to keep the operation simple and predictable.
         for school in deleted_schools:
             school_id = school.get("school_id")
+            school_name = school.get("school_name")
             try:
-                # Hard delete the school
-                delete_saas_school(school_id, hard_delete=True)
+                delete_saas_school(school_id)
                 removed_count += 1
-                logger.info(f"[CLEANUP_JOB] 🗑️ Permanently removed school: {school_id}")
+                logger.info(f"[CLEANUP_JOB] ✅ Permanently removed deleted school: {school_name}")
             except Exception as e:
-                logger.error(f"[CLEANUP_JOB] ❌ Failed to remove school {school_id}: {e}")
-        
+                logger.error(f"[CLEANUP_JOB] ❌ Failed to remove {school_name}: {e}")
+
         return removed_count
-    
+
     async def run_cleanup(self) -> dict:
-        """Run all cleanup tasks"""
-        logger.info("[CLEANUP_JOB] Starting cleanup job")
-        
-        snapshots_removed = await self.cleanup_old_snapshots()
-        schools_removed = await self.cleanup_deleted_schools()
-        
-        results = {
-            "snapshots_removed": snapshots_removed,
-            "schools_removed": schools_removed,
-            "run_at": datetime.utcnow().isoformat()
-        }
-        
-        logger.info(f"[CLEANUP_JOB] Completed: {snapshots_removed} snapshots, {schools_removed} schools removed")
-        
-        return results
+        """Run cleanup subtasks and return a summary."""
+        logger.info("[CLEANUP_JOB] 🔄 Running cleanup tasks")
+        try:
+            snapshots_removed = await self.cleanup_old_snapshots()
+            schools_removed = await self.cleanup_deleted_schools()
+            self.last_run = datetime.utcnow()
+            logger.info(f"[CLEANUP_JOB] Completed: {snapshots_removed} snapshots removed, {schools_removed} schools removed")
+            return {"snapshots_removed": snapshots_removed, "schools_removed": schools_removed}
+        except Exception as e:
+            logger.error(f"[CLEANUP_JOB] ❌ Cleanup run failed: {e}")
+            return {"error": str(e)}
     
     async def start_scheduled_job(self, interval_hours: int = 24):
         """Start the scheduled cleanup job"""

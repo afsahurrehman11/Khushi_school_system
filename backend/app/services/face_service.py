@@ -6,6 +6,11 @@ Integrated with existing CMS attendance collections.
 Now uses ONNX Runtime + ArcFace ResNet100 (~170MB) instead of PyTorch (~400MB).
 """
 import logging
+import time
+try:
+    import psutil
+except Exception:
+    psutil = None
 import io
 import numpy as np
 import json
@@ -50,6 +55,17 @@ def _init_ml_libs():
     
     _ml_libs_initialized = True
     logger.info("📦 Initializing ML libraries for face recognition...")
+
+    def _mem_info():
+        if psutil:
+            vm = psutil.virtual_memory()
+            used_mb = int(vm.used / (1024 * 1024))
+            total_mb = int(vm.total / (1024 * 1024))
+            return f"{vm.percent:.1f}% used ({used_mb}MB / {total_mb}MB)"
+        else:
+            return "psutil not available"
+
+    logger.info(f"Memory before ML init: {_mem_info()}")
     
     # Set BLAS/LAPACK thread limits to avoid CPU thrashing
     # These must be set BEFORE importing torch/numpy
@@ -63,21 +79,25 @@ def _init_ml_libs():
     
     # Try to load FaceNet PyTorch model
     try:
+        t0 = time.time()
+        logger.info(f"Model import starting... Memory snapshot: {_mem_info()}")
         from PIL import Image as _Image
         Image = _Image
         
         # Import FaceNet embedding generator
         from .embedding_service import EmbeddingGenerator, _init_facenet
-
         # Initialize the FaceNet model
         if _init_facenet():
             USE_FACENET = True
-            logger.info("✅ FaceNet PyTorch loaded")
+            t1 = time.time()
+            logger.info(f"✅ FaceNet PyTorch loaded (took {t1 - t0:.2f}s). Memory after load: {_mem_info()}")
         else:
-            logger.info("FaceNet PyTorch not available")
+            t1 = time.time()
+            logger.info(f"FaceNet PyTorch not available (attempt took {t1 - t0:.2f}s). Memory after attempt: {_mem_info()}")
             
     except Exception as e:
-        logger.info(f"FaceNet face recognition not available: {e}")
+        logger.error(f"FaceNet face recognition not available: {e}", exc_info=True)
+        logger.info(f"Memory after failed FaceNet init: {_mem_info()}")
         USE_FACENET = False
 
     # Try OpenCV for face detection
@@ -85,7 +105,7 @@ def _init_ml_libs():
         import cv2 as _cv2
         cv2 = _cv2
         CV2_AVAILABLE = True
-        logger.info("✅ OpenCV loaded")
+        logger.info(f"✅ OpenCV loaded. Memory after OpenCV import: {_mem_info()}")
     except ImportError:
         CV2_AVAILABLE = False
         logger.warning("OpenCV not available for face detection")

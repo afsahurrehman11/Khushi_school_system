@@ -154,9 +154,10 @@ async def init_models(
         
         from ..services.face_service import _init_ml_libs
         from ..services import face_service as fs
-        
-        # Call the lazy init function (loads model if not already loaded)
-        _init_ml_libs()
+
+        # Call the lazy init function in a thread to avoid blocking the event loop
+        import asyncio
+        await asyncio.to_thread(_init_ml_libs)
         
         elapsed = time.time() - start_time
         facenet_available = getattr(fs, 'USE_FACENET', False)

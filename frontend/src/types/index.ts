@@ -697,6 +697,140 @@ export interface AccountantTransaction {
   createdAt: string;
 }
 
+// ================= Student Monthly Fee Types (M1 Schema) =================
+
+/**
+ * Fee Status for Monthly Fee Records
+ */
+export type FeeStatusType = "PAID" | "PARTIAL" | "UNPAID" | "OVERDUE";
+
+/**
+ * Payment Method Types
+ */
+export type PaymentMethodType = "CASH" | "BANK_TRANSFER" | "ONLINE" | "CHEQUE" | "CARD" | "OTHER";
+
+/**
+ * Student Monthly Fee Record
+ */
+export interface StudentMonthlyFee {
+  id: string;
+  school_id: string;
+  student_id: string;
+  month: number;  // 1-12
+  year: number;
+  month_name?: string;
+  base_fee: number;
+  scholarship_percent: number;
+  scholarship_amount: number;
+  fee_after_discount: number;
+  arrears_added: number;
+  final_fee: number;
+  amount_paid: number;
+  remaining_amount: number;
+  status: FeeStatusType;
+  created_at: string;
+  updated_at?: string;
+}
+
+/**
+ * Monthly Fee Breakdown (with payments)
+ */
+export interface MonthlyFeeBreakdown extends StudentMonthlyFee {
+  payments: StudentPayment[];
+}
+
+/**
+ * Monthly Fee Summary Statistics
+ */
+export interface MonthlyFeeSummary {
+  total_months: number;
+  paid_months: number;
+  partial_months: number;
+  unpaid_months: number;
+  overdue_months: number;
+  total_fees_generated: number;
+  total_paid: number;
+  total_remaining: number;
+  total_scholarship_given: number;
+}
+
+/**
+ * Student Payment Record
+ */
+export interface StudentPayment {
+  id: string;
+  school_id: string;
+  student_id: string;
+  monthly_fee_id: string;
+  amount: number;
+  payment_method: PaymentMethodType;
+  transaction_reference?: string;
+  notes?: string;
+  received_by?: string;
+  payment_date: string;
+  created_at: string;
+  // Extra display fields
+  month?: number;
+  year?: number;
+  month_name?: string;
+}
+
+/**
+ * Payment Summary for Student
+ */
+export interface StudentPaymentSummary {
+  total_payments: number;
+  total_amount_paid: number;
+  payments_by_method: Record<PaymentMethodType, number>;
+  recent_payments: StudentPayment[];
+}
+
+/**
+ * Student Fee Overview (for Student Detail Page)
+ */
+export interface StudentFeeOverview {
+  student_id: string;
+  student_name?: string;
+  class_name?: string;
+  scholarship_percent: number;
+  arrears_balance: number;
+  base_fee: number;
+  current_month_fee?: StudentMonthlyFee;
+  fee_summary: MonthlyFeeSummary;
+  payment_summary: StudentPaymentSummary;
+}
+
+/**
+ * Create Monthly Fee Request
+ */
+export interface CreateMonthlyFeeRequest {
+  student_id: string;
+  month: number;
+  year: number;
+  base_fee: number;
+  scholarship_percent?: number;
+  arrears_added?: number;
+}
+
+/**
+ * Create Payment Request
+ */
+export interface CreatePaymentRequest {
+  student_id: string;
+  monthly_fee_id: string;
+  amount: number;
+  payment_method: PaymentMethodType;
+  transaction_reference?: string;
+  notes?: string;
+}
+
+/**
+ * Update Student Scholarship Request
+ */
+export interface UpdateScholarshipRequest {
+  scholarship_percent: number;
+}
+
 /**
  * Notification Type
  */

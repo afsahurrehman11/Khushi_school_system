@@ -30,5 +30,6 @@ from .billing import router as billing
 from .fee_vouchers import router as fee_vouchers
 from .fee_voucher_settings import router as fee_voucher_settings
 from .analytics import router as analytics
+from .student_monthly_fees import router as student_monthly_fees
 
-__all__ = ["auth", "users", "students", "fees", "classes", "teachers", "grades", "accounting", "payments", "reports", "root", "root_admin", "schools", "student_import_export", "chalans", "fee_categories", "class_fee_assignments", "notifications", "fee_payments", "accountant", "payment_methods", "cash_sessions", "statistics", "attendance", "whatsapp", "face", "teacher_attendance", "saas", "billing", "fee_vouchers", "fee_voucher_settings", "analytics"]
+__all__ = ["auth", "users", "students", "fees", "classes", "teachers", "grades", "accounting", "payments", "reports", "root", "root_admin", "schools", "student_import_export", "chalans", "fee_categories", "class_fee_assignments", "notifications", "fee_payments", "accountant", "payment_methods", "cash_sessions", "statistics", "attendance", "whatsapp", "face", "teacher_attendance", "saas", "billing", "fee_vouchers", "fee_voucher_settings", "analytics", "student_monthly_fees"]

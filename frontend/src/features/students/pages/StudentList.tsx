@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, AlertCircle, ChevronDown, UserPlus } from 'lucide-react';
 import Modal from '../../../components/Modal';
@@ -17,9 +17,13 @@ import { apiCallJSON, getAuthHeaders } from '../../../utils/api';
 import { entitySync, useEntitySync } from '../../../utils/entitySync';
 import { Student } from '../studentsData';
 
+// Lazy load StudentFeeTab for M8 performance optimization
+const StudentFeeTab = lazy(() => import('../components/StudentFeeTab'));
+
 const StudentList: React.FC = () => {
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [studentDetailTab, setStudentDetailTab] = useState<'profile' | 'fees'>('profile');
   const [admissionPopupOpen, setAdmissionPopupOpen] = useState(false);
   const [admissionPopupStudent, setAdmissionPopupStudent] = useState<any | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -436,77 +440,110 @@ const StudentList: React.FC = () => {
 
       <AnimatePresence>
         {selectedStudent && (
-          <Modal isOpen={!!selectedStudent} onClose={() => setSelectedStudent(null)} title="Student Profile" size="lg">
-            <div className="space-y-6">
-              <div className="flex items-center gap-4 pb-6 border-b border-secondary-200">
-                {selectedStudent.profileImageBlob ? (
-                  <div className="w-20 h-20 rounded-full overflow-hidden flex-shrink-0 border-2 border-primary-200">
-                    <img src={`data:${selectedStudent.profileImageType || 'image/jpeg'};base64,${selectedStudent.profileImageBlob}`} alt={selectedStudent.name} className="w-full h-full object-cover" />
+          <Modal isOpen={!!selectedStudent} onClose={() => { setSelectedStudent(null); setStudentDetailTab('profile'); }} title="Student Details" size="xl">
+            {/* Tab Navigation */}
+            <div className="flex border-b border-secondary-200 -mt-2 mb-4">
+              <button
+                onClick={() => setStudentDetailTab('profile')}
+                className={`px-6 py-3 text-sm font-medium transition-colors ${
+                  studentDetailTab === 'profile'
+                    ? 'border-b-2 border-primary-500 text-primary-600'
+                    : 'text-secondary-500 hover:text-secondary-700'
+                }`}
+              >
+                Profile
+              </button>
+              <button
+                onClick={() => setStudentDetailTab('fees')}
+                className={`px-6 py-3 text-sm font-medium transition-colors ${
+                  studentDetailTab === 'fees'
+                    ? 'border-b-2 border-primary-500 text-primary-600'
+                    : 'text-secondary-500 hover:text-secondary-700'
+                }`}
+              >
+                Fee Management
+              </button>
+            </div>
+
+            {/* Tab Content */}
+            {studentDetailTab === 'profile' ? (
+              <div className="space-y-6">
+                <div className="flex items-center gap-4 pb-6 border-b border-secondary-200">
+                  {selectedStudent.profileImageBlob ? (
+                    <div className="w-20 h-20 rounded-full overflow-hidden flex-shrink-0 border-2 border-primary-200">
+                      <img src={`data:${selectedStudent.profileImageType || 'image/jpeg'};base64,${selectedStudent.profileImageBlob}`} alt={selectedStudent.name} className="w-full h-full object-cover" />
+                    </div>
+                  ) : (
+                    <div className="w-20 h-20 bg-primary-100 rounded-full flex items-center justify-center"><span className="text-3xl font-bold text-primary-700">{selectedStudent.name.charAt(0)}</span></div>
+                  )}
+                  <div>
+                    <h2 className="text-2xl font-bold text-secondary-900">{selectedStudent.name}</h2>
+                    <p className="text-secondary-600">Roll No: {selectedStudent.rollNo}</p>
+                    {selectedStudent.registrationNumber && <p className="text-sm text-primary-600 font-medium">Reg: {selectedStudent.registrationNumber}</p>}
+                    <Badge label={selectedStudentClassLabel} color="primary" />
                   </div>
-                ) : (
-                  <div className="w-20 h-20 bg-primary-100 rounded-full flex items-center justify-center"><span className="text-3xl font-bold text-primary-700">{selectedStudent.name.charAt(0)}</span></div>
-                )}
-                <div>
-                  <h2 className="text-2xl font-bold text-secondary-900">{selectedStudent.name}</h2>
-                  <p className="text-secondary-600">Roll No: {selectedStudent.rollNo}</p>
-                  {selectedStudent.registrationNumber && <p className="text-sm text-primary-600 font-medium">Reg: {selectedStudent.registrationNumber}</p>}
-                  <Badge label={selectedStudentClassLabel} color="primary" />
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <p className="text-sm text-secondary-500 mb-1">Email</p>
-                  <p className="text-secondary-900">{selectedStudent.email}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-secondary-500 mb-1">Phone</p>
-                  <p className="text-secondary-900">{selectedStudent.phone}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-secondary-500 mb-1">Date of Birth</p>
-                  <p className="text-secondary-900">{selectedStudent.dateOfBirth ? new Date(selectedStudent.dateOfBirth).toLocaleDateString() : ''}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-secondary-500 mb-1">Address</p>
-                  <p className="text-secondary-900">{selectedStudent.address}</p>
-                </div>
-              </div>
-
-              <div className="pt-6 border-t border-secondary-200">
-                <h3 className="font-semibold text-secondary-900 mb-3">Guardian Information</h3>
                 <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <p className="text-sm text-secondary-500 mb-1">Parent CNIC</p>
-                    <p className="text-secondary-900">{selectedStudent.parentCnic || 'Not provided'}</p>
+                    <p className="text-sm text-secondary-500 mb-1">Email</p>
+                    <p className="text-secondary-900">{selectedStudent.email}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-secondary-500 mb-1">Guardian Name</p>
-                    <p className="text-secondary-900">{selectedStudent.guardianName}</p>
+                    <p className="text-sm text-secondary-500 mb-1">Phone</p>
+                    <p className="text-secondary-900">{selectedStudent.phone}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-secondary-500 mb-1">Guardian Phone</p>
-                    <p className="text-secondary-900">{selectedStudent.guardianPhone}</p>
+                    <p className="text-sm text-secondary-500 mb-1">Date of Birth</p>
+                    <p className="text-secondary-900">{selectedStudent.dateOfBirth ? new Date(selectedStudent.dateOfBirth).toLocaleDateString() : ''}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-secondary-500 mb-1">Address</p>
+                    <p className="text-secondary-900">{selectedStudent.address}</p>
                   </div>
                 </div>
-              </div>
 
-              {selectedStudent.assignedClasses.length > 0 && (
                 <div className="pt-6 border-t border-secondary-200">
-                  <h3 className="font-semibold text-secondary-900 mb-3">Enrolled Subjects</h3>
-                  <div className="flex flex-wrap gap-2">{selectedStudent.assignedClasses.map((subject: string, idx: number) => <Badge key={idx} label={subject} color="primary" />)}</div>
+                  <h3 className="font-semibold text-secondary-900 mb-3">Guardian Information</h3>
+                  <div className="grid grid-cols-2 gap-6">
+                    <div>
+                      <p className="text-sm text-secondary-500 mb-1">Parent CNIC</p>
+                      <p className="text-secondary-900">{selectedStudent.parentCnic || 'Not provided'}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-secondary-500 mb-1">Guardian Name</p>
+                      <p className="text-secondary-900">{selectedStudent.guardianName}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-secondary-500 mb-1">Guardian Phone</p>
+                      <p className="text-secondary-900">{selectedStudent.guardianPhone}</p>
+                    </div>
+                  </div>
                 </div>
-              )}
 
-              <div className="flex gap-3 pt-6 border-t border-secondary-200">
-                <Button variant="primary" className="flex-1" onClick={() => { setEditStudent(selectedStudent); setEditOpen(true); }}>
-                  Edit Profile
-                </Button>
-                <Button variant="danger" className="flex-1" onClick={async () => { await deleteStudent(String(selectedStudent.id)); }}>
-                  Remove Student
-                </Button>
+                {selectedStudent.assignedClasses.length > 0 && (
+                  <div className="pt-6 border-t border-secondary-200">
+                    <h3 className="font-semibold text-secondary-900 mb-3">Enrolled Subjects</h3>
+                    <div className="flex flex-wrap gap-2">{selectedStudent.assignedClasses.map((subject: string, idx: number) => <Badge key={idx} label={subject} color="primary" />)}</div>
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-6 border-t border-secondary-200">
+                  <Button variant="primary" className="flex-1" onClick={() => { setEditStudent(selectedStudent); setEditOpen(true); }}>
+                    Edit Profile
+                  </Button>
+                  <Button variant="danger" className="flex-1" onClick={async () => { await deleteStudent(String(selectedStudent.id)); }}>
+                    Remove Student
+                  </Button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="min-h-[500px]">
+                <Suspense fallback={<div className="flex items-center justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div><span className="ml-3 text-secondary-600">Loading fee management...</span></div>}>
+                  <StudentFeeTab studentId={String(selectedStudent.id)} studentName={selectedStudent.name} />
+                </Suspense>
+              </div>
+            )}
           </Modal>
         )}
       </AnimatePresence>

@@ -586,15 +586,28 @@ def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, rig
             Paragraph("Rs. 0", fee_amount_style)
         ])
 
+    # Scholarship discount row (only show if student has scholarship)
+    scholarship_percent = student.get('scholarship_percent', 0) or 0
+    scholarship_amount = 0
+    if scholarship_percent > 0:
+        scholarship_amount = (total_fee * scholarship_percent) / 100
+        # Show as discount (negative, in green style)
+        scholarship_style = ParagraphStyle('ScholarshipItem', parent=styles['Normal'], fontSize=5.5 * font_scale, textColor=colors.HexColor('#22543d'))
+        scholarship_amount_style = ParagraphStyle('ScholarshipAmount', parent=styles['Normal'], fontSize=5.5 * font_scale, alignment=TA_RIGHT, textColor=colors.HexColor('#22543d'))
+        fee_rows.append([
+            Paragraph(f"Scholarship ({scholarship_percent:.0f}%)", scholarship_style),
+            Paragraph(f"−Rs. {scholarship_amount:,.0f}", scholarship_amount_style)
+        ])
+
     # Arrears row (ALWAYS show, even if 0)
-    arrears_amount = student.get('arrears', 0)
+    arrears_amount = student.get('arrears', 0) or student.get('arrears_balance', 0) or 0
     fee_rows.append([
         Paragraph("Arrears", fee_item_style),
         Paragraph(f"Rs. {arrears_amount:,.0f}", fee_amount_style)
     ])
 
-    # Total row (include arrears in total)
-    total_with_arrears = total_fee + arrears_amount
+    # Total row (include arrears, subtract scholarship)
+    total_with_arrears = total_fee - scholarship_amount + arrears_amount
     total_style = ParagraphStyle('Total', parent=styles['Normal'], fontSize=7 * font_scale, fontName='Helvetica-Bold')
     total_amount_style = ParagraphStyle('TotalAmount', parent=styles['Normal'], fontSize=7 * font_scale, fontName='Helvetica-Bold', alignment=TA_RIGHT)
     fee_rows.append([

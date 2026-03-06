@@ -170,6 +170,48 @@ def create_indexes():
     except Exception as e:
         logger.error(f"❌ Failed to create attendance indexes: {str(e)}")
     
+    try:
+        # Student Monthly Fees - for monthly fee tracking and history
+        logger.debug("Creating student monthly fees indexes")
+        # Unique constraint: one fee record per student per month/year
+        db.student_monthly_fees.create_index(
+            [("school_id", 1), ("student_id", 1), ("month", 1), ("year", 1)],
+            unique=True
+        )
+        db.student_monthly_fees.create_index([("school_id", 1), ("student_id", 1)])
+        db.student_monthly_fees.create_index([("school_id", 1), ("status", 1)])
+        db.student_monthly_fees.create_index([("school_id", 1), ("year", 1), ("month", 1)])
+        db.student_monthly_fees.create_index([("school_id", 1), ("created_at", -1)])
+        # Index for overdue fee queries
+        db.student_monthly_fees.create_index([("school_id", 1), ("status", 1), ("year", 1), ("month", 1)])
+        indexes_created += 6
+        logger.debug("Student monthly fees indexes created")
+    except Exception as e:
+        logger.error(f"❌ Failed to create student monthly fees indexes: {str(e)}")
+    
+    try:
+        # Student Payments - for payment tracking
+        logger.debug("Creating student payments indexes")
+        db.student_payments.create_index([("school_id", 1), ("student_id", 1)])
+        db.student_payments.create_index([("school_id", 1), ("monthly_fee_id", 1)])
+        db.student_payments.create_index([("school_id", 1), ("payment_date", -1)])
+        db.student_payments.create_index([("school_id", 1), ("student_id", 1), ("payment_date", -1)])
+        db.student_payments.create_index([("school_id", 1), ("created_at", -1)])
+        indexes_created += 5
+        logger.debug("Student payments indexes created")
+    except Exception as e:
+        logger.error(f"❌ Failed to create student payments indexes: {str(e)}")
+    
+    try:
+        # Students - additional indexes for scholarship and arrears queries
+        logger.debug("Creating additional student indexes for fee management")
+        db.students.create_index([("school_id", 1), ("scholarship_percent", 1)])
+        db.students.create_index([("school_id", 1), ("arrears_balance", 1)])
+        indexes_created += 2
+        logger.debug("Additional student indexes created")
+    except Exception as e:
+        logger.error(f"❌ Failed to create additional student indexes: {str(e)}")
+    
     logger.info(f"Total indexes created: {indexes_created}")
 
 if __name__ == "__main__":

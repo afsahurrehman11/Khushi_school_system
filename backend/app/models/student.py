@@ -53,7 +53,9 @@ class StudentSchema(BaseModel):
     guardian_info: Optional[GuardianInfo] = None
     contact_info: Optional[ContactInfo] = None
     academic_year: str
-    arrears: float = 0.0  # Per-student arrears amount (PKR)
+    arrears: float = 0.0  # Per-student arrears amount (PKR) - DEPRECATED, use arrears_balance
+    arrears_balance: float = 0.0  # Current arrears balance (PKR)
+    scholarship_percent: float = 0.0  # Scholarship percentage (0-100)
     # Image fields - stored as base64 blob in MongoDB
     profile_image_blob: Optional[str] = None  # Base64 encoded image
     profile_image_type: Optional[str] = None  # MIME type (image/jpeg, image/png)
@@ -86,7 +88,9 @@ class StudentUpdate(BaseModel):
     status: Optional[str] = None
     guardian_info: Optional[GuardianInfo] = None
     contact_info: Optional[ContactInfo] = None
-    arrears: Optional[float] = None  # Per-student arrears amount (PKR)
+    arrears: Optional[float] = None  # Per-student arrears amount (PKR) - DEPRECATED
+    arrears_balance: Optional[float] = None  # Current arrears balance (PKR)
+    scholarship_percent: Optional[float] = None  # Scholarship percentage (0-100)
     profile_image_blob: Optional[str] = None
     profile_image_type: Optional[str] = None
     cnic_image_blob: Optional[str] = None

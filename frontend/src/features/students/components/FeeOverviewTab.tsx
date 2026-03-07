@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { StudentFeeOverview, PaymentMethodType } from '../../../types';
+import { StudentFeeOverview } from '../../../types';
 import studentFeeService from '../../../services/studentFees';
 import { studentsService } from '../../../services/students';
 import { api } from '../../../utils/api';
@@ -17,7 +17,7 @@ interface FeeOverviewTabProps {
   studentCode?: string;
   className?: string;
   classId?: string;
-  onPrintVoucher?: () => void;
+  onPrintVoucher?: () => Promise<void> | (() => void);
   onRefresh?: () => void;
   onPaymentSuccess?: () => void; // Alias for onRefresh for parent flexibility
 }
@@ -28,7 +28,6 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
   studentCode,
   className,
   classId,
-  onPrintVoucher,
   onRefresh,
   onPaymentSuccess
 }) => {
@@ -60,23 +59,24 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
       }
       // Try to fetch fee category details (if assigned) to show full breakdown
       try {
-        setFetchCategoryError(null);
-        let cid = data?.fee_category?.category_id || data?.fee_category?.id || data?.current_month_fee?.category_id || data?.current_month_fee?.fee_category_id || data?.current_month_fee?.fee_category?.id;
+      setFetchCategoryError(null);
+      const d = data as any;
+      let cid = d?.fee_category?.category_id || d?.fee_category?.id || d?.current_month_fee?.category_id || d?.current_month_fee?.fee_category_id || d?.current_month_fee?.fee_category?.id;
 
         // If we don't have a category id in the overview, try the class assignment (if classId prop provided)
         if (!cid && classId) {
           try {
-            logger.info('[FEE] Fetching class assignment for classId: ' + classId);
+            logger.info('FEE', 'Fetching class assignment for classId: ' + classId);
             const assignment = await api.get(`/class-fee-assignments/classes/${classId}/active`);
             cid = assignment?.category_id || assignment?.categoryId || assignment?.category?.id || assignment?.category_id || null;
-            logger.debug('[FEE] Class assignment result: ' + JSON.stringify(assignment));
+            logger.debug('FEE', 'Class assignment result: ' + JSON.stringify(assignment));
           } catch (ae) {
-            logger.debug('[FEE] Class assignment fetch failed: ' + String(ae));
+            logger.debug('FEE', 'Class assignment fetch failed: ' + String(ae));
           }
         }
 
         if (cid) {
-          logger.info(`[FEE] Fetching fee category ${cid} for student ${studentId}`);
+          logger.info('FEE', `Fetching fee category ${cid} for student ${studentId}`);
           const cat = await api.get(`/fee-categories/${cid}`);
           const catData = cat?.components ? cat : (cat?.data ? cat.data : cat);
           // detect components under various possible keys
@@ -91,16 +91,18 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
             setFeeCategoryComponentsState(null);
             setFetchCategoryError('No components found on fee category');
           }
-        } else if (data?.fee_category?.components) {
-          setFeeCategoryComponentsState((data.fee_category.components || []).map((c: any) => ({ component_name: c.component_name || c.name || 'Unknown', amount: Number(c.amount || 0) })));
-        } else if (data?.current_month_fee?.components) {
-          setFeeCategoryComponentsState((data.current_month_fee.components || []).map((c: any) => ({ component_name: c.component_name || c.name || 'Unknown', amount: Number(c.amount || 0) })));
+        } else if ((data as any)?.fee_category?.components) {
+          const d2 = data as any;
+          setFeeCategoryComponentsState((d2.fee_category.components || []).map((c: any) => ({ component_name: c.component_name || c.name || 'Unknown', amount: Number(c.amount || 0) })));
+        } else if ((data as any)?.current_month_fee?.components) {
+          const d3 = data as any;
+          setFeeCategoryComponentsState((d3.current_month_fee.components || []).map((c: any) => ({ component_name: c.component_name || c.name || 'Unknown', amount: Number(c.amount || 0) })));
         } else {
           setFeeCategoryComponentsState(null);
           setFetchCategoryError('No fee category assigned to student or class');
         }
       } catch (e: any) {
-        logger.error('[FEE] Failed to fetch fee category: ' + String(e));
+        logger.error('FEE', 'Failed to fetch fee category: ' + String(e));
         setFeeCategoryComponentsState(null);
         setFetchCategoryError(e?.message || String(e));
       }
@@ -143,9 +145,7 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
     }
   };
 
-  const handlePayment = async (e: React.FormEvent) => {
-    // Payment recording removed from Overview tab (use Accountant -> Record Payment)
-  };
+  // Payment recording removed from Overview tab (use Accountant -> Record Payment)
 
   const handleScholarshipUpdate = async () => {
     const percent = parseFloat(scholarshipValue);

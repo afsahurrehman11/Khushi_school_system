@@ -24,6 +24,7 @@ class StudentMonthlyFeeCreate(BaseModel):
     scholarship_amount: float = 0.0  # Calculated discount amount
     fee_after_discount: float  # base_fee - scholarship_amount
     arrears_added: float = 0.0  # Arrears carried forward from previous month
+    arrears_carried: bool = False  # Whether previous months' arrears have been carried into this record
     final_fee: float  # fee_after_discount + arrears_added
     amount_paid: float = 0.0
     remaining_amount: float  # final_fee - amount_paid
@@ -68,6 +69,7 @@ class StudentMonthlyFeeResponse(BaseModel):
     scholarship_amount: float
     fee_after_discount: float
     arrears_added: float
+    arrears_carried: bool = False
     final_fee: float
     amount_paid: float
     remaining_amount: float

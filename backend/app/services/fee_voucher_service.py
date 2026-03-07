@@ -20,6 +20,7 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 
 from app.database import get_db
 from bson import ObjectId
+from app.services.student_fee_service import compute_student_arrears_balance
 
 logger = logging.getLogger(__name__)
 
@@ -220,15 +221,73 @@ def _generate_single_voucher_elements(
     column_gap = 3 * mm
     doc_side_margin = 15 * mm
     usable_width = page_width - (doc_side_margin * 2) - (column_gap * 2)
+    # Scale overall content to 97% of usable width to make voucher nearly full-width
+    scale_factor = 0.97
+    scaled_usable = usable_width * scale_factor
     # Column width (3 columns with small gaps)
-    col_width = usable_width / 3
+    col_width = scaled_usable / 3
     # Available width for inner content (accounting for column paddings)
     content_w = col_width - 10*mm
     # Inner content further reduced so inner tables' borders fit inside the outer column padding
     inner_content_w = content_w - 8*mm
 
-    # Calculate total fee
+    # Prefer using the student's generated monthly fee if available (includes arrears and scholarship)
     total_fee = sum(comp.get("amount", 0) for comp in fee_components)
+
+    # Ensure we have school_id and a string student id before querying monthly fee records
+    school_id = student.get("school_id", "")
+
+    try:
+        # Determine student id string (use string form of ObjectId if present)
+        sid = student.get("_id")
+        try:
+            sid = str(sid)
+        except Exception:
+            pass
+
+        now = datetime.utcnow()
+        monthly_fee = db.student_monthly_fees.find_one({
+            "school_id": school_id,
+            "student_id": sid,
+            "month": now.month,
+            "year": now.year
+        })
+
+        if monthly_fee:
+            # If monthly fee record exists, use its components and totals for accuracy
+            # Components on the monthly fee (if present) are the canonical breakdown
+            if monthly_fee.get("components"):
+                fee_components = monthly_fee.get("components")
+                total_fee = sum(comp.get("amount", 0) for comp in fee_components)
+            else:
+                # Fall back to base_fee if components missing
+                total_fee = monthly_fee.get("fee_after_discount") or monthly_fee.get("base_fee") or total_fee
+
+            # Also expose monthly fee summary values for later rows
+            monthly_scholarship_percent = monthly_fee.get("scholarship_percent", student.get("scholarship_percent", 0) or 0)
+            monthly_scholarship_amount = monthly_fee.get("scholarship_amount", 0)
+            monthly_arrears_added = monthly_fee.get("arrears_added", 0)
+            monthly_amount_paid = monthly_fee.get("amount_paid", 0)
+            monthly_final_fee = monthly_fee.get("final_fee", total_fee - monthly_scholarship_amount + monthly_arrears_added)
+        else:
+            monthly_scholarship_percent = student.get("scholarship_percent", 0) or 0
+            monthly_scholarship_amount = (total_fee * monthly_scholarship_percent) / 100 if monthly_scholarship_percent else 0
+            # If no monthly record exists, compute arrears from monthly fee records to get accurate carried amounts
+            try:
+                student_id_for_arrears = sid
+                monthly_arrears_added = float(compute_student_arrears_balance(student_id_for_arrears, school_id))
+            except Exception:
+                monthly_arrears_added = student.get("arrears", 0) or student.get("arrears_balance", 0) or 0
+            monthly_amount_paid = 0
+            monthly_final_fee = total_fee - monthly_scholarship_amount + monthly_arrears_added
+
+    except Exception as e:
+        logger.warning(f"[FEE_VOUCHER] Could not load monthly fee for student when generating voucher: {e}")
+        monthly_scholarship_percent = student.get("scholarship_percent", 0) or 0
+        monthly_scholarship_amount = (total_fee * monthly_scholarship_percent) / 100 if monthly_scholarship_percent else 0
+        monthly_arrears_added = student.get("arrears", 0) or student.get("arrears_balance", 0) or 0
+        monthly_amount_paid = 0
+        monthly_final_fee = total_fee - monthly_scholarship_amount + monthly_arrears_added
 
     # Fetch school_id from student
     school_id = student.get("school_id", "")
@@ -333,9 +392,78 @@ def _generate_single_voucher_elements(
             logger.info(f"[FEE_VOUCHER] Attempting to fit with font_scale={font_scale:.2f}")
 
             # Create each column with current font_scale
-            office_copy = create_voucher_copy("Office Copy", font_scale, left_image_data, right_image_data, school_name, custom_header, custom_footer, student, class_name, fee_components, total_fee, photo_data, styles, inner_content_w, content_w, page_height, doc)
-            student_copy = create_voucher_copy("Student Copy", font_scale, left_image_data, right_image_data, school_name, custom_header, custom_footer, student, class_name, fee_components, total_fee, photo_data, styles, inner_content_w, content_w, page_height, doc)
-            notice_copy = create_voucher_copy("Notice Copy", font_scale, left_image_data, right_image_data, school_name, custom_header, custom_footer, student, class_name, fee_components, total_fee, photo_data, styles, inner_content_w, content_w, page_height, doc)
+            office_copy = create_voucher_copy(
+                "Office Copy",
+                font_scale,
+                left_image_data,
+                right_image_data,
+                school_name,
+                custom_header,
+                custom_footer,
+                student,
+                class_name,
+                fee_components,
+                total_fee,
+                photo_data,
+                styles,
+                inner_content_w,
+                content_w,
+                page_height,
+                doc,
+                locals().get('monthly_scholarship_percent', 0),
+                locals().get('monthly_scholarship_amount', 0),
+                locals().get('monthly_arrears_added', 0),
+                locals().get('monthly_amount_paid', 0),
+                locals().get('monthly_final_fee', None)
+            )
+            student_copy = create_voucher_copy(
+                "Student Copy",
+                font_scale,
+                left_image_data,
+                right_image_data,
+                school_name,
+                custom_header,
+                custom_footer,
+                student,
+                class_name,
+                fee_components,
+                total_fee,
+                photo_data,
+                styles,
+                inner_content_w,
+                content_w,
+                page_height,
+                doc,
+                locals().get('monthly_scholarship_percent', 0),
+                locals().get('monthly_scholarship_amount', 0),
+                locals().get('monthly_arrears_added', 0),
+                locals().get('monthly_amount_paid', 0),
+                locals().get('monthly_final_fee', None)
+            )
+            notice_copy = create_voucher_copy(
+                "Notice Copy",
+                font_scale,
+                left_image_data,
+                right_image_data,
+                school_name,
+                custom_header,
+                custom_footer,
+                student,
+                class_name,
+                fee_components,
+                total_fee,
+                photo_data,
+                styles,
+                inner_content_w,
+                content_w,
+                page_height,
+                doc,
+                locals().get('monthly_scholarship_percent', 0),
+                locals().get('monthly_scholarship_amount', 0),
+                locals().get('monthly_arrears_added', 0),
+                locals().get('monthly_amount_paid', 0),
+                locals().get('monthly_final_fee', None)
+            )
 
             columns = [office_copy, student_copy, notice_copy]
 
@@ -386,8 +514,35 @@ def _generate_single_voucher_elements(
     return [main_table]
 
 
-def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, right_image_data, school_name, custom_header, custom_footer, student, class_name, fee_components, total_fee, photo_data, styles, inner_content_w, content_w, page_height, doc):
-    """Create a single voucher copy for one column. Includes student photo, reduced spacing, and one-line signature layout. `font_scale` scales font sizes for auto-fit."""
+def create_voucher_copy(
+    copy_title: str,
+    font_scale: float,
+    left_image_data,
+    right_image_data,
+    school_name,
+    custom_header,
+    custom_footer,
+    student,
+    class_name,
+    fee_components,
+    total_fee,
+    photo_data,
+    styles,
+    inner_content_w,
+    content_w,
+    page_height,
+    doc,
+    monthly_scholarship_percent: float = 0,
+    monthly_scholarship_amount: float = 0,
+    monthly_arrears_added: float = 0,
+    monthly_amount_paid: float = 0,
+    monthly_final_fee = None
+):
+    """Create a single voucher copy for one column. Includes student photo, reduced spacing, and one-line signature layout. `font_scale` scales font sizes for auto-fit.
+
+    The function now accepts precomputed monthly values for scholarship and arrears so
+    the PDF shows consistent calculations with the UI.
+    """
     copy_elements = []
     logger.info(f"[FEE_VOUCHER] Creating {copy_title} with font_scale={font_scale:.2f}, photo_available={photo_data is not None}")
 
@@ -479,7 +634,8 @@ def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, rig
         ('ALIGN', (1, 0), (1, 0), 'CENTER'),
     ]))
     copy_elements.append(header_row_table)
-    copy_elements.append(Spacer(1, 0.5*mm))  # Further reduced from 1mm
+    # Reserve fixed header spacing so header area is consistent across vouchers
+    copy_elements.append(Spacer(1, 2.5*mm))
 
     # Fee Voucher centered title - smaller font, reduced spacing
     title_style = ParagraphStyle(
@@ -571,47 +727,121 @@ def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, rig
         [Paragraph("<b>Description</b>", fee_header_style), Paragraph("<b>Amount</b>", fee_header_style)]
     ]
 
-    # Only add fee components (no zero discount/tax/arrears)
-    if fee_components:
-        for comp in fee_components:
-            comp_name = comp.get('component_name', comp.get('name', 'Fee'))
+    # Embed a sub-table that shows the fee category breakdown (up to 6 attribute rows)
+    category_name = None
+    try:
+        # Attempt to read a category name if available on components or fee_category
+        if isinstance(fee_components, dict):
+            category_name = fee_components.get('category_name')
+        # If fee_components is a list of component dicts, category_name may be present on the parent
+    except Exception:
+        category_name = None
+
+    # Build category breakdown table data
+    cat_table_data = [[Paragraph('<b>Attribute</b>', fee_header_style), Paragraph('<b>Amount</b>', fee_header_style)]]
+
+    if fee_components and isinstance(fee_components, list) and len(fee_components) > 0:
+        # Add up to 6 attribute rows; fill empty rows if fewer
+        for comp in fee_components[:6]:
+            comp_name = comp.get('component_name', comp.get('name', ''))
             comp_amount = comp.get('amount', 0)
-            fee_rows.append([
-                Paragraph(comp_name, fee_item_style),
-                Paragraph(f"Rs. {comp_amount:,.0f}", fee_amount_style)
-            ])
+            cat_table_data.append([Paragraph(comp_name or '', fee_item_style), Paragraph(f"Rs. {comp_amount:,.0f}", fee_amount_style)])
+
+        # If less than 6 attributes, pad empty rows to keep space consistent
+        for _ in range(6 - min(6, len(fee_components))):
+            cat_table_data.append([Paragraph('', fee_item_style), Paragraph('', fee_amount_style)])
     else:
-        fee_rows.append([
-            Paragraph("No fee assigned", fee_item_style),
-            Paragraph("Rs. 0", fee_amount_style)
-        ])
+        # No components; show empty attribute rows
+        for _ in range(6):
+            cat_table_data.append([Paragraph('', fee_item_style), Paragraph('', fee_amount_style)])
 
-    # Scholarship discount row (only show if student has scholarship)
-    scholarship_percent = student.get('scholarship_percent', 0) or 0
-    scholarship_amount = 0
-    if scholarship_percent > 0:
-        scholarship_amount = (total_fee * scholarship_percent) / 100
-        # Show as discount (negative, in green style)
-        scholarship_style = ParagraphStyle('ScholarshipItem', parent=styles['Normal'], fontSize=5.5 * font_scale, textColor=colors.HexColor('#22543d'))
-        scholarship_amount_style = ParagraphStyle('ScholarshipAmount', parent=styles['Normal'], fontSize=5.5 * font_scale, alignment=TA_RIGHT, textColor=colors.HexColor('#22543d'))
-        fee_rows.append([
-            Paragraph(f"Scholarship ({scholarship_percent:.0f}%)", scholarship_style),
-            Paragraph(f"−Rs. {scholarship_amount:,.0f}", scholarship_amount_style)
-        ])
+    # Category total calculation (sum of components)
+    try:
+        category_total = sum((c.get('amount', 0) for c in fee_components)) if isinstance(fee_components, list) else total_fee
+    except Exception:
+        category_total = total_fee
 
-    # Arrears row (ALWAYS show, even if 0)
-    arrears_amount = student.get('arrears', 0) or student.get('arrears_balance', 0) or 0
+    # Create a compact, minimal nested table and constrain its width so it never overflows
+    # First row is header, following 6 rows are attribute rows
+    header_row_height = 6 * mm
+    attr_row_height = 5.0 * mm
+    row_heights = [header_row_height] + [attr_row_height] * 6
+
+    # Left cell width in the main fee table (first column) - use this to constrain nested table
+    left_cell_width = inner_content_w * 0.65
+    # Reserve small padding inside left cell for nested table
+    nested_total_width = left_cell_width - (3 * mm)
+    # Distribute nested columns as 70/30 of nested_total_width
+    nested_left_col = nested_total_width * 0.70
+    nested_right_col = nested_total_width * 0.30
+
+    # Minimal styling: no heavy outer box, subtle lines, smaller font to avoid wrapping
+    category_table = Table(cat_table_data, colWidths=[nested_left_col, nested_right_col], rowHeights=row_heights)
+    category_table.setStyle(TableStyle([
+        ('FONTSIZE', (0, 0), (-1, -1), 4.6 * font_scale),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#264873')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('LINEBELOW', (0, 0), (-1, 0), 0.5, colors.HexColor('#1f4b6b')),
+        ('INNERGRID', (0, 1), (-1, -1), 0.2, colors.HexColor('#d1d5db')),
+        ('LEFTPADDING', (0, 0), (-1, -1), 3),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+    ]))
+
+    # Add the category table as the first row in the main fee table (left cell contains nested table)
+    fee_rows.append([
+        category_table,
+        Paragraph(f"Rs. {category_total:,.0f}", fee_amount_style)
+    ])
+
+    # Scholarship discount row (use monthly data when available)
+    scholarship_percent = monthly_scholarship_percent if monthly_scholarship_percent is not None else (student.get('scholarship_percent', 0) or 0)
+    scholarship_amount = monthly_scholarship_amount if monthly_scholarship_amount is not None else ((total_fee * scholarship_percent) / 100 if scholarship_percent else 0)
+
+    # Use base fee for later calculations
+    base_fee = total_fee
+
+    # Scholarship row (always show scholarship percent and amount)
+    scholarship_style = ParagraphStyle('ScholarshipItem', parent=styles['Normal'], fontSize=5.5 * font_scale, textColor=colors.HexColor('#22543d'))
+    scholarship_amount_style = ParagraphStyle('ScholarshipAmount', parent=styles['Normal'], fontSize=5.5 * font_scale, alignment=TA_RIGHT, textColor=colors.HexColor('#22543d'))
+    fee_rows.append([
+        Paragraph(f"Scholarship ({scholarship_percent:.0f}%)", scholarship_style),
+        Paragraph(f"−Rs. {scholarship_amount:,.0f}", scholarship_amount_style)
+    ])
+
+    # Arrears row (ALWAYS show, even if 0) - prefer provided monthly_arrears_added
+    arrears_amount = monthly_arrears_added if monthly_arrears_added is not None else 0
     fee_rows.append([
         Paragraph("Arrears", fee_item_style),
         Paragraph(f"Rs. {arrears_amount:,.0f}", fee_amount_style)
     ])
 
-    # Total row (include arrears, subtract scholarship)
-    total_with_arrears = total_fee - scholarship_amount + arrears_amount
+    # Amount Paid row
+    amount_paid = monthly_amount_paid if monthly_amount_paid is not None else 0
+    fee_rows.append([
+        Paragraph("Amount Paid", fee_item_style),
+        Paragraph(f"Rs. {amount_paid:,.0f}", fee_amount_style)
+    ])
+
+    # Remaining amount (final - paid)
+    if monthly_final_fee is not None:
+        remaining_amount = monthly_final_fee - amount_paid
+    else:
+        remaining_amount = (base_fee - scholarship_amount + arrears_amount) - amount_paid
+
+    fee_rows.append([
+        Paragraph("Remaining", fee_item_style),
+        Paragraph(f"Rs. {remaining_amount:,.0f}", fee_amount_style)
+    ])
+
+    # Total / Grand Total row (include arrears, subtract scholarship)
+    total_with_arrears = monthly_final_fee if monthly_final_fee is not None else (base_fee - scholarship_amount + arrears_amount)
     total_style = ParagraphStyle('Total', parent=styles['Normal'], fontSize=7 * font_scale, fontName='Helvetica-Bold')
     total_amount_style = ParagraphStyle('TotalAmount', parent=styles['Normal'], fontSize=7 * font_scale, fontName='Helvetica-Bold', alignment=TA_RIGHT)
     fee_rows.append([
-        Paragraph("<b>TOTAL</b>", total_style),
+        Paragraph("<b>GRAND TOTAL</b>", total_style),
         Paragraph(f"<b>Rs. {total_with_arrears:,.0f}</b>", total_amount_style)
     ])
 
@@ -653,6 +883,9 @@ def create_voucher_copy(copy_title: str, font_scale: float, left_image_data, rig
         footer_custom_style = ParagraphStyle('CustomFooter', parent=styles['Normal'], fontSize=5 * font_scale, alignment=TA_CENTER, textColor=colors.HexColor('#444444'), fontName='Helvetica-Oblique', leading=6 * font_scale)  # Reduced from 6/7
         copy_elements.append(Paragraph(custom_footer, footer_custom_style))
         copy_elements.append(Spacer(1, 0.5*mm))  # Further reduced from 1.5mm
+
+    # Reserve fixed footer space before signature/stamp area
+    copy_elements.append(Spacer(1, 4*mm))
 
     # One-line signature layout: Accountant (left) and Bank Stamp (right) with underlines
     logger.info(f"[FEE_VOUCHER] Adding signature/stamp line to {copy_title}")

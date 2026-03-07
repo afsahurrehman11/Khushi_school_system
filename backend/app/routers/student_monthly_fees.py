@@ -138,7 +138,13 @@ async def generate_fee(
 ):
     """Generate monthly fee for a student"""
     school_id = current_user.get("school_id")
-    user_id = current_user.get("sub")
+    # Build a small received_by audit payload with user context
+    received_by = {
+        "id": current_user.get("id"),
+        "email": current_user.get("email"),
+        "name": current_user.get("name"),
+        "role": current_user.get("role")
+    }
     
     try:
         fee = generate_monthly_fee(
@@ -299,7 +305,7 @@ async def record_payment(
             payment_method=request.payment_method,
             transaction_reference=request.transaction_reference,
             notes=request.notes,
-            received_by=user_id
+            received_by=received_by
         )
         return payment
     except ValueError as e:

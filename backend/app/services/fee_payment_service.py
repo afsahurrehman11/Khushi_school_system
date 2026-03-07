@@ -207,3 +207,83 @@ def get_fee_payment_summary_for_student(student_id: str) -> Dict:
         "remaining_amount": max(0, remaining_amount),
         "status": status
     }
+
+
+def get_fee_payment_summary_for_students(student_ids: List[str]) -> Dict[str, Dict]:
+    """Get payment summaries for multiple students in one query.
+
+    Returns a mapping: student_id -> {total_fee, paid_amount, remaining_amount, status}
+    """
+    db = get_db()
+
+    # Map student _id (string) -> class_id
+    student_obj_map = {}
+    obj_ids = []
+    for sid in student_ids:
+        try:
+            obj_ids.append(ObjectId(sid))
+        except Exception:
+            # skip invalid ids
+            continue
+
+    students = list(db.students.find({"_id": {"$in": obj_ids}}, {"_id": 1, "class_id": 1}))
+    for s in students:
+        student_obj_map[str(s.get("_id"))] = s.get("class_id")
+
+    # Resolve active fee category per class
+    class_ids = list({v for v in student_obj_map.values() if v})
+    class_to_category = {}
+    categories = {}
+    if class_ids:
+        assignments = list(db.class_fee_assignments.find({"class_id": {"$in": class_ids}, "is_active": True}))
+        category_ids = {a.get("category_id") for a in assignments if a.get("category_id")}
+        # fetch categories
+        if category_ids:
+            cats = list(db.fee_categories.find({"_id": {"$in": [ObjectId(c) for c in category_ids]}}))
+            for c in cats:
+                cid = str(c.get("_id"))
+                if "total_amount" in c and isinstance(c.get("total_amount"), (int, float)):
+                    categories[cid] = c.get("total_amount", 0)
+                elif isinstance(c.get("components"), list):
+                    categories[cid] = sum((comp.get("amount", 0) for comp in c.get("components", [])))
+                else:
+                    categories[cid] = 0
+
+        for a in assignments:
+            class_to_category[a.get("class_id")] = a.get("category_id")
+
+    # Aggregate payments by student_id (payments store student_id as string)
+    payments_pipeline = [
+        {"$match": {"student_id": {"$in": student_ids}}},
+        {"$group": {"_id": "$student_id", "total_paid": {"$sum": "$amount_paid"}}}
+    ]
+    agg = list(db.fee_payments.aggregate(payments_pipeline))
+    paid_map = {item.get("_id"): item.get("total_paid", 0) for item in agg}
+
+    # Build results
+    results = {}
+    for sid in student_ids:
+        class_id = student_obj_map.get(sid)
+        total_fee = 0
+        if class_id:
+            cat_id = class_to_category.get(class_id)
+            if cat_id:
+                total_fee = categories.get(str(cat_id), 0)
+
+        paid_amount = paid_map.get(sid, 0)
+        remaining_amount = total_fee - paid_amount
+        if paid_amount == 0:
+            status = "unpaid"
+        elif paid_amount >= total_fee:
+            status = "paid"
+        else:
+            status = "partial"
+
+        results[sid] = {
+            "total_fee": total_fee,
+            "paid_amount": paid_amount,
+            "remaining_amount": max(0, remaining_amount),
+            "status": status
+        }
+
+    return results

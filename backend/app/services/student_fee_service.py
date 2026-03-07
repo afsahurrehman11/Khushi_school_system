@@ -8,6 +8,7 @@ from typing import List, Optional, Dict, Any
 from bson import ObjectId
 import logging
 import calendar
+import traceback
 
 from app.database import get_db
 from app.models.student_monthly_fee import (
@@ -31,6 +32,26 @@ def convert_objectid(doc: dict) -> dict:
         doc["id"] = str(doc["_id"])
         del doc["_id"]
     return doc
+
+
+def _convert_bson_recursive(obj):
+    """Recursively convert BSON types (ObjectId) to JSON-friendly types."""
+    if obj is None:
+        return None
+    # Convert single ObjectId
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    # Dict -> convert values
+    if isinstance(obj, dict):
+        new = {}
+        for k, v in obj.items():
+            new[k] = _convert_bson_recursive(v)
+        return new
+    # List/tuple -> convert items
+    if isinstance(obj, (list, tuple)):
+        return [_convert_bson_recursive(v) for v in obj]
+    # Other types (datetime, str, int, float, bool) pass through
+    return obj
 
 # ==================== SCHOLARSHIP SERVICE (M2) ====================
 
@@ -81,7 +102,67 @@ def update_student_scholarship(student_id: str, school_id: str, scholarship_perc
             }
         }
     )
-    
+    # If update succeeded, also update current month's fee record (if exists)
+    if result.modified_count > 0:
+        try:
+            # Determine student _id for fee queries
+            student_obj_id = None
+            if ObjectId.is_valid(student_id):
+                student_obj_id = ObjectId(student_id)
+            else:
+                s = db.students.find_one({"student_id": student_id, "school_id": school_id})
+                if s:
+                    student_obj_id = s.get("_id")
+
+            if student_obj_id:
+                now = datetime.utcnow()
+                fee = db.student_monthly_fees.find_one({
+                    "school_id": school_id,
+                    "student_id": str(student_obj_id),
+                    "month": now.month,
+                    "year": now.year
+                })
+                if fee:
+                    # Recompute scholarship-related fields while preserving payments
+                    base_fee = fee.get("base_fee", 0)
+                    arrears_added = fee.get("arrears_added", 0)
+                    amount_paid = fee.get("amount_paid", 0)
+
+                    scholarship_amount = round((base_fee * scholarship_percent) / 100.0, 2)
+                    fee_after_discount = base_fee - scholarship_amount
+                    final_fee = fee_after_discount + (arrears_added or 0)
+                    remaining_amount = final_fee - (amount_paid or 0)
+
+                    new_status = FeeStatus.UNPAID.value
+                    if remaining_amount <= 0:
+                        new_status = FeeStatus.PAID.value
+                        remaining_amount = 0.0
+                    elif amount_paid and amount_paid > 0:
+                        new_status = FeeStatus.PARTIAL.value
+
+                    db.student_monthly_fees.update_one(
+                        {"_id": fee["_id"]},
+                        {"$set": {
+                            "scholarship_percent": scholarship_percent,
+                            "scholarship_amount": scholarship_amount,
+                            "fee_after_discount": fee_after_discount,
+                            "final_fee": final_fee,
+                            "remaining_amount": remaining_amount,
+                            "status": new_status,
+                            "updated_at": datetime.utcnow()
+                        }}
+                    )
+
+                    # Recompute student's arrears after changing scholarship
+                    try:
+                        sid = str(student_obj_id)
+                        new_arrears = compute_student_arrears_balance(sid, school_id)
+                        update_student_arrears(sid, school_id, new_arrears)
+                    except Exception:
+                        pass
+        except Exception:
+            logger.exception("Failed to recompute current month fee after scholarship update")
+
     return result.modified_count > 0
 
 def update_student_arrears(student_id: str, school_id: str, arrears_balance: float) -> bool:
@@ -106,6 +187,37 @@ def update_student_arrears(student_id: str, school_id: str, arrears_balance: flo
     )
     
     return result.modified_count > 0
+
+
+def compute_student_arrears_balance(student_id: str, school_id: str) -> float:
+    """Recompute student's arrears balance from monthly fee records.
+
+    Arrears are defined as the sum of remaining amounts for previous months
+    (months earlier than the current month) and any fees marked OVERDUE.
+    This ensures arrears always reflect the accurate outstanding history.
+    """
+    db = get_db()
+    now = datetime.utcnow()
+    current_month = now.month
+    current_year = now.year
+
+    query = {
+        "school_id": school_id,
+        "student_id": student_id,
+        "remaining_amount": {"$gt": 0},
+        "$or": [
+            {"year": {"$lt": current_year}},
+            {"year": current_year, "month": {"$lt": current_month}},
+            {"status": FeeStatus.OVERDUE.value}
+        ]
+    }
+
+    fees = list(db.student_monthly_fees.find(query))
+    total = 0.0
+    for f in fees:
+        total += f.get("remaining_amount", 0)
+
+    return float(total)
 
 # ==================== MONTHLY FEE SERVICE (M3) ====================
 
@@ -201,13 +313,46 @@ def generate_monthly_fee(
     # Calculate fee after discount
     fee_after_discount = round(base_fee - scholarship_amount, 2)
     
-    # Get arrears
-    arrears_added = student.get("arrears_balance", student.get("arrears", 0.0))
-    
+    # Compute arrears to add automatically:
+    # - include legacy student arrears_balance
+    # - include any previous monthly fees' remaining amounts that have not been carried yet
+    now = datetime.utcnow()
+
+    try:
+        prev_query = {
+            "school_id": school_id,
+            "student_id": student_id_str,
+            "$or": [
+                {"year": {"$lt": year}},
+                {"year": year, "month": {"$lt": month}}
+            ],
+            "remaining_amount": {"$gt": 0},
+            "arrears_carried": {"$ne": True}
+        }
+
+        fees_to_carry = list(db.student_monthly_fees.find(prev_query))
+        carried_total = sum(f.get("remaining_amount", 0.0) for f in fees_to_carry)
+    except Exception:
+        fees_to_carry = []
+        carried_total = 0.0
+
+    initial_arrears = student.get("arrears_balance", student.get("arrears", 0.0)) or 0.0
+    arrears_added = round(initial_arrears + carried_total, 2)
+
+    # Mark previous months as carried so we don't double-add in future generations
+    if fees_to_carry:
+        ids = [f["_id"] for f in fees_to_carry]
+        db.student_monthly_fees.update_many(
+            {"_id": {"$in": ids}},
+            {"$set": {"arrears_carried": True, "status": FeeStatus.OVERDUE.value, "updated_at": now}}
+        )
+
+    # Clear legacy student arrears balance since we've included it in this month's fee
+    if arrears_added > 0:
+        update_student_arrears(student_id_str, school_id, 0.0)
+
     # Calculate final fee
     final_fee = round(fee_after_discount + arrears_added, 2)
-    
-    now = datetime.utcnow()
     
     fee_record = {
         "school_id": school_id,
@@ -387,10 +532,11 @@ def get_fee_summary(student_id: str, school_id: str) -> Dict[str, Any]:
     }
 
 def get_current_month_fee(student_id: str, school_id: str) -> Optional[Dict[str, Any]]:
-    """Get current month's fee record"""
+    """Get current month's fee record. Auto-generates if it doesn't exist."""
     now = datetime.utcnow()
     db = get_db()
     
+    # Try to find existing fee for current month
     fee = db.student_monthly_fees.find_one({
         "school_id": school_id,
         "student_id": student_id,
@@ -398,9 +544,55 @@ def get_current_month_fee(student_id: str, school_id: str) -> Optional[Dict[str,
         "year": now.year
     })
     
+    # If fee doesn't exist, generate it automatically
+    if not fee:
+        try:
+            logger.info(f"[FEE] Auto-generating monthly fee for student {student_id}, month {now.month}/{now.year}")
+            
+            # First verify student exists and is in the right school
+            student_query = {"school_id": school_id}
+            if ObjectId.is_valid(student_id):
+                student_query["_id"] = ObjectId(student_id)
+            else:
+                student_query["student_id"] = student_id
+            
+            student = db.students.find_one(student_query)
+            if not student:
+                logger.warning(f"[FEE] Student {student_id} not found in school {school_id}")
+                return None
+            
+            # Use the ObjectId string for consistency
+            student_id_str = str(student["_id"])
+            
+            # Generate the fee
+            fee_dict = generate_monthly_fee(
+                student_id=student_id_str,
+                school_id=school_id,
+                month=now.month,
+                year=now.year,
+                generated_by="auto-generate"
+            )
+            
+            logger.info(f"[FEE] ✓ Successfully auto-generated fee for student {student_id_str}, final_fee: {fee_dict.get('final_fee', 0)}")
+            fee = fee_dict
+            
+        except Exception as e:
+            logger.error(f"[FEE] ❌ Failed to auto-generate monthly fee for student {student_id}: {str(e)}")
+            logger.error(f"[FEE] Traceback: {traceback.format_exc()}")
+            return None
+    
     if fee:
-        fee = convert_objectid(fee)
-        fee["month_name"] = get_month_name(fee["month"])
+        # Convert ObjectId if present
+        if "_id" in fee:
+            fee["id"] = str(fee["_id"])
+            del fee["_id"]
+        elif "id" not in fee and "_id" not in fee:
+            # Already converted, no action needed
+            pass
+        
+        # Ensure month_name is set
+        if "month_name" not in fee and "month" in fee:
+            fee["month_name"] = get_month_name(fee["month"])
     
     return fee
 
@@ -414,7 +606,7 @@ def create_payment(
     payment_method: str = "CASH",
     transaction_reference: Optional[str] = None,
     notes: Optional[str] = None,
-    received_by: Optional[str] = None
+    received_by: Optional[Any] = None
 ) -> Dict[str, Any]:
     """Create a payment record and update monthly fee"""
     db = get_db()
@@ -475,12 +667,13 @@ def create_payment(
         }
     )
     
-    # Update student arrears balance
-    # If fully paid, arrears becomes 0; if partial, remaining becomes arrears for next month
-    if new_status == FeeStatus.PAID.value:
-        update_student_arrears(student_id, school_id, 0.0)
-    else:
-        update_student_arrears(student_id, school_id, new_remaining)
+    # Recompute and update student's arrears balance from fee records
+    try:
+        new_arrears_balance = compute_student_arrears_balance(student_id, school_id)
+        update_student_arrears(student_id, school_id, new_arrears_balance)
+    except Exception:
+        # If recompute fails, fall back to conservative behavior of setting arrears to sum of new_remaining
+        update_student_arrears(student_id, school_id, new_remaining if new_remaining > 0 else 0.0)
     
     logger.info(f"Payment recorded: {amount} for fee {monthly_fee_id}. Status: {new_status}")
     
@@ -488,7 +681,13 @@ def create_payment(
     payment["month"] = fee["month"]
     payment["year"] = fee["year"]
     payment["month_name"] = get_month_name(fee["month"])
-    
+    # Ensure JSON-serializable response (convert any ObjectId instances)
+    try:
+        payment = _convert_bson_recursive(payment)
+    except Exception:
+        # Fall back: ensure inserted id exists as string
+        if "id" not in payment and hasattr(result, "inserted_id"):
+            payment["id"] = str(result.inserted_id)
     return payment
 
 def get_student_payments(
@@ -669,6 +868,7 @@ def carry_forward_arrears(school_id: str) -> Dict[str, Any]:
     query = {
         "school_id": school_id,
         "status": {"$in": [FeeStatus.UNPAID.value, FeeStatus.PARTIAL.value]},
+        "arrears_carried": {"$ne": True},
         "$or": [
             {"year": {"$lt": current_year}},
             {"year": current_year, "month": {"$lt": current_month}}
@@ -680,25 +880,30 @@ def carry_forward_arrears(school_id: str) -> Dict[str, Any]:
     updated_count = 0
     total_arrears = 0
     
+    students_to_recalc = set()
+    
     for fee in fees_to_update:
         remaining = fee["remaining_amount"]
         if remaining > 0:
-            # Update fee status to OVERDUE
+            # Update fee status to OVERDUE and mark carried
             db.student_monthly_fees.update_one(
                 {"_id": fee["_id"]},
-                {"$set": {"status": FeeStatus.OVERDUE.value, "updated_at": now}}
+                    {"$set": {"status": FeeStatus.OVERDUE.value, "arrears_carried": True, "updated_at": now}}
             )
-            
-            # Update student arrears balance
-            student_id = fee["student_id"]
-            student = db.students.find_one({"_id": ObjectId(student_id)})
-            if student:
-                current_arrears = student.get("arrears_balance", 0)
-                new_arrears = current_arrears + remaining
-                update_student_arrears(student_id, school_id, new_arrears)
-                total_arrears += remaining
-            
+            students_to_recalc.add(fee["student_id"])
+            total_arrears += remaining
             updated_count += 1
+
+    # After updating fee records, recompute arrears per affected student to keep balances accurate
+    total_arrears = 0
+    for sid in students_to_recalc:
+        try:
+            new_balance = compute_student_arrears_balance(sid, school_id)
+            update_student_arrears(sid, school_id, new_balance)
+            total_arrears += new_balance
+        except Exception:
+            # best-effort: continue
+            continue
     
     logger.info(f"Carried forward arrears for {updated_count} fee records. Total arrears: {total_arrears}")
     

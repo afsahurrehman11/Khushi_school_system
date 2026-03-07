@@ -94,7 +94,7 @@ const StudentCard: React.FC<StudentCardProps> = ({
               title="Admission Options"
               className="w-8 h-8 bg-white/95 rounded flex items-center justify-center border border-indigo-100 hover:bg-white"
             >
-              <svg className="w-4 h-4 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" strokeLinecap="round" strokeLinejoin="round" /><polyline points="7 10 12 15 17 10" strokeLinecap="round" strokeLinejoin="round" /><line x1="12" y1="15" x2="12" y2="3" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <svg className="w-4 h-4 text-indigo-600" viewBox="Arrears" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" strokeLinecap="round" strokeLinejoin="round" /><polyline points="7 10 12 15 17 10" strokeLinecap="round" strokeLinejoin="round" /><line x1="12" y1="15" x2="12" y2="3" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </button>
           </div>
         )}

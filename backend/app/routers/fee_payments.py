@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
+from pydantic import BaseModel
 from app.models.fee import FeePaymentCreate, FeePaymentInDB, FeePaymentUpdate, FeePaymentResponse
 from app.services.fee_payment_service import (
     record_fee_payment, get_fee_payment_by_id, get_fee_payments_for_student,
@@ -168,6 +169,34 @@ async def get_student_fee_summary(
     except Exception as e:
         logger.error(f"[SCHOOL:{school_id}] ❌ Error fetching summary: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to fetch payment summary")
+
+
+
+class StudentIdsPayload(BaseModel):
+    student_ids: List[str]
+
+
+@router.post("/students/summary", response_model=dict)
+async def get_students_fee_summaries(
+    payload: StudentIdsPayload,
+    current_user: dict = Depends(check_permission("fees.view"))
+):
+    """Get payment summaries for multiple students in a single request.
+    Returns a mapping student_id -> summary
+    """
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching payment summaries for multiple students")
+
+    try:
+        from app.services.fee_payment_service import get_fee_payment_summary_for_students
+
+        results = get_fee_payment_summary_for_students(payload.student_ids)
+        logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved summaries for {len(results)} students")
+        return results
+    except Exception as e:
+        logger.error(f"[SCHOOL:{school_id}] ❌ Error fetching summaries: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch payment summaries")
 
 @router.put("/{payment_id}", response_model=dict)
 async def update_fee_payment_record(

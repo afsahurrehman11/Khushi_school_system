@@ -185,9 +185,20 @@ try:
     logger.info("✅ FastAPI app initialized successfully")
 
     # CORS middleware
+    # Ensure allowed_origins is a list (support string from env)
+    allow_origins = settings.allowed_origins
+    try:
+        if isinstance(allow_origins, str):
+            # Support comma-separated env values
+            allow_origins = [o.strip() for o in allow_origins.split(",") if o.strip()]
+        if not isinstance(allow_origins, (list, tuple)):
+            allow_origins = [allow_origins]
+    except Exception:
+        allow_origins = ["*"]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.allowed_origins,
+        allow_origins=allow_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

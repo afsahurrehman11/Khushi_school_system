@@ -35,12 +35,18 @@ interface StudentData {
   total_fee: number;
   paid_amount: number;
   remaining_amount: number;
+  roll_number?: string;
+  registration_id?: string;
+  arrears?: number;
+  scholarship_percent?: number;
+  scholarship_amount?: number;
 }
 
 const FeePage: React.FC = () => {
   const [classes, setClasses] = useState<ClassData[]>([]);
   const [selectedClass, setSelectedClass] = useState<ClassData | null>(null);
   const [students, setStudents] = useState<StudentData[]>([]);
+  const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'partial' | 'unpaid'>('all');
   const [selectedStudent, setSelectedStudent] = useState<StudentData | null>(null);
   const [loading, setLoading] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -94,29 +100,19 @@ const FeePage: React.FC = () => {
         }
       }
 
-      // Fetch per-student payment summary to compute paid/partial/unpaid counts.
+      // Fetch per-student payment summary in bulk to avoid N+1 HTTP calls.
       let fee_summary = null;
       try {
         if (studentsList.length > 0) {
-          // Limit concurrency by batching
-          const BATCH = 50;
-          const chunks: any[][] = [];
-          for (let i = 0; i < studentsList.length; i += BATCH) chunks.push(studentsList.slice(i, i + BATCH));
-
+          const ids = studentsList.map(s => s.id);
+          // Backend endpoint returns a mapping student_id -> summary
+          const res = await api.post(`/fee-payments/students/summary`, { student_ids: ids });
           let paid = 0, partial = 0, unpaid = 0;
-          for (const chunk of chunks) {
-            const promises = chunk.map((s: any) => api.get(`/fee-payments/student/${s.id}/summary`).catch(() => ({ status: 'unpaid' })));
-            const results = await Promise.allSettled(promises);
-            for (const r of results) {
-              if (r.status === 'fulfilled') {
-                const s = r.value;
-                if (s?.status === 'paid') paid++;
-                else if (s?.status === 'partial') partial++;
-                else unpaid++;
-              } else {
-                unpaid++;
-              }
-            }
+          for (const sid of ids) {
+            const s = res[sid] || { status: 'unpaid' };
+            if (s.status === 'paid') paid++;
+            else if (s.status === 'partial') partial++;
+            else unpaid++;
           }
           fee_summary = { paid, partial, unpaid };
         } else {
@@ -471,36 +467,47 @@ const FeePage: React.FC = () => {
   const loadStudentsForClass = async (classData: ClassData) => {
     setLoading(true);
     try {
-      const studentsData = await api.get(`/api/students?class_id=${classData.id}`);
+      const studentsData = await api.get(`/students?class_id=${classData.id}`);
 
-      // Enrich with fee status
-      const enrichedStudents = await Promise.all(
-        studentsData.map(async (student: any) => {
-          // Get fee summary for student
-          let summary = {
-            total_fee: classData.fee_category?.total_amount || 0,
-            paid_amount: 0,
-            remaining_amount: classData.fee_category?.total_amount || 0,
-            status: 'unpaid' as const,
-          };
-          try {
-            summary = await api.get(`/fee-payments/student/${student.id}/summary`);
-          } catch (e) {
-            // Keep default
-          }
+      // Bulk fetch fee summaries for students to avoid N+1 API calls
+      let summaries: Record<string, any> = {};
+      try {
+        const ids = studentsData.map((s: any) => s.id);
+        if (ids.length > 0) {
+          summaries = await api.post(`/fee-payments/students/summary`, { student_ids: ids });
+        }
+      } catch (e) {
+        summaries = {};
+      }
 
-          return {
-            id: student.id,
-            student_id: student.student_id,
-            full_name: student.full_name,
-            fee_status: summary.status as 'paid' | 'partial' | 'unpaid',
-            fee_category: classData.fee_category?.name || 'No Category',
-            total_fee: summary.total_fee,
-            paid_amount: summary.paid_amount,
-            remaining_amount: summary.remaining_amount,
-          };
-        })
-      );
+      const enrichedStudents = (studentsData || []).map((student: any) => {
+        const ssummary = summaries[student.id] || {};
+        const total_fee = ssummary.total_fee ?? classData.fee_category?.total_amount ?? 0;
+        const paid_amount = ssummary.paid_amount ?? 0;
+        // scholarship percent may be on student document
+        const scholarship_percent = student.scholarship_percent ?? student.scholarship ?? 0;
+        const scholarship_amount = Math.round((total_fee * (scholarship_percent || 0)) / 100);
+        const arrears = ssummary.arrears ?? student.arrears_balance ?? student.arrears ?? 0;
+        const remaining_amount = (total_fee - (paid_amount || 0) + (arrears || 0) - (scholarship_amount || 0));
+
+        const status = (ssummary.status as 'paid' | 'partial' | 'unpaid') || ((remaining_amount <= 0) ? 'paid' : (paid_amount > 0 ? 'partial' : 'unpaid'));
+
+        return {
+          id: student.id,
+          student_id: student.student_id,
+          full_name: student.full_name,
+          roll_number: student.roll_number || student.roll_no || '',
+          registration_id: student.registration_number || student.student_id || '',
+          fee_status: status,
+          fee_category: classData.fee_category?.name || 'No Category',
+          total_fee: total_fee,
+          paid_amount: paid_amount,
+          remaining_amount: remaining_amount,
+          arrears: arrears,
+          scholarship_percent: scholarship_percent,
+          scholarship_amount: scholarship_amount,
+        } as StudentData & any;
+      });
 
       setStudents(enrichedStudents);
       setSelectedClass(classData);
@@ -545,26 +552,30 @@ const FeePage: React.FC = () => {
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-bold text-primary-900">Fee Management - {selectedStudent.full_name}</h1>
             <div className="flex items-center gap-2">
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={handleDownloadVoucher}
                 disabled={downloadingVoucher}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="p-2 rounded-full text-white bg-primary-600 hover:bg-primary-700"
+                title={downloadingVoucher ? 'Downloading...' : 'Download Voucher'}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
-                {downloadingVoucher ? 'Downloading...' : 'Download Voucher'}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={handlePrintVoucher}
                 disabled={downloadingVoucher}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-primary-700 bg-white border border-primary-300 hover:bg-primary-50 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="p-2 rounded-full bg-white border border-primary-300 text-primary-700 hover:bg-primary-50"
+                title={downloadingVoucher ? 'Loading...' : 'Print Voucher'}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                 </svg>
-                {downloadingVoucher ? 'Loading...' : 'Print Voucher'}
-              </button>
+              </Button>
               <button onClick={() => setSelectedStudent(null)} className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors">Back to Students</button>
             </div>
           </div>
@@ -581,7 +592,7 @@ const FeePage: React.FC = () => {
             <div>
               <Suspense fallback={<div className="py-8 text-center text-gray-600">Loading...</div>}>
                 {selectedFeeTab === 'overview' && (
-                  <FeeOverviewTab studentId={String(selectedStudent.id)} studentName={selectedStudent.full_name} studentCode={selectedStudent.student_id} className={selectedClass?.class_name} onPrintVoucher={handlePrintVoucher} onRefresh={async () => { if (selectedClass) await loadStudentsForClass(selectedClass); }} />
+                  <FeeOverviewTab studentId={String(selectedStudent.id)} studentName={selectedStudent.full_name} studentCode={selectedStudent.student_id} className={selectedClass?.class_name} classId={selectedClass?.id} onPrintVoucher={handlePrintVoucher} onRefresh={async () => { if (selectedClass) await loadStudentsForClass(selectedClass); }} />
                 )}
 
                 {selectedFeeTab === 'record' && (
@@ -616,27 +627,45 @@ const FeePage: React.FC = () => {
             <div className="text-center py-8">Loading students...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {students.map((student) => (
-                <div
-                  key={student.id}
-                  className={`bg-white rounded-lg shadow-md p-4 border-l-4 cursor-pointer hover:shadow-lg transition-shadow ${getStatusColor(student.fee_status)}`}
-                  onClick={() => setSelectedStudent(student)}
-                >
-                  <h3 className="font-semibold text-lg mb-2">{student.full_name}</h3>
-                  <p className="text-sm text-gray-600 mb-1">ID: {student.student_id}</p>
-                  <p className="text-sm text-gray-600 mb-2">{student.fee_category}</p>
-                  <div className="text-sm">
-                    <p>Total: ${student.total_fee}</p>
-                    <p>Paid: ${student.paid_amount}</p>
-                    <p>Remaining: ${student.remaining_amount}</p>
-                  </div>
-                  <div className="mt-2">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(student.fee_status)}`}>
-                      {getStatusText(student.fee_status)}
-                    </span>
-                  </div>
-                </div>
-              ))}
+              <div className="flex items-center gap-3 mb-4">
+                <label className="text-sm font-medium">Filter:</label>
+                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)} className="px-3 py-1 border rounded-md text-sm">
+                  <option value="all">All</option>
+                  <option value="unpaid">Unpaid</option>
+                  <option value="partial">Partial</option>
+                  <option value="paid">Paid</option>
+                </select>
+              </div>
+
+              {students.filter(s => filterStatus === 'all' ? true : s.fee_status === filterStatus).map((student) => (
+                    <div
+                      key={student.id}
+                      className={`rounded-lg shadow-md p-4 border-l-4 cursor-pointer hover:shadow-lg transition-shadow ${getStatusColor(student.fee_status)}`}
+                      onClick={() => setSelectedStudent(student)}
+                    >
+                      <h3 className="font-semibold text-lg mb-1 truncate">{student.full_name}</h3>
+                      <div className="text-sm text-gray-600 mb-2">
+                        <div>Roll: {student.roll_number || '—'}</div>
+                        <div>Reg: {student.registration_id || '—'}</div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-sm mb-2">
+                        <div className="text-gray-700">Arrears</div>
+                        <div className="font-medium text-gray-900">{new Intl.NumberFormat('en-PK', { style: 'currency', currency: 'PKR', maximumFractionDigits: 0 }).format(student.arrears || 0)}</div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-sm">
+                        <div className="text-gray-700">Remaining</div>
+                        <div className="font-medium text-gray-900">{new Intl.NumberFormat('en-PK', { style: 'currency', currency: 'PKR', maximumFractionDigits: 0 }).format(student.remaining_amount || 0)}</div>
+                      </div>
+
+                      <div className="mt-3">
+                        <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${student.fee_status === 'paid' ? 'bg-green-200 text-green-800' : student.fee_status === 'partial' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                          {getStatusText(student.fee_status)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
             </div>
           )}
         </div>

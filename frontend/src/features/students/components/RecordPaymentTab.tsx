@@ -79,6 +79,12 @@ const RecordPaymentTab: React.FC<Props> = ({ studentId, onRecorded }) => {
       setAmount(''); setTxRef(''); setMethodName('');
       await loadCurrent();
       onRecorded?.();
+      // Notify other components (overview, class lists) that a payment was recorded
+      try {
+        window.dispatchEvent(new CustomEvent('feeRecorded', { detail: { studentId } }));
+      } catch (e) {
+        // ignore
+      }
     } catch (err: any) {
       InAppNotificationService.error(err?.message || 'Failed to record payment');
     } finally {

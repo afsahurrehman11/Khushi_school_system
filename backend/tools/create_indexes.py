@@ -115,6 +115,25 @@ def create_indexes():
                 {"keys": [("school_id", ASCENDING), ("received_by", ASCENDING)], "name": "idx_school_accountant"},
             ]
         },
+        # Student Monthly Fees Collection
+        {
+            "collection": "student_monthly_fees",
+            "indexes": [
+                {"keys": [("school_id", ASCENDING)], "name": "idx_student_monthly_school"},
+                {"keys": [("school_id", ASCENDING), ("student_id", ASCENDING)], "name": "idx_school_student_monthly"},
+                {"keys": [("school_id", ASCENDING), ("student_id", ASCENDING), ("year", DESCENDING), ("month", DESCENDING)], "name": "idx_school_student_year_month"},
+                {"keys": [("school_id", ASCENDING), ("status", ASCENDING)], "name": "idx_school_monthly_status"},
+            ]
+        },
+        # Student Payments Collection (detailed payments per student)
+        {
+            "collection": "student_payments",
+            "indexes": [
+                {"keys": [("school_id", ASCENDING)], "name": "idx_student_payments_school"},
+                {"keys": [("school_id", ASCENDING), ("student_id", ASCENDING)], "name": "idx_school_student_payments_v2"},
+                {"keys": [("school_id", ASCENDING), ("payment_date", DESCENDING)], "name": "idx_school_student_payment_date"},
+            ]
+        },
         
         # Class Fee Assignments Collection
         {

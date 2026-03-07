@@ -34,8 +34,24 @@ class UsageSnapshotJob:
         Returns summary of results.
         """
         logger.info("[SNAPSHOT_JOB] Starting daily usage snapshot job")
-        
+
         root_db = get_saas_root_db()
+
+        # Prevent frequent duplicate runs across processes by checking a persisted last_run.
+        try:
+            job_doc = root_db.system_jobs.find_one({"job": "usage_snapshot"}) or {}
+            last_run = job_doc.get("last_run")
+            if last_run:
+                # last_run stored as datetime in DB
+                delta = datetime.utcnow() - last_run
+                # If last run was within 50 minutes, skip to avoid duplicate overlapping runs
+                # (we schedule the job hourly; use a slightly smaller guard)
+                if delta.total_seconds() < (50 * 60):
+                    logger.info("[SNAPSHOT_JOB] Skipping run - recently executed")
+                    return {"total": 0, "successful": 0, "failed": 0, "skipped": 0, "errors": []}
+        except Exception:
+            # If system_jobs not available, continue normally
+            pass
         
         # Get all active schools
         schools = list(root_db.schools.find({
@@ -77,6 +93,11 @@ class UsageSnapshotJob:
                 logger.error(f"[SNAPSHOT_JOB] ❌ Failed for {school_name}: {e}")
         
         self.last_run = datetime.utcnow()
+        # persist last_run to system_jobs for cross-process guard
+        try:
+            root_db.system_jobs.update_one({"job": "usage_snapshot"}, {"$set": {"last_run": self.last_run}}, upsert=True)
+        except Exception:
+            pass
         
         logger.info(
             f"[SNAPSHOT_JOB] Completed: {results['successful']}/{results['total']} successful, "
@@ -352,7 +373,8 @@ async def start_background_jobs():
     billing_job = get_billing_job()
     
     # Start jobs in background
-    asyncio.create_task(snapshot_job.start_scheduled_job(interval_hours=24))
+    # Snapshot job scheduled to run every 1 hour
+    asyncio.create_task(snapshot_job.start_scheduled_job(interval_hours=1))
     asyncio.create_task(cleanup_job.start_scheduled_job(interval_hours=48))
     asyncio.create_task(billing_job.start_scheduled_job(interval_hours=24))
     # Start embedding sync job (polling fallback for change-stream updates)

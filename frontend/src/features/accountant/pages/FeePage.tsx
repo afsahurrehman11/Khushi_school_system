@@ -1,7 +1,6 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import Button from '../../../components/Button';
-import FeeCategoryModal from '../components/FeeCategoryModal';
-import FeeVoucherSettingsModal from '../components/FeeVoucherSettingsModal';
+import { FeeCategoryModal, FeeVoucherSettingsModal } from '../components';
 import { InAppNotificationService } from '../services';
 import { api } from '../../../utils/api';
 import { config } from '../../../config';
@@ -57,6 +56,10 @@ const FeePage: React.FC = () => {
   const [jobProgress, setJobProgress] = useState<{ jobId: string, status: string, progress: number, type: string } | null>(null);
   const [classDetails, setClassDetails] = useState<Record<string, { loading: boolean; student_count?: number; fee_category?: any; fee_summary?: any }>>({});
   const [selectedFeeTab, setSelectedFeeTab] = useState<'overview' | 'history' | 'records' | 'record'>('overview');
+  const [exportStatus, setExportStatus] = useState<'paid' | 'partial' | 'unpaid' | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [showExportInline, setShowExportInline] = useState(false);
+  const exportInlineRef = React.useRef<HTMLDivElement | null>(null);
 
   // Lazy-load student fee components
   const FeeOverviewTab = lazy(() => import('../../../features/students/components/FeeOverviewTab'));
@@ -525,6 +528,111 @@ const FeePage: React.FC = () => {
     }
   };
 
+  const handleExportByStatus = async (statusParam?: 'paid' | 'partial' | 'unpaid') => {
+    const statusToUse = statusParam ?? exportStatus;
+
+    if (exporting) {
+      console.log('[EXPORT] 🔄 Export already in progress');
+      InAppNotificationService.info('Export already in progress');
+      return;
+    }
+
+    if (!statusToUse || !selectedClass) {
+      console.warn('[EXPORT] ❌ Missing status or class', { statusToUse, selectedClass: selectedClass ? { id: selectedClass.id, name: selectedClass.class_name, section: selectedClass.section } : null });
+      return;
+    }
+
+    setExporting(true);
+    console.log(`[EXPORT] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log(`[EXPORT] Starting export | Class: ${selectedClass.class_name} (${selectedClass.id})`);
+    console.log(`[EXPORT] Section: ${selectedClass.section || 'All Sections'}`);
+    console.log(`[EXPORT] Status filter: ${statusToUse.toUpperCase()}`);
+    console.log(`[EXPORT] Time: ${new Date().toISOString()}`);
+    InAppNotificationService.info(`Exporting ${statusToUse} students from ${selectedClass.section || 'all sections'}...`);
+    
+    try {
+      const sectionParam = selectedClass.section ? `&section=${encodeURIComponent(selectedClass.section)}` : '';
+      const url = `${config.API_BASE_URL}/fees/export?class_id=${selectedClass.id}&status=${statusToUse}${sectionParam}`;
+      console.log(`[EXPORT] API Request: ${url}`);
+      console.log(`[EXPORT] Headers: Authorization present`);
+      
+      const startTime = performance.now();
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: authService.getAuthHeaders(),
+      });
+      const fetchTime = (performance.now() - startTime).toFixed(2);
+
+      console.log(`[EXPORT] Response status: ${response.status} | Time: ${fetchTime}ms`);
+      console.log(`[EXPORT] Content-Type: ${response.headers.get('content-type')}`);
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Failed to export' }));
+        console.error('[EXPORT] ❌ HTTP Error:', { status: response.status, error });
+        throw new Error(error.detail || `HTTP ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      console.log(`[EXPORT] ✅ Received blob: ${blob.size} bytes | type: ${blob.type}`);
+      
+      // Show details about blob content (first 500 bytes as text if XML/JSON)
+      if (blob.type.includes('spreadsheet') || blob.type.includes('xml')) {
+        try {
+          const text = await blob.slice(0, 500).text();
+          console.log(`[EXPORT] Blob preview (first 500 chars): ${text.substring(0, 200)}`);
+        } catch (e) {
+          console.log('[EXPORT] (binary blob, skipped preview)');
+        }
+      }
+
+      // Trigger download
+      const url_obj = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url_obj;
+      const date = new Date().toISOString().split('T')[0];
+      const sectionSuffix = selectedClass.section ? `_${selectedClass.section.replace(/ /g, '_')}` : '';
+      a.download = `fee_report_${selectedClass.class_name.replace(/ /g, '_')}${sectionSuffix}_${statusToUse}_${date}.xlsx`;
+      
+      console.log(`[EXPORT] Creating download link: ${a.download}`);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url_obj);
+
+      console.log(`[EXPORT] ✅ Download initiated: ${a.download}`);
+      console.log(`[EXPORT] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+      InAppNotificationService.success(`${statusToUse} students exported successfully`);
+      setExportStatus(null);
+    } catch (error: any) {
+      console.error('[EXPORT] ❌ Exception caught:', error);
+      console.error('[EXPORT] ❌ Stack:', error.stack);
+      console.log(`[EXPORT] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+      InAppNotificationService.error(error.message || 'Failed to export fee report');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleOpenExportModal = () => {
+    if (!selectedClass) return;
+    setShowExportInline((s) => !s);
+  };
+
+  // Close inline dropdown on outside click
+  React.useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!showExportInline) return;
+      const el = exportInlineRef.current;
+      if (!el) return;
+      if (!(e.target instanceof Node)) return;
+      if (!el.contains(e.target)) setShowExportInline(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [showExportInline]);
+
+  // Export modal replaced with native prompt; no debug overlays here.
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'paid': return 'bg-green-100 border-green-300';
@@ -623,20 +731,48 @@ const FeePage: React.FC = () => {
             </Button>
           </div>
 
+          {/* Horizontal navbar with filter and export */}
+          <div className="bg-white rounded-lg shadow-sm border border-secondary-200 px-4 py-3 mb-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-medium text-secondary-700">Filter:</label>
+              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)} className="px-3 py-2 border border-secondary-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                <option value="all">All</option>
+                <option value="unpaid">Unpaid</option>
+                <option value="partial">Partial</option>
+                <option value="paid">Paid</option>
+              </select>
+              <span className="text-sm text-secondary-500 ml-2">
+                ({students.filter(s => filterStatus === 'all' ? true : s.fee_status === filterStatus).length} students)
+              </span>
+            </div>
+            
+            <div className="relative">
+              <button
+                onClick={() => handleOpenExportModal()}
+                disabled={exporting}
+                className={`flex items-center gap-2 px-4 py-2 ${exporting ? 'bg-success-300 cursor-not-allowed' : 'bg-success-600 hover:bg-success-700'} text-white rounded-lg text-sm font-medium transition-colors shadow-sm`}
+                title="Export Students by Fee Status"
+              >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Export Excel
+              </button>
+
+              {showExportInline && (
+                <div ref={exportInlineRef} className="absolute right-0 mt-2 w-44 bg-white rounded-md shadow-lg border border-gray-200 z-50">
+                  <button className="w-full text-left px-3 py-2 hover:bg-gray-100" onClick={() => { setShowExportInline(false); handleExportByStatus('paid'); }}>Paid</button>
+                  <button className="w-full text-left px-3 py-2 hover:bg-gray-100" onClick={() => { setShowExportInline(false); handleExportByStatus('partial'); }}>Partial</button>
+                  <button className="w-full text-left px-3 py-2 hover:bg-gray-100" onClick={() => { setShowExportInline(false); handleExportByStatus('unpaid'); }}>Unpaid</button>
+                </div>
+              )}
+            </div>
+          </div>
+
           {loading ? (
             <div className="text-center py-8">Loading students...</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              <div className="flex items-center gap-3 mb-4">
-                <label className="text-sm font-medium">Filter:</label>
-                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as any)} className="px-3 py-1 border rounded-md text-sm">
-                  <option value="all">All</option>
-                  <option value="unpaid">Unpaid</option>
-                  <option value="partial">Partial</option>
-                  <option value="paid">Paid</option>
-                </select>
-              </div>
-
               {students.filter(s => filterStatus === 'all' ? true : s.fee_status === filterStatus).map((student) => (
                     <div
                       key={student.id}
@@ -803,6 +939,7 @@ const FeePage: React.FC = () => {
 
         <FeeCategoryModal isOpen={showCategoryModal} onClose={() => setShowCategoryModal(false)} />
         <FeeVoucherSettingsModal isOpen={showVoucherSettingsModal} onClose={() => setShowVoucherSettingsModal(false)} />
+        {/* Export now uses native prompt flow (no modal) */}
 
         {/* Progress Modal for Background Jobs */}
         {jobProgress && (

@@ -19,10 +19,13 @@ import {
   ChevronRight,
   Edit2,
   Save,
+  Printer,
 } from 'lucide-react';
 import Button from '../../../components/Button';
 import Modal from '../../../components/Modal';
 import logger from '../../../utils/logger';
+import ExportModal from '../components/ExportModal';
+import { classesService } from '../../../services/classes';
 import type { 
   ImportPreviewResponse, 
   IncompleteStudentsResponse,
@@ -38,6 +41,7 @@ import {
   getImportHistory,
   getIncompleteStudents,
   updateIncompleteStudent,
+  printStudentForms,
 } from '../services/importExportApi';
 import { entitySync } from '../../../utils/entitySync';
 
@@ -72,6 +76,30 @@ const StudentImportExportPage: React.FC = () => {
   const [exporting, setExporting] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
+  // Export modal
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportClasses, setExportClasses] = useState<any[] | null>(null);
+  const openExportModal = async () => {
+    // Fetch classes first — do not show modal until classes/sections loaded
+    try {
+      logger.info('EXPORT', 'Fetching classes before opening export modal');
+      setExportLoading(true);
+      const res = await classesService.getClasses(1, 1000);
+      const items = res.items || [];
+      setExportClasses(items);
+      logger.info('EXPORT', `Loaded ${items.length} classes`);
+      setExportOpen(true);
+    } catch (err: any) {
+      logger.error('EXPORT', `Failed to load classes: ${String(err)}`);
+      // Show a simple alert for now — caller can retry
+      // You could replace with a nicer UI toast/modal if desired
+      alert('Failed to load classes. Please retry or check console for details.');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   // History modal
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyData, setHistoryData] = useState<any[]>([]);
@@ -84,6 +112,7 @@ const StudentImportExportPage: React.FC = () => {
   const [editingStudent, setEditingStudent] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [savingStudent, setSavingStudent] = useState<string | null>(null);
+  const [printingSection, setPrintingSection] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
@@ -98,14 +127,20 @@ const StudentImportExportPage: React.FC = () => {
   const loadIncompleteStudents = async () => {
     setIncompleteLoading(true);
     try {
+      logger.info('INCOMPLETE', 'Loading incomplete students data...');
       const data = await getIncompleteStudents();
       setIncompleteData(data);
-      // Expand first class by default
+      logger.info('INCOMPLETE', `Loaded ${data.total_incomplete_students} incomplete students in ${data.classes.length} classes/sections`);
+      
+      // Expand first class/section by default
       if (data.classes.length > 0) {
-        setExpandedClasses(new Set([data.classes[0].class_id]));
+        const firstClass = data.classes[0];
+        const sectionKey = firstClass.section ? `${firstClass.class_id}_${firstClass.section}` : firstClass.class_id;
+        setExpandedClasses(new Set([sectionKey]));
       }
     } catch (err: any) {
-      logger.error('INCOMPLETE', err.message);
+      logger.error('INCOMPLETE', `Failed to load incomplete students: ${err.message}`);
+      setError(err.message ||'Failed to load incomplete students');
     } finally {
       setIncompleteLoading(false);
     }
@@ -363,13 +398,18 @@ const StudentImportExportPage: React.FC = () => {
   const startEditing = (student: IncompleteStudent) => {
     setEditingStudent(student.id);
     setEditValues({
-      section: student.section || '',
+      section: student.current_data.section || '',
       gender: student.current_data.gender || '',
       date_of_birth: student.current_data.date_of_birth || '',
+      admission_date: student.current_data.admission_date || '',
+      registration_number: student.current_data.registration_number || '',
       father_name: student.current_data.father_name || '',
+      mother_name: student.current_data.mother_name || '',
       father_cnic: student.current_data.father_cnic || '',
       parent_contact: student.current_data.parent_contact || '',
+      guardian_email: student.current_data.guardian_email || '',
       address: student.current_data.address || '',
+      emergency_contact: student.current_data.emergency_contact || '',
     });
   };
 
@@ -388,14 +428,39 @@ const StudentImportExportPage: React.FC = () => {
         setSavingStudent(null);
         return;
       }
+      
+      // Validate emergency contact if provided
+      if (editValues.emergency_contact && !phoneRegex.test(editValues.emergency_contact)) {
+        setError('Emergency contact must be in format 92XXXXXXXXXX');
+        setSavingStudent(null);
+        return;
+      }
+      
       await updateIncompleteStudent(studentId, editValues);
       await loadIncompleteStudents();
       setEditingStudent(null);
       setEditValues({});
+      logger.info('INCOMPLETE', `Successfully updated student ${studentId}`);
     } catch (err: any) {
+      logger.error('INCOMPLETE', `Failed to update student: ${err.message}`);
       setError(err.message || 'Failed to update student');
     } finally {
       setSavingStudent(null);
+    }
+  };
+
+  const handlePrintForms = async (classId: string, section?: string) => {
+    const sectionKey = section ? `${classId}_${section}` : classId;
+    setPrintingSection(sectionKey);
+    try {
+      logger.info('PRINT', `Printing forms for class ${classId}, section ${section || 'all'}`);
+      await printStudentForms(classId, section);
+      logger.info('PRINT', 'PDF generated successfully');
+    } catch (err: any) {
+      logger.error('PRINT', `Failed to print forms: ${err.message}`);
+      setError(err.message || 'Failed to generate PDF');
+    } finally {
+      setPrintingSection(null);
     }
   };
 
@@ -427,17 +492,17 @@ const StudentImportExportPage: React.FC = () => {
         <motion.div
           whileHover={{ y: -2, boxShadow: '0 8px 30px rgba(0,0,0,0.12)' }}
           className="bg-white rounded-xl shadow-soft p-5 cursor-pointer border border-secondary-200 hover:border-success-300 transition-colors"
-          onClick={handleExport}
+          onClick={() => { if (!exportLoading) openExportModal(); }}
         >
           <div className="w-10 h-10 bg-success-100 rounded-lg flex items-center justify-center mb-3">
             <Download className="w-5 h-5 text-success-600" />
           </div>
           <h3 className="text-base font-semibold text-secondary-900 mb-1">Export Students</h3>
           <p className="text-sm text-secondary-500">Download all students as Excel file</p>
-          <div className="mt-3">
-            <Button variant="success" size="sm" disabled={exporting}>
+            <div className="mt-3">
+            <Button variant="success" size="sm" disabled={exportLoading || exporting} onClick={(e) => { e.stopPropagation(); if (!exportLoading) openExportModal(); }}>
               <Download className="w-4 h-4" />
-              {exporting ? 'Exporting...' : 'Export'}
+              {exportLoading ? 'Loading classes...' : exporting ? 'Exporting...' : 'Export'}
             </Button>
           </div>
         </motion.div>
@@ -835,58 +900,82 @@ const StudentImportExportPage: React.FC = () => {
           </div>
 
           {/* Classes with Incomplete Students */}
-          <div className="space-y-3">
-            {incompleteData?.classes.map((cls) => (
-              <div key={cls.class_id} className="bg-white rounded-xl shadow-soft border border-secondary-200 overflow-hidden">
-                {/* Class Header */}
-                <div
-                  className="px-4 py-3 bg-secondary-50 border-b border-secondary-200 cursor-pointer flex items-center justify-between hover:bg-secondary-100 transition-colors"
-                  onClick={() => toggleClassExpand(cls.class_id)}
-                >
-                  <div className="flex items-center gap-3">
-                    {expandedClasses.has(cls.class_id) ? (
-                      <ChevronDown className="w-5 h-5 text-secondary-500" />
+          <div className="space-y-4">
+            {incompleteData?.classes.map((cls) => {
+              const sectionKey = cls.section ? `${cls.class_id}_${cls.section}` : cls.class_id;
+              const isPrinting = printingSection === sectionKey;
+              
+              return (
+              <div key={sectionKey} className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
+                {/* Class Header with Print Button */}
+                <div className="px-5 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 flex items-center justify-between">
+                  <div 
+                    className="flex items-center gap-3 flex-1 cursor-pointer"
+                    onClick={() => toggleClassExpand(sectionKey)}
+                  >
+                    {expandedClasses.has(sectionKey) ? (
+                      <ChevronDown className="w-5 h-5 text-indigo-600" />
                     ) : (
-                      <ChevronRight className="w-5 h-5 text-secondary-500" />
+                      <ChevronRight className="w-5 h-5 text-indigo-600" />
                     )}
                     <div className="flex items-center gap-2">
-                      <Users className="w-5 h-5 text-primary-600" />
-                      <span className="font-semibold text-secondary-900">{cls.class_name}</span>
+                      <Users className="w-5 h-5 text-indigo-600" />
+                      <div>
+                        <span className="font-semibold text-gray-900">{cls.class_name}</span>
+                        {cls.section && <span className="ml-2 text-gray-600">- Section {cls.section}</span>}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm text-secondary-500">
-                      {cls.students.length} students
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-gray-600">
+                      {cls.students.length} student{cls.students.length !== 1 ? 's' : ''}
                     </span>
-                    <span className="px-2 py-1 bg-warning-100 text-warning-700 text-xs rounded-full">
-                      {cls.total_missing_fields} missing fields
+                    <span className="px-3 py-1 bg-amber-100 text-amber-700 text-xs font-medium rounded-full">
+                      {cls.total_missing_fields} missing
                     </span>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handlePrintForms(cls.class_id, cls.section);
+                      }}
+                      disabled={isPrinting}
+                      className="flex items-center gap-2"
+                    >
+                      {isPrinting ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Printer className="w-4 h-4" />
+                      )}
+                      {isPrinting ? 'Generating...' : 'Print Forms'}
+                    </Button>
                   </div>
                 </div>
 
                 {/* Students List */}
                 <AnimatePresence>
-                  {expandedClasses.has(cls.class_id) && (
+                  {expandedClasses.has(sectionKey) && (
                     <motion.div
                       initial={{ height: 0 }}
                       animate={{ height: 'auto' }}
                       exit={{ height: 0 }}
                       className="overflow-hidden"
                     >
-                      <div className="divide-y divide-secondary-100">
+                      <div className="divide-y divide-gray-100">
                         {cls.students.map((student) => (
-                          <div key={student.id} className="p-4">
+                          <div key={student.id} className="p-5 hover:bg-gray-50 transition-colors">
                             <div className="flex items-start justify-between">
                               <div>
-                                <p className="font-medium text-secondary-900">{student.full_name}</p>
-                                <p className="text-sm text-secondary-500">
-                                  Roll: {student.roll_number} | Reg: {student.registration_number}
+                                <p className="font-semibold text-gray-900 text-lg">{student.full_name}</p>
+                                <p className="text-sm text-gray-500 mt-1">
+                                  Roll: <span className="font-medium">{student.roll_number}</span> | Reg: <span className="font-medium">{student.registration_number}</span>
                                 </p>
-                                <div className="flex flex-wrap gap-1 mt-2">
+                                <div className="flex flex-wrap gap-1.5 mt-3">
                                   {student.missing_fields.map((field) => (
                                     <span
                                       key={field}
-                                      className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded"
+                                      className="px-2.5 py-1 bg-red-50 text-red-600 text-xs font-medium rounded-md border border-red-200"
                                     >
                                       {MISSING_FIELD_LABELS[field] || field}
                                     </span>
@@ -1015,6 +1104,64 @@ const StudentImportExportPage: React.FC = () => {
                                     />
                                   </div>
                                 )}
+                                {student.missing_fields.includes('admission_date') && (
+                                  <div>
+                                    <label className="text-sm font-medium text-secondary-700">Admission Date</label>
+                                    <input
+                                      type="date"
+                                      value={editValues.admission_date || ''}
+                                      onChange={(e) => setEditValues({ ...editValues, admission_date: e.target.value })}
+                                      className="mt-1 w-full px-3 py-2 border rounded-lg text-sm"
+                                    />
+                                  </div>
+                                )}
+                                {student.missing_fields.includes('registration_number') && (
+                                  <div>
+                                    <label className="text-sm font-medium text-secondary-700">Registration Number</label>
+                                    <input
+                                      type="text"
+                                      value={editValues.registration_number || ''}
+                                      onChange={(e) => setEditValues({ ...editValues, registration_number: e.target.value })}
+                                      className="mt-1 w-full px-3 py-2 border rounded-lg text-sm"
+                                      placeholder="REG-YYYY-####"
+                                    />
+                                  </div>
+                                )}
+                                {student.missing_fields.includes('mother_name') && (
+                                  <div>
+                                    <label className="text-sm font-medium text-secondary-700">Mother Name</label>
+                                    <input
+                                      type="text"
+                                      value={editValues.mother_name || ''}
+                                      onChange={(e) => setEditValues({ ...editValues, mother_name: e.target.value })}
+                                      className="mt-1 w-full px-3 py-2 border rounded-lg text-sm"
+                                    />
+                                  </div>
+                                )}
+                                {student.missing_fields.includes('guardian_email') && (
+                                  <div>
+                                    <label className="text-sm font-medium text-secondary-700">Guardian Email</label>
+                                    <input
+                                      type="email"
+                                      value={editValues.guardian_email || ''}
+                                      onChange={(e) => setEditValues({ ...editValues, guardian_email: e.target.value })}
+                                      className="mt-1 w-full px-3 py-2 border rounded-lg text-sm"
+                                      placeholder="email@example.com"
+                                    />
+                                  </div>
+                                )}
+                                {student.missing_fields.includes('emergency_contact') && (
+                                  <div>
+                                    <label className="text-sm font-medium text-secondary-700">Emergency Contact</label>
+                                    <input
+                                      type="text"
+                                      value={editValues.emergency_contact || ''}
+                                      onChange={(e) => setEditValues({ ...editValues, emergency_contact: e.target.value })}
+                                      className="mt-1 w-full px-3 py-2 border rounded-lg text-sm"
+                                      placeholder="92XXXXXXXXXX"
+                                    />
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -1024,7 +1171,8 @@ const StudentImportExportPage: React.FC = () => {
                   )}
                 </AnimatePresence>
               </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
@@ -1052,7 +1200,7 @@ const StudentImportExportPage: React.FC = () => {
           </p>
         </div>
 
-        {/* Tabs */}
+        {/* Modals */}
         <div className="mb-6 border-b border-secondary-200">
           <div className="flex gap-4">
             <button
@@ -1091,6 +1239,9 @@ const StudentImportExportPage: React.FC = () => {
 
         {/* Tab Content */}
         {activeTab === 'import-export' ? renderImportExportTab() : renderIncompleteTab()}
+
+        {/* Export Modal */}
+        <ExportModal isOpen={exportOpen} onClose={() => { logger.info('EXPORT', 'Export modal closed'); setExportOpen(false); }} classes={exportClasses || undefined} />
 
         {/* History Modal */}
         <Modal isOpen={historyOpen} onClose={() => setHistoryOpen(false)} title="Import History">

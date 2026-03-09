@@ -14,6 +14,8 @@ from datetime import datetime, timedelta
 import uuid
 import hashlib
 import logging
+import time
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +53,14 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     password = form_data.password
     
     logger.info(f"🔐 Login attempt for: {email}")
+    start_time = time.monotonic()
     
     # ============================================
     # SINGLE SOURCE OF TRUTH: global_users ONLY
     # ============================================
+    db_lookup_start = time.monotonic()
     user = get_global_user_by_email(email)
+    logger.debug(f"db: get_global_user_by_email took {time.monotonic() - db_lookup_start:.3f}s")
     
     if not user:
         logger.warning(f"❌ Login failed: User not found in global_users - {email}")
@@ -103,29 +108,67 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     
     # For non-root users, verify school is active
     if role != "root" and school_id:
-        root_db = get_saas_root_db()
-        school = root_db.schools.find_one({"school_id": school_id})
-        
-        if not school:
-            logger.warning(f"❌ Login blocked: School not found - {email}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="School not found",
-            )
-        
-        if school.get("status") == "suspended":
-            logger.warning(f"❌ Login blocked: School suspended - {email}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="School is suspended. Contact administrator.",
-            )
-        
-        if school.get("status") == "deleted":
-            logger.warning(f"❌ Login blocked: School deleted - {email}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="School has been deleted.",
-            )
+        # Prefer denormalized school status on the user document (fast).
+        school_status = user.get("school_status")
+        if school_status:
+            if school_status == "suspended":
+                logger.warning(f"❌ Login blocked: School suspended (denormalized) - {email}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="School is suspended. Contact administrator.",
+                )
+            if school_status == "deleted":
+                logger.warning(f"❌ Login blocked: School deleted (denormalized) - {email}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="School has been deleted.",
+                )
+        else:
+            # Fall back to a very small projection lookup to confirm school status.
+            school_lookup_start = time.monotonic()
+            root_db = get_saas_root_db()
+            school = root_db.schools.find_one({"school_id": school_id}, {"status": 1, "database_name": 1, "school_slug": 1})
+            logger.debug(f"db: schools.find_one (proj) took {time.monotonic() - school_lookup_start:.3f}s")
+
+            if not school:
+                logger.warning(f"❌ Login blocked: School not found - {email}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="School not found",
+                )
+
+            if school.get("status") == "suspended":
+                logger.warning(f"❌ Login blocked: School suspended - {email}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="School is suspended. Contact administrator.",
+                )
+
+            if school.get("status") == "deleted":
+                logger.warning(f"❌ Login blocked: School deleted - {email}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="School has been deleted.",
+                )
+
+            # Optionally write the small denormalized value back to global_users in background
+            def _denormalize_school(email_local, sid):
+                try:
+                    db = get_saas_root_db()
+                    db.global_users.update_one(
+                        {"email": email_local},
+                        {"$set": {"school_status": school.get("status"),
+                                  "database_name": school.get("database_name", database_name),
+                                  "school_slug": school.get("school_slug", school_slug)}}
+                    )
+                    logger.debug(f"db: denormalized school for {email_local}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not denormalize school for {email_local}: {e}")
+
+            try:
+                threading.Thread(target=_denormalize_school, args=(email, school_id), daemon=True).start()
+            except Exception:
+                pass
     
     # Build JWT with proper structure
     # Role stored as capitalized for frontend compatibility
@@ -161,17 +204,28 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         expires_delta=access_token_expires
     )
     # Persist the active session id and expiry in the global_users collection
+    # Persist session in background so login API is not blocked on a sync DB write.
+    def _persist_session(email_local, sid, expires):
+        try:
+            db_start = time.monotonic()
+            root_db = get_saas_root_db()
+            root_db.global_users.update_one(
+                {"email": email_local},
+                {"$set": {
+                    "active_session_id": sid,
+                    "session_expires": datetime.utcnow() + expires
+                }}
+            )
+            logger.debug(f"db: global_users.update_one (persist session) took {time.monotonic() - db_start:.3f}s")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not persist active session for {email_local}: {e}")
+
     try:
-        root_db = get_saas_root_db()
-        root_db.global_users.update_one(
-            {"email": email},
-            {"$set": {
-                "active_session_id": session_id,
-                "session_expires": datetime.utcnow() + access_token_expires
-            }}
-        )
+        t = threading.Thread(target=_persist_session, args=(email, session_id, access_token_expires), daemon=True)
+        t.start()
     except Exception as e:
-        logger.warning(f"⚠️ Could not persist active session for {email}: {e}")
+        logger.warning(f"⚠️ Failed to start background session persistence for {email}: {e}")
+    logger.debug(f"total_login_time so far: {time.monotonic() - start_time:.3f}s")
     return {
         "access_token": access_token,
         "token_type": "bearer",

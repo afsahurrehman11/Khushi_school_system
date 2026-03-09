@@ -88,21 +88,29 @@ export interface IncompleteStudent {
   full_name: string;
   roll_number: string;
   class_id: string;
+  class_name: string;  // Now included from backend
   section: string;
   missing_fields: string[];
   current_data: {
+    section: string;
     gender: string;
     date_of_birth: string;
+    admission_date: string;
+    registration_number: string;
     father_name: string;
+    mother_name: string;
     father_cnic: string;
     parent_contact: string;
+    guardian_email: string;
     address: string;
+    emergency_contact: string;
   };
 }
 
 export interface IncompleteStudentsClass {
   class_id: string;
   class_name: string;
+  section: string;  // Now section-specific grouping
   students: IncompleteStudent[];
   total_missing_fields: number;
 }
@@ -110,6 +118,11 @@ export interface IncompleteStudentsClass {
 export interface IncompleteStudentsResponse {
   total_incomplete_students: number;
   classes: IncompleteStudentsClass[];
+  field_definitions?: Record<string, {
+    path: string;
+    label: string;
+    type: string;
+  }>;
 }
 
 // Column mapping for import
@@ -135,9 +148,13 @@ export const MISSING_FIELD_LABELS: Record<string, string> = {
   section: 'Section',
   gender: 'Gender',
   date_of_birth: 'Date of Birth',
+  admission_date: 'Admission Date',
+  registration_number: 'Registration Number',
   father_name: 'Father Name',
+  mother_name: 'Mother Name',
   father_cnic: 'Father CNIC',
-  parent_contact: 'Phone Number',
+  parent_contact: 'Parent Contact',  guardian_email: 'Guardian Email',
   address: 'Address',
+  emergency_contact: 'Emergency Contact',
   profile_image: 'Profile Photo',
 };

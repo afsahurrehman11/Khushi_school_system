@@ -92,9 +92,7 @@ def ensure_client_connected(retries: int = 3, delay: float = 2.0):
             _log_error("MONGO_URI environment variable is not set! Must be configured in backend/.env")
             return None
         
-        logger.info(f"📡 Database connection string loaded from backend/.env")
-        masked_uri = _mask_uri(uri)
-        logger.info(f"   Using URI: {masked_uri}")
+        logger.info("📡 Database connection configured (connection string not logged for security)")
 
         # Allow explicit fallback via env var for environments with DNS issues
         fallback = os.environ.get("FALLBACK_MONGO_URI")

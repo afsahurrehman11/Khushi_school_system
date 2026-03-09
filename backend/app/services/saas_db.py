@@ -342,7 +342,23 @@ def get_global_user_by_email(email: str) -> Optional[Dict]:
     """
     try:
         root_db = get_saas_root_db()
-        user = root_db.global_users.find_one({"email": email.lower().strip()})
+        # Only fetch the fields required for authentication and login response.
+        projection = {
+            "password_hash": 1,
+            "password": 1,
+            "is_active": 1,
+            "role": 1,
+            "school_id": 1,
+            "school_slug": 1,
+            "database_name": 1,
+            "created_at": 1,
+            "name": 1,
+            "active_session_id": 1,
+            "session_expires": 1,
+            # optional denormalized fields that speed up login
+            "school_status": 1,
+        }
+        user = root_db.global_users.find_one({"email": email.lower().strip()}, projection)
         if user:
             user["id"] = str(user.pop("_id"))
         return user

@@ -30,8 +30,10 @@ class ClassesService {
       }
 
       const data = await response.json();
-      logger.info('CLASSES', `[SCHOOL:${schoolId}] ✅ Fetched ${data.items?.length || 0} classes`);
-      return data;
+      // Backend sometimes returns an array of classes (non-paginated) or a paginated object { items: [], total }
+      const normalized = Array.isArray(data) ? { items: data, total: data.length } : data;
+      logger.info('CLASSES', `[SCHOOL:${schoolId}] ✅ Fetched ${normalized.items?.length || 0} classes`);
+      return normalized;
     } catch (error: any) {
       logger.error('CLASSES', `[API] ❌ Error fetching classes: ${error.message}`);
       throw error;

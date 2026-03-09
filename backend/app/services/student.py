@@ -129,7 +129,9 @@ def get_all_students(filters: dict = None, school_id: str = None) -> list:
         "assigned_teacher_ids": 1,
         "created_at": 1,
         "updated_at": 1,
-        # Exclude heavy fields like contact_info, guardian_info, etc.
+        # Include small guardian/contact fields needed for list view so UI can show Father, CNIC, Phone
+        "guardian_info": 1,
+        "contact_info": 1,
     }
     
     # Query with projection for speed
@@ -151,6 +153,9 @@ def get_all_students(filters: dict = None, school_id: str = None) -> list:
         student.setdefault('subjects', student.get('subjects', []))
         student.setdefault('assigned_teacher_ids', student.get('assigned_teacher_ids', []))
         student.setdefault('school_name', 'School')  # Default value, no DB lookup
+        # Ensure guardian_info and contact_info exist to avoid undefined in frontend
+        student.setdefault('guardian_info', student.get('guardian_info', {}) or {})
+        student.setdefault('contact_info', student.get('contact_info', {}) or {})
         
         # ensure timestamps exist
         if 'created_at' not in student:

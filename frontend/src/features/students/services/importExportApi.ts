@@ -243,3 +243,35 @@ export async function updateIncompleteStudent(
   }
   return response.json();
 }
+
+/**
+ * Print student profile forms as PDF (A4 landscape, 2-3 students per page).
+ */
+export async function printStudentForms(classId: string, section?: string): Promise<void> {
+  const params = new URLSearchParams();
+  params.set('class_id', classId);
+  if (section) params.set('section', section);
+  
+  const url = `${BASE}/incomplete-students/print-forms?${params.toString()}`;
+  
+  const response = await apiCall(url, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Failed to generate PDF' }));
+    throw new Error(err.detail || 'Failed to generate PDF');
+  }
+  
+  const blob = await response.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  const today = new Date().toISOString().split('T')[0];
+  a.download = `student_forms_${classId}_${section || 'all'}_${today}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(blobUrl);
+}

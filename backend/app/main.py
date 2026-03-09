@@ -152,31 +152,11 @@ def log_memory():
 
 # Wrap entire application startup in try-except
 try:
-    logger.info("🚀 Starting Khushi ERP System API - Detailed Logging Enabled")
-    log_memory()
-
-    # Fixed numbers for testing logs
-    fixed_number_1 = 42
-    fixed_number_2 = 7
-    logger.info(f"Fixed numbers initialized: {fixed_number_1}, {fixed_number_2}")
-
-    # Small simulation function using fixed numbers
-    def simulate_computation():
-        result = fixed_number_1 * fixed_number_2 + (fixed_number_1 // fixed_number_2)
-        logger.info(f"Simulation computation result: {result}")
-        return result
-
-    simulate_computation()
-
-    # NOTE: Heavy ML libraries (TensorFlow, PyTorch, DeepFace) are now loaded 
-    # LAZILY in a background task AFTER the server starts to avoid deployment timeouts.
-    # See the startup_event() function for deferred loading.
-
-    logger.info("✅ Skipping heavy ML imports at startup (will load lazily on demand)")
-    log_memory()
+    logger.info("🚀 Starting Khushi ERP System API")
+    # Keep startup logs concise and avoid printing sensitive or noisy debug values
 
     # Initialize FastAPI app
-    logger.info("🔧 Initializing FastAPI application...")
+    logger.info("🔧 Initializing FastAPI application")
     app = FastAPI(
         title="Khushi ERP System API",
         description="School Enterprise Resource Planning System",
@@ -209,7 +189,7 @@ try:
     # Use Starlette's GZipMiddleware (FastAPI may not export it directly)
     from starlette.middleware.gzip import GZipMiddleware
     app.add_middleware(GZipMiddleware, minimum_size=1000)
-    logger.info("✅ GZip compression middleware added (min_size=1000 bytes)")
+    logger.info("✅ GZip compression middleware added")
 
     # Normalize incoming paths: handle accidental duplicate '/api/api' prefixes
     @app.middleware("http")
@@ -236,7 +216,7 @@ try:
     logger.info("✅ Database routing middleware added")
 
     # Include routers with error handling
-    logger.info("🔗 Including API routers...")
+    logger.info("🔗 Including API routers")
     try:
         app.include_router(auth, prefix="/api", tags=["Authentication"])
         app.include_router(saas_router, prefix="/api/saas", tags=["SaaS Management"])
@@ -276,8 +256,7 @@ try:
         logger.error(f"❌ Failed to include routers: {e}")
         raise
 
-    log_memory()
-    logger.info("🎉 Application initialization completed successfully")
+    logger.info("🎉 Application initialized")
 
 except Exception as e:
     logger.critical(f"💥 APPLICATION CRASHED AT STARTUP: {e}")
@@ -303,19 +282,13 @@ async def startup_event():
     try:
         # ============ DATABASE CONNECTION ============
         try:
-            # Log MONGO_URI for debugging (masked password)
+            # Note: Do not log database connection strings or credentials.
+            # Only log whether a connection string is configured.
             mongo_uri = settings.mongo_uri
             if mongo_uri:
-                masked_uri = re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', mongo_uri)
-                logger.info(f"🔗 MONGO_URI (masked): {masked_uri}")
-                
-                # Check if URI contains encoded characters
-                if '%40' in mongo_uri or '%2A' in mongo_uri:
-                    logger.info("   ✓ URI contains URL-encoded characters")
-                else:
-                    logger.info("   ⚠ URI does NOT contain URL-encoded characters")
+                logger.info("🔗 MONGO_URI is configured")
             else:
-                logger.warning("⚠️ MONGO_URI is not configured in backend/.env")
+                logger.warning("⚠️ MONGO_URI is not configured")
             
             logger.info("📊 Connecting to MongoDB...")
             # Attempt to get DB; this will try to connect lazily

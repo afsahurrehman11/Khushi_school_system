@@ -391,9 +391,11 @@ def get_all_classes(school_id: str = None) -> list:
         logger.info(f"[SCHOOL:{school_id}] Fetching classes")
     classes = list(db.classes.find(query))
 
-    # build lookup maps for subjects and teachers
-    subject_map = { str(s.get('_id')): (s.get('subject_name') or s.get('name') or s.get('subject_code')) for s in db.subjects.find() }
-    teacher_map = { str(t.get('_id')): (t.get('name') or t.get('fullName') or t.get('teacherId') or t.get('cnic')) for t in db.teachers.find() }
+    # build lookup maps for subjects and teachers (restrict to school_id to speed up queries)
+    subject_query = {"school_id": school_id} if school_id else {}
+    teacher_query = {"school_id": school_id} if school_id else {}
+    subject_map = { str(s.get('_id')): (s.get('subject_name') or s.get('name') or s.get('subject_code')) for s in db.subjects.find(subject_query) }
+    teacher_map = { str(t.get('_id')): (t.get('name') or t.get('fullName') or t.get('teacherId') or t.get('cnic')) for t in db.teachers.find(teacher_query) }
 
     for cls in classes:
         cls["id"] = str(cls["_id"])
@@ -440,9 +442,11 @@ def get_class_by_id(class_id: str, school_id: str = None) -> Optional[dict]:
             return None
 
         cls["id"] = str(cls["_id"])
-        # enrich assignments
-        subject_map = { str(s.get('_id')): (s.get('subject_name') or s.get('name') or s.get('subject_code')) for s in db.subjects.find() }
-        teacher_map = { str(t.get('_id')): (t.get('name') or t.get('fullName') or t.get('teacherId') or t.get('cnic')) for t in db.teachers.find() }
+        # enrich assignments (restrict lookups to school_id)
+        subject_query = {"school_id": school_id} if school_id else {}
+        teacher_query = {"school_id": school_id} if school_id else {}
+        subject_map = { str(s.get('_id')): (s.get('subject_name') or s.get('name') or s.get('subject_code')) for s in db.subjects.find(subject_query) }
+        teacher_map = { str(t.get('_id')): (t.get('name') or t.get('fullName') or t.get('teacherId') or t.get('cnic')) for t in db.teachers.find(teacher_query) }
 
         raw = cls.get('assigned_subjects', [])
         assignments = []

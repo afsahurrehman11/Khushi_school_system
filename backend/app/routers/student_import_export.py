@@ -43,6 +43,7 @@ from app.services.import_log_service import (
     get_all_import_logs,
 )
 from app.services.student import get_all_students
+from bson.objectid import ObjectId
 from app.services.bulk_import_service import (
     validate_zip_file_path,
     execute_import_with_images,
@@ -677,6 +678,34 @@ async def export_students(
             filters["section"] = section
 
         students = get_all_students(filters)
+
+        # Map class_id (stored as DB _id strings) to human-readable class name+section
+        try:
+            db = get_db()
+            class_ids = list({s.get('class_id') for s in students if s.get('class_id')})
+            oid_list = []
+            for cid in class_ids:
+                try:
+                    oid_list.append(ObjectId(cid))
+                except Exception:
+                    # skip non-ObjectId values
+                    continue
+            class_map = {}
+            if oid_list:
+                for c in db.classes.find({"_id": {"$in": oid_list}}):
+                    cid_str = str(c.get("_id"))
+                    cname = c.get("class_name") or c.get("name") or c.get("class") or ""
+                    section_val = c.get("section") or ""
+                    full_name = f"{cname}" + (f"-{section_val}" if section_val else "")
+                    class_map[cid_str] = full_name
+
+            # Replace class_id in students with readable name when available
+            for s in students:
+                cid = s.get('class_id')
+                if cid and cid in class_map:
+                    s['class_id'] = class_map[cid]
+        except Exception as e:
+            logger.warning(f"[SCHOOL:{school_id}] ⚠️ Could not map class names for export: {str(e)}")
         xlsx_bytes = export_students_xlsx(students)
         
         logger.info(f"[SCHOOL:{school_id}] ✅ Exported {len(students)} students")
@@ -777,99 +806,183 @@ async def notification_stream(
 # Incomplete Students Endpoints
 # ---------------------------------------------------------------------------
 
+# Define which fields should be checked for missing data (dynamically extensible)
+REQUIRED_STUDENT_FIELDS = {
+    "section": {"path": "section", "label": "Section", "type": "string"},
+    "gender": {"path": "gender", "label": "Gender", "type": "string"},
+    "date_of_birth": {"path": "date_of_birth", "label": "Date of Birth", "type": "date"},
+    "admission_date": {"path": "admission_date", "label": "Admission Date", "type": "date"},
+}
+
+OPTIONAL_STUDENT_FIELDS = {
+    "father_name": {"path": "guardian_info.father_name", "label": "Father Name", "type": "string"},
+    "mother_name": {"path": "guardian_info.mother_name", "label": "Mother Name", "type": "string"},
+    "father_cnic": {"path": "guardian_info.parent_cnic", "label": "Father CNIC", "type": "string"},
+    "parent_contact": {"path": "guardian_info.guardian_contact", "label": "Parent Contact", "type": "phone"},
+    "guardian_email": {"path": "guardian_info.guardian_email", "label": "Guardian Email", "type": "email"},
+    "address": {"path": "guardian_info.address", "label": "Address", "type": "string"},
+    "emergency_contact": {"path": "contact_info.emergency_contact", "label": "Emergency Contact", "type": "phone"},
+    "registration_number": {"path": "registration_number", "label": "Registration Number", "type": "string"},
+}
+
+
+def get_nested_value(obj: dict, path: str):
+    """Get value from nested dict using dot notation"""
+    keys = path.split('.')
+    value = obj
+    for key in keys:
+        if isinstance(value, dict):
+            value = value.get(key)
+        else:
+            return None
+    return value
+
+
+def check_missing_fields(student: dict) -> list:
+    """Dynamically check all student fields for missing data"""
+    missing = []
+    
+    # Check all defined fields
+    all_fields = {**REQUIRED_STUDENT_FIELDS, **OPTIONAL_STUDENT_FIELDS}
+    
+    for field_key, field_info in all_fields.items():
+        value = get_nested_value(student, field_info['path'])
+        
+        # Check if value is missing (None, empty string, or empty dict/list)
+        if value is None or value == "" or (isinstance(value, (dict, list)) and not value):
+            missing.append(field_key)
+    
+    # Also check for profile image
+    if not student.get("profile_image_blob"):
+        missing.append("profile_image")
+    
+    return missing
+
+
 @router.get("/incomplete-students")
 async def get_incomplete_students(
     class_id: Optional[str] = Query(None),
     current_user: dict = Depends(require_school_admin),
 ):
     """
-    Get all students with incomplete/missing data, grouped by class.
+    Get all students with incomplete/missing data, grouped by class and section.
+    Dynamically detects missing fields based on Student schema.
     """
     school_id = current_user.get("school_id")
     admin_email = current_user.get("email", "")
-    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching incomplete students")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Fetching incomplete students (dynamic detection)")
     
     try:
         db = get_db()
         
-        # Find students where data_status is 'incomplete' OR have missing optional fields
+        # Build dynamic query for any potential missing fields
+        or_conditions = [
+            {"data_status": "incomplete"},
+            {"missing_fields": {"$exists": True, "$ne": []}},
+        ]
+        
+        # Add conditions for each field that might be missing
+        all_fields = {**REQUIRED_STUDENT_FIELDS, **OPTIONAL_STUDENT_FIELDS}
+        for field_info in all_fields.values():
+            or_conditions.append({field_info['path']: {"$in": [None, ""]}})
+        
         query = {
             "school_id": school_id,
-            "$or": [
-                {"data_status": "incomplete"},
-                {"missing_fields": {"$exists": True, "$ne": []}},
-                # Also check for empty optional fields
-                {"section": {"$in": [None, ""]}},
-                {"gender": {"$in": [None, ""]}},
-                {"date_of_birth": {"$in": [None, ""]}},
-                {"guardian_info.father_name": {"$in": [None, ""]}},
-                {"guardian_info.parent_cnic": {"$in": [None, ""]}},
-                {"guardian_info.guardian_contact": {"$in": [None, ""]}},
-                {"guardian_info.address": {"$in": [None, ""]}},
-            ]
+            "$or": or_conditions
         }
         
         if class_id:
             query["class_id"] = class_id
         
+        logger.info(f"[SCHOOL:{school_id}] Querying students with potential missing data...")
         students_cursor = db.students.find(query)
         
-        # Group by class
+        # Fetch class information for mapping class_id to class_name
+        class_map = {}
+        classes_cursor = db.classes.find({"school_id": school_id}, {"_id": 1, "class_name": 1})
+        for cls in classes_cursor:
+            class_map[str(cls["_id"])] = cls.get("class_name", "Unknown Class")
+        
+        logger.info(f"[SCHOOL:{school_id}] Loaded {len(class_map)} classes for mapping")
+        
+        # Group by class and section
         grouped = {}
         total_incomplete = 0
+        processed_count = 0
         
         for student in students_cursor:
-            cls = student.get("class_id", "Unassigned")
-            if cls not in grouped:
-                grouped[cls] = {
-                    "class_id": cls,
-                    "class_name": cls,
+            processed_count += 1
+            
+            # Dynamically calculate missing fields
+            missing = check_missing_fields(student)
+            
+            if not missing:
+                continue  # Skip students with complete data
+            
+            # Get class info
+            class_id_str = student.get("class_id", "Unassigned")
+            class_name = class_map.get(class_id_str, class_id_str)  # Fallback to ID if not found
+            section = student.get("section", "")
+            
+            # Group by class_id + section
+            group_key = f"{class_id_str}_{section}" if section else class_id_str
+            
+            if group_key not in grouped:
+                grouped[group_key] = {
+                    "class_id": class_id_str,
+                    "class_name": class_name,
+                    "section": section,
                     "students": [],
                     "total_missing_fields": 0,
                 }
             
-            # Calculate missing fields for this student
+            # Build current data object for all fields
             guardian = student.get("guardian_info", {}) or {}
-            missing = []
-            if not student.get("section"): missing.append("section")
-            if not student.get("gender"): missing.append("gender")
-            if not student.get("date_of_birth"): missing.append("date_of_birth")
-            if not guardian.get("father_name"): missing.append("father_name")
-            if not guardian.get("parent_cnic"): missing.append("father_cnic")
-            if not guardian.get("guardian_contact"): missing.append("parent_contact")
-            if not guardian.get("address"): missing.append("address")
-            if not student.get("profile_image_blob"): missing.append("profile_image")
+            contact = student.get("contact_info", {}) or {}
             
-            if missing:
-                student_data = {
-                    "id": str(student.get("_id", "")),
-                    "student_id": student.get("student_id", ""),
-                    "registration_number": student.get("registration_number", ""),
-                    "full_name": student.get("full_name", ""),
-                    "roll_number": student.get("roll_number", ""),
-                    "class_id": cls,
-                    "section": student.get("section", ""),
-                    "missing_fields": missing,
-                    "current_data": {
-                        "gender": student.get("gender", ""),
-                        "date_of_birth": student.get("date_of_birth", ""),
-                        "father_name": guardian.get("father_name", ""),
-                        "father_cnic": guardian.get("parent_cnic", ""),
-                        "parent_contact": guardian.get("guardian_contact", ""),
-                        "address": guardian.get("address", ""),
-                    }
-                }
-                grouped[cls]["students"].append(student_data)
-                grouped[cls]["total_missing_fields"] += len(missing)
-                total_incomplete += 1
+            current_data = {
+                "section": student.get("section", ""),
+                "gender": student.get("gender", ""),
+                "date_of_birth": student.get("date_of_birth", ""),
+                "admission_date": student.get("admission_date", ""),
+                "registration_number": student.get("registration_number", ""),
+                "father_name": guardian.get("father_name", ""),
+                "mother_name": guardian.get("mother_name", ""),
+                "father_cnic": guardian.get("parent_cnic", ""),
+                "parent_contact": guardian.get("guardian_contact", ""),
+                "guardian_email": guardian.get("guardian_email", ""),
+                "address": guardian.get("address", ""),
+                "emergency_contact": contact.get("emergency_contact", ""),
+            }
+            
+            student_data = {
+                "id": str(student.get("_id", "")),
+                "student_id": student.get("student_id", ""),
+                "registration_number": student.get("registration_number", ""),
+                "full_name": student.get("full_name", ""),
+                "roll_number": student.get("roll_number", ""),
+                "class_id": class_id_str,
+                "class_name": class_name,
+                "section": section,
+                "missing_fields": missing,
+                "current_data": current_data,
+            }
+            
+            grouped[group_key]["students"].append(student_data)
+            grouped[group_key]["total_missing_fields"] += len(missing)
+            total_incomplete += 1
         
-        # Sort classes alphabetically
-        result = sorted(grouped.values(), key=lambda x: x["class_name"])
+        # Sort classes alphabetically, then by section
+        result = sorted(
+            grouped.values(), 
+            key=lambda x: (x["class_name"], x["section"])
+        )
         
-        logger.info(f"[SCHOOL:{school_id}] ✅ Found {total_incomplete} students with incomplete data")
+        logger.info(f"[SCHOOL:{school_id}] ✅ Found {total_incomplete} students with incomplete data (processed {processed_count} total)")
         return {
             "total_incomplete_students": total_incomplete,
             "classes": result,
+            "field_definitions": {**REQUIRED_STUDENT_FIELDS, **OPTIONAL_STUDENT_FIELDS}
         }
     except Exception as e:
         logger.exception(f"[SCHOOL:{school_id}] ❌ Failed to fetch incomplete students: {str(e)}")
@@ -883,11 +996,11 @@ async def update_incomplete_student(
     current_user: dict = Depends(require_school_admin),
 ):
     """
-    Update a student's missing fields.
+    Update a student's missing fields with comprehensive validation and logging.
     """
     school_id = current_user.get("school_id")
     admin_email = current_user.get("email", "")
-    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Updating student {student_id}")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Updating student {student_id} with fields: {list(updates.keys())}")
     
     try:
         from bson.objectid import ObjectId
@@ -900,55 +1013,84 @@ async def update_incomplete_student(
         })
         
         if not student:
+            logger.warning(f"[SCHOOL:{school_id}] Student {student_id} not found")
             raise HTTPException(status_code=404, detail="Student not found")
         
         # Build update document
         update_doc = {"updated_at": datetime.utcnow()}
-        
-        # Direct fields
-        for field in ["section", "gender", "date_of_birth"]:
-            if field in updates and updates[field]:
-                update_doc[field] = updates[field]
-        
-        # Guardian info fields
         guardian_updates = {}
-        if "father_name" in updates and updates["father_name"]:
-            guardian_updates["guardian_info.father_name"] = updates["father_name"]
-        if "father_cnic" in updates and updates["father_cnic"]:
-            guardian_updates["guardian_info.parent_cnic"] = updates["father_cnic"]
-        if "parent_contact" in updates and updates["parent_contact"]:
-            guardian_updates["guardian_info.guardian_contact"] = updates["parent_contact"]
-            update_doc["contact_info.phone"] = updates["parent_contact"]
-        if "address" in updates and updates["address"]:
-            guardian_updates["guardian_info.address"] = updates["address"]
+        contact_updates = {}
         
+        # Direct fields mapping
+        direct_fields = {
+            "section": "section",
+            "gender": "gender",
+            "date_of_birth": "date_of_birth",
+            "admission_date": "admission_date",
+            "registration_number": "registration_number",
+        }
+        
+        for api_field, db_field in direct_fields.items():
+            if api_field in updates and updates[api_field] not in [None, ""]:
+                update_doc[db_field] = updates[api_field]
+                logger.debug(f"[SCHOOL:{school_id}] Setting {db_field} = {updates[api_field]}")
+        
+        # Guardian info fields mapping
+        guardian_fields = {
+            "father_name": "father_name",
+            "mother_name": "mother_name",
+            "father_cnic": "parent_cnic",
+            "parent_contact": "guardian_contact",
+            "guardian_email": "guardian_email",
+            "address": "address",
+        }
+        
+        for api_field, db_field in guardian_fields.items():
+            if api_field in updates and updates[api_field] not in [None, ""]:
+                guardian_updates[f"guardian_info.{db_field}"] = updates[api_field]
+                logger.debug(f"[SCHOOL:{school_id}] Setting guardian_info.{db_field} = {updates[api_field]}")
+                
+                # Also update contact_info.phone if parent_contact is provided
+                if api_field == "parent_contact":
+                    contact_updates["contact_info.phone"] = updates[api_field]
+        
+        # Contact info fields
+        if "emergency_contact" in updates and updates["emergency_contact"] not in [None, ""]:
+            contact_updates["contact_info.emergency_contact"] = updates["emergency_contact"]
+            logger.debug(f"[SCHOOL:{school_id}] Setting emergency_contact")
+        
+        # Merge all updates
         update_doc.update(guardian_updates)
+        update_doc.update(contact_updates)
         
-        # Recalculate data status
-        existing_guardian = student.get("guardian_info", {}) or {}
-        merged_guardian = {
-            "father_name": updates.get("father_name") or existing_guardian.get("father_name", ""),
-            "parent_cnic": updates.get("father_cnic") or existing_guardian.get("parent_cnic", ""),
-            "guardian_contact": updates.get("parent_contact") or existing_guardian.get("guardian_contact", ""),
-            "address": updates.get("address") or existing_guardian.get("address", ""),
-        }
-        merged_student = {
-            "section": updates.get("section") or student.get("section", ""),
-            "gender": updates.get("gender") or student.get("gender", ""),
-            "date_of_birth": updates.get("date_of_birth") or student.get("date_of_birth", ""),
-        }
+        # Recalculate data status based on updated student
+        # Merge existing data with updates to check completeness
+        updated_student = {**student}
+        for key, value in update_doc.items():
+            if not key.startswith("guardian_info.") and not key.startswith("contact_info."):
+                updated_student[key] = value
         
-        new_missing = []
-        if not merged_student.get("section"): new_missing.append("section")
-        if not merged_student.get("gender"): new_missing.append("gender")
-        if not merged_student.get("date_of_birth"): new_missing.append("date_of_birth")
-        if not merged_guardian.get("father_name"): new_missing.append("father_name")
-        if not merged_guardian.get("parent_cnic"): new_missing.append("father_cnic")
-        if not merged_guardian.get("guardian_contact"): new_missing.append("parent_contact")
-        if not merged_guardian.get("address"): new_missing.append("address")
+        # Update nested fields
+        if not updated_student.get("guardian_info"):
+            updated_student["guardian_info"] = {}
+        if not updated_student.get("contact_info"):
+            updated_student["contact_info"] = {}
+        
+        for key, value in guardian_updates.items():
+            field_name = key.replace("guardian_info.", "")
+            updated_student["guardian_info"][field_name] = value
+        
+        for key, value in contact_updates.items():
+            field_name = key.replace("contact_info.", "")
+            updated_student["contact_info"][field_name] = value
+        
+        # Check for remaining missing fields
+        new_missing = check_missing_fields(updated_student)
         
         update_doc["data_status"] = "complete" if not new_missing else "incomplete"
         update_doc["missing_fields"] = new_missing
+        
+        logger.info(f"[SCHOOL:{school_id}] New data_status: {update_doc['data_status']}, remaining missing: {len(new_missing)} fields")
         
         # Perform update
         result = db.students.update_one(
@@ -957,17 +1099,270 @@ async def update_incomplete_student(
         )
         
         if result.modified_count == 0:
-            logger.warning(f"[SCHOOL:{school_id}] No changes made to student {student_id}")
+            logger.warning(f"[SCHOOL:{school_id}] No changes made to student {student_id} (possibly duplicate data)")
+        else:
+            logger.info(f"[SCHOOL:{school_id}] ✅ Successfully updated student {student_id}")
         
-        logger.info(f"[SCHOOL:{school_id}] ✅ Updated student {student_id}")
         return {
             "success": True,
             "message": "Student updated successfully",
             "data_status": update_doc["data_status"],
             "remaining_missing_fields": new_missing,
+            "modified_count": result.modified_count,
         }
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"[SCHOOL:{school_id}] ❌ Failed to update student: {str(e)}")
+        logger.exception(f"[SCHOOL:{school_id}] ❌ Failed to update student {student_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to update student: {str(e)}")
+
+
+@router.post("/incomplete-students/print-forms")
+async def print_incomplete_student_forms(
+    class_id: str = Query(..., description="Class ID"),
+    section: Optional[str] = Query(None, description="Section (optional)"),
+    current_user: dict = Depends(require_school_admin),
+):
+    """
+    Generate A4 landscape PDF with student profile forms (2-3 students per page).
+    Shows existing data and leaves blanks for missing fields.
+    """
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email", "")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Generating PDF forms for class {class_id}, section {section}")
+    
+    try:
+        from bson.objectid import ObjectId
+        from io import BytesIO
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.units import cm, mm
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.enums import TA_LEFT, TA_CENTER
+        
+        db = get_db()
+        
+        # Fetch class info
+        class_doc = db.classes.find_one({"_id": ObjectId(class_id), "school_id": school_id})
+        if not class_doc:
+            raise HTTPException(status_code=404, detail="Class not found")
+        
+        class_name = class_doc.get("class_name", "Unknown Class")
+        
+        # Build students query (support class_id stored as string or ObjectId)
+        try:
+            query = {"school_id": school_id, "$or": [{"class_id": class_id}, {"class_id": ObjectId(class_id)}]}
+        except Exception:
+            query = {"school_id": school_id, "class_id": class_id}
+
+        if section:
+            query["section"] = section
+
+        students_cursor = db.students.find(query)
+        students_list = []
+        
+        for student in students_cursor:
+            missing = check_missing_fields(student)
+            if missing:  # Only include students with missing data
+                students_list.append({
+                    "student": student,
+                    "missing": missing
+                })
+        
+        if not students_list:
+            raise HTTPException(status_code=404, detail="No students with missing data found in this class/section")
+        
+        logger.info(f"[SCHOOL:{school_id}] Generating PDF for {len(students_list)} students")
+        
+        # Create PDF
+        buffer = BytesIO()
+        page_width, page_height = landscape(A4)
+        
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=landscape(A4),
+            leftMargin=1*cm,
+            rightMargin=1*cm,
+            topMargin=1.5*cm,
+            bottomMargin=1*cm,
+        )
+        
+        story = []
+        styles = getSampleStyleSheet()
+        
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=14,
+            textColor=colors.HexColor('#1F4E79'),
+            spaceAfter=8,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        
+        label_style = ParagraphStyle(
+            'Label',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.HexColor('#333333'),
+            fontName='Helvetica-Bold'
+        )
+        
+        value_style = ParagraphStyle(
+            'Value',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.HexColor('#000000'),
+        )
+        
+        # Process students 2 per page
+        studentsper_page = 2
+        
+        for idx, item in enumerate(students_list):
+            student = item["student"]
+            missing_fields = item["missing"]
+            
+            guardian = student.get("guardian_info", {}) or {}
+            contact = student.get("contact_info", {}) or {}
+            
+            # School header (small)
+            school_name = student.get("school_name", "School")
+            header = Paragraph(f"<b>{school_name}</b> - Student Profile Form", title_style)
+            story.append(header)
+            story.append(Spacer(1, 3*mm))
+            
+            # Define all fields to display
+            form_fields = [
+                ("Name", student.get("full_name", ""), "full_name"),
+                ("Roll Number", student.get("roll_number", ""), "roll_number"),
+                ("Registration No", student.get("registration_number", ""), "registration_number"),
+                ("Class", class_name, "class"),
+                ("Section", student.get("section", ""), "section"),
+                ("Gender", student.get("gender", ""), "gender"),
+                ("Date of Birth", student.get("date_of_birth", ""), "date_of_birth"),
+                ("Admission Date", student.get("admission_date", ""), "admission_date"),
+                ("Father Name", guardian.get("father_name", ""), "father_name"),
+                ("Mother Name", guardian.get("mother_name", ""), "mother_name"),
+                ("Father CNIC", guardian.get("parent_cnic", ""), "father_cnic"),
+                ("Parent Contact", guardian.get("guardian_contact", ""), "parent_contact"),
+                ("Emergency Contact", contact.get("emergency_contact", ""), "emergency_contact"),
+                ("Guardian Email", guardian.get("guardian_email", ""), "guardian_email"),
+                ("Address", guardian.get("address", ""), "address"),
+            ]
+            
+            # Build table data - 2 columns of fields
+            table_data = []
+            for i in range(0, len(form_fields), 2):
+                row = []
+                
+                # Left field
+                label1, value1, key1 = form_fields[i]
+                is_missing1 = key1 in missing_fields or key1.replace("_", "") in missing_fields or any(k in key1 for k in missing_fields)
+                
+                if is_missing1 or not value1:
+                    display_value1 = "_" * 40  # Blank line for missing
+                    cell_color1 = colors.HexColor('#FFF4E6')  # Light orange for missing
+                else:
+                    display_value1 = str(value1)
+                    cell_color1 = colors.white
+                
+                cell1 = Table([
+                    [Paragraph(f"<b>{label1}:</b>", label_style)],
+                    [Paragraph(display_value1, value_style)]
+                ], colWidths=[9*cm])
+                cell1.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, -1), cell_color1),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+                    ('TOPPADDING', (0, 0), (-1, -1), 2),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ]))
+                
+                row.append(cell1)
+                
+                # Right field (if exists)
+                if i + 1 < len(form_fields):
+                    label2, value2, key2 = form_fields[i + 1]
+                    is_missing2 = key2 in missing_fields or key2.replace("_", "") in missing_fields or any(k in key2 for k in missing_fields)
+                    
+                    if is_missing2 or not value2:
+                        display_value2 = "_" * 40
+                        cell_color2 = colors.HexColor('#FFF4E6')
+                    else:
+                        display_value2 = str(value2)
+                        cell_color2 = colors.white
+                    
+                    cell2 = Table([
+                        [Paragraph(f"<b>{label2}:</b>", label_style)],
+                        [Paragraph(display_value2, value_style)]
+                    ], colWidths=[9*cm])
+                    cell2.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, -1), cell_color2),
+                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                        ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+                        ('TOPPADDING', (0, 0), (-1, -1), 2),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                    ]))
+                    row.append(cell2)
+                else:
+                    row.append("")  # Empty cell
+                
+                table_data.append(row)
+            
+            # Create main form table
+            form_table = Table(table_data, colWidths=[9.5*cm, 9.5*cm], spaceBefore=0, spaceAfter=5*mm)
+            form_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ]))
+            
+            story.append(form_table)
+            
+            # Signature line
+            sig_data = [[
+                Paragraph("<b>Administrator Signature:</b> ____________________", value_style),
+                Paragraph("<b>Date:</b> ____________________", value_style)
+            ]]
+            sig_table = Table(sig_data, colWidths=[10*cm, 9*cm])
+            sig_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ]))
+            story.append(sig_table)
+            
+            # Add page break after every 2 students (except last)
+            if (idx + 1) % students_per_page == 0 and (idx + 1) < len(students_list):
+                story.append(PageBreak())
+            else:
+                story.append(Spacer(1, 5*mm))  # Space between forms on same page
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        
+        logger.info(f"[SCHOOL:{school_id}] ✅ Generated PDF with {len(students_list)} student forms")
+        
+        from datetime import datetime
+        filename = f"student_forms_{class_name.replace(' ', '_')}_{section or 'all'}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(
+            buffer,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"[SCHOOL:{school_id}] ❌ Failed to generate PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")

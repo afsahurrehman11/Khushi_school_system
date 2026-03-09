@@ -15,6 +15,7 @@ def record_fee_payment(data: dict) -> Optional[dict]:
     db = get_db()
     
     payment = {
+        "school_id": data.get("school_id"),
         "student_id": data.get("student_id"),
         "class_id": data.get("class_id"),
         "amount_paid": data.get("amount_paid"),

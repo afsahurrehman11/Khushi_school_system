@@ -17,12 +17,6 @@ interface ClassData {
     total_amount: number;
     components?: { component_name: string; amount: number; }[];
   };
-  student_count: number;
-  fee_summary: {
-    paid: number;
-    partial: number;
-    unpaid: number;
-  };
 }
 
 interface StudentData {
@@ -54,7 +48,7 @@ const FeePage: React.FC = () => {
   const [downloadingVoucher, setDownloadingVoucher] = useState(false);
   const [downloadingClassVouchers, setDownloadingClassVouchers] = useState<string | null>(null);
   const [jobProgress, setJobProgress] = useState<{ jobId: string, status: string, progress: number, type: string } | null>(null);
-  const [classDetails, setClassDetails] = useState<Record<string, { loading: boolean; student_count?: number; fee_category?: any; fee_summary?: any }>>({});
+  const [classDetails, setClassDetails] = useState<Record<string, { loading: boolean; fee_category?: any }>>({});
   const [selectedFeeTab, setSelectedFeeTab] = useState<'overview' | 'history' | 'records' | 'record'>('overview');
   const [exportStatus, setExportStatus] = useState<'paid' | 'partial' | 'unpaid' | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -73,59 +67,27 @@ const FeePage: React.FC = () => {
     loadClasses();
   }, []);
 
-  // Lazy-load per-class details (student count, fee category) when card is hovered
+  // Lazy-load per-class fee category info when card is hovered
   const loadClassCardDetails = async (classId: string) => {
-    // Only skip if we already have loaded student_count (i.e. details present)
-    if (classDetails[classId]?.student_count !== undefined) return;
+    // Only skip if we already have loaded fee_category
+    if (classDetails[classId]?.fee_category !== undefined) return;
 
     setClassDetails(prev => ({ ...prev, [classId]: { loading: true } }));
 
     try {
-      const [feeDataResp, studentsResp] = await Promise.allSettled([
-        api.get(`/class-fee-assignments/classes/${classId}/active`).catch(() => null),
-        api.get(`/students?class_id=${classId}`).catch(() => []),
-      ]);
-
-      let student_count = 0;
-      let studentsList: any[] = [];
-      if (studentsResp.status === 'fulfilled') {
-        studentsList = Array.isArray(studentsResp.value) ? studentsResp.value : [];
-        student_count = studentsList.length;
-      }
+      const feeDataResp = await api.get(`/class-fee-assignments/classes/${classId}/active`).catch(() => null);
 
       let fee_category = null;
-      if (feeDataResp.status === 'fulfilled' && feeDataResp.value?.category_id) {
+      if (feeDataResp?.category_id) {
         try {
-          const cat = await api.get(`/fee-categories/${feeDataResp.value.category_id}`);
+          const cat = await api.get(`/fee-categories/${feeDataResp.category_id}`);
           fee_category = cat || null;
         } catch (e) {
           fee_category = null;
         }
       }
 
-      // Fetch per-student payment summary in bulk to avoid N+1 HTTP calls.
-      let fee_summary = null;
-      try {
-        if (studentsList.length > 0) {
-          const ids = studentsList.map(s => s.id);
-          // Backend endpoint returns a mapping student_id -> summary
-          const res = await api.post(`/fee-payments/students/summary`, { student_ids: ids });
-          let paid = 0, partial = 0, unpaid = 0;
-          for (const sid of ids) {
-            const s = res[sid] || { status: 'unpaid' };
-            if (s.status === 'paid') paid++;
-            else if (s.status === 'partial') partial++;
-            else unpaid++;
-          }
-          fee_summary = { paid, partial, unpaid };
-        } else {
-          fee_summary = { paid: 0, partial: 0, unpaid: 0 };
-        }
-      } catch (e) {
-        fee_summary = null;
-      }
-
-      setClassDetails(prev => ({ ...prev, [classId]: { loading: false, student_count, fee_category, fee_summary } }));
+      setClassDetails(prev => ({ ...prev, [classId]: { loading: false, fee_category } }));
     } catch (e) {
       setClassDetails(prev => ({ ...prev, [classId]: { loading: false } }));
     }
@@ -437,15 +399,13 @@ const FeePage: React.FC = () => {
   const loadClasses = async () => {
     setLoading(true);
     try {
-      // Fetch basic classes list quickly. Detailed info is loaded lazily per-card.
+      // Fetch basic classes list quickly. Fee category info is loaded lazily per-card.
       const classesData = await api.get('/classes');
       const minimal = classesData.map((cls: any) => ({
         id: cls.id,
         class_name: cls.class_name,
         section: cls.section,
         fee_category: null,
-        student_count: null,
-        fee_summary: null,
       }));
       setClasses(minimal);
       // Initialize inline loaders for each card and start background fetches (staggered)
@@ -472,28 +432,31 @@ const FeePage: React.FC = () => {
     try {
       const studentsData = await api.get(`/students?class_id=${classData.id}`);
 
-      // Bulk fetch fee summaries for students to avoid N+1 API calls
-      let summaries: Record<string, any> = {};
+      // Bulk fetch current month fee status using the optimized endpoint
+      let monthlyFeeStatus: Record<string, any> = {};
       try {
         const ids = studentsData.map((s: any) => s.id);
         if (ids.length > 0) {
-          summaries = await api.post(`/fee-payments/students/summary`, { student_ids: ids });
+          // Use the new optimized endpoint that fetches current month status
+          monthlyFeeStatus = await api.post(`/student-fees/students/current-month-status`, { student_ids: ids });
         }
       } catch (e) {
-        summaries = {};
+        console.error('[FEE_STATUS] Failed to fetch current month status:', e);
+        monthlyFeeStatus = {};
       }
 
       const enrichedStudents = (studentsData || []).map((student: any) => {
-        const ssummary = summaries[student.id] || {};
-        const total_fee = ssummary.total_fee ?? classData.fee_category?.total_amount ?? 0;
-        const paid_amount = ssummary.paid_amount ?? 0;
-        // scholarship percent may be on student document
-        const scholarship_percent = student.scholarship_percent ?? student.scholarship ?? 0;
-        const scholarship_amount = Math.round((total_fee * (scholarship_percent || 0)) / 100);
-        const arrears = ssummary.arrears ?? student.arrears_balance ?? student.arrears ?? 0;
-        const remaining_amount = (total_fee - (paid_amount || 0) + (arrears || 0) - (scholarship_amount || 0));
-
-        const status = (ssummary.status as 'paid' | 'partial' | 'unpaid') || ((remaining_amount <= 0) ? 'paid' : (paid_amount > 0 ? 'partial' : 'unpaid'));
+        // Get current month fee data from the new optimized endpoint
+        const monthlyFee = monthlyFeeStatus[student.id] || {};
+        
+        // Use data from current month fee record
+        const status = monthlyFee.status?.toLowerCase() || 'unpaid';
+        const final_fee = monthlyFee.final_fee || 0;
+        const amount_paid = monthlyFee.amount_paid || 0;
+        const remaining_amount = monthlyFee.remaining_amount || 0;
+        const scholarship_percent = monthlyFee.scholarship_percent || student.scholarship_percent || 0;
+        const scholarship_amount = monthlyFee.scholarship_amount || 0;
+        const arrears = monthlyFee.arrears_added || 0;
 
         return {
           id: student.id,
@@ -503,8 +466,8 @@ const FeePage: React.FC = () => {
           registration_id: student.registration_number || student.student_id || '',
           fee_status: status,
           fee_category: classData.fee_category?.name || 'No Category',
-          total_fee: total_fee,
-          paid_amount: paid_amount,
+          total_fee: final_fee,
+          paid_amount: amount_paid,
           remaining_amount: remaining_amount,
           arrears: arrears,
           scholarship_percent: scholarship_percent,
@@ -907,43 +870,6 @@ const FeePage: React.FC = () => {
                       </span>
                     ) : (classDetails[cls.id]?.fee_category?.name || cls.fee_category?.name || 'Not Assigned')}
                   </p>
-                  <p className="text-gray-600 mb-4">Students: {classDetails[cls.id]?.loading ? (
-                    <svg className="animate-spin inline-block h-3 w-3 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                    </svg>
-                  ) : (classDetails[cls.id]?.student_count ?? '—')}</p>
-
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span>Paid:</span>
-                      <span className="text-green-600">{classDetails[cls.id]?.loading ? (
-                        <svg className="animate-spin inline-block h-3 w-3 text-green-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                        </svg>
-                      ) : (classDetails[cls.id]?.fee_summary?.paid ?? cls.fee_summary?.paid ?? '—')}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Partial:</span>
-                      <span className="text-yellow-600">{classDetails[cls.id]?.loading ? (
-                        <svg className="animate-spin inline-block h-3 w-3 text-yellow-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                        </svg>
-                      ) : (classDetails[cls.id]?.fee_summary?.partial ?? cls.fee_summary?.partial ?? '—')}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Unpaid:</span>
-                      <span className="text-red-600">{classDetails[cls.id]?.loading ? (
-                        <svg className="animate-spin inline-block h-3 w-3 text-red-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                        </svg>
-                      ) : (classDetails[cls.id]?.fee_summary?.unpaid ?? cls.fee_summary?.unpaid ?? '—')}</span>
-                    </div>
-                  </div>
-                  
                 </div>
               </div>
             ))}

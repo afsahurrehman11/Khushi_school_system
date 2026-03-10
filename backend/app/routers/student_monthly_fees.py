@@ -68,6 +68,9 @@ class CreatePaymentRequest(BaseModel):
     transaction_reference: Optional[str] = None
     notes: Optional[str] = None
 
+class StudentIdsRequest(BaseModel):
+    student_ids: List[str]
+
 # ==================== M2: SCHOLARSHIP ENDPOINTS ====================
 
 @router.get("/scholarship/{student_id}")
@@ -363,6 +366,30 @@ async def get_fee_overview(
         raise
     except Exception as e:
         logger.error(f"Failed to get fee overview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/students/current-month-status")
+async def get_students_current_month_status(
+    request: StudentIdsRequest,
+    current_user: dict = Depends(check_permission("fees.view"))
+):
+    """
+    Get current month fee status for multiple students (optimized for Student Cards Page).
+    Returns a mapping of student_id -> current month fee data including status.
+    """
+    school_id = current_user.get("school_id")
+    
+    try:
+        from app.services.student_fee_service import get_students_current_month_status
+        
+        logger.info(f"[SCHOOL:{school_id}] Fetching current month status for {len(request.student_ids)} students")
+        
+        results = get_students_current_month_status(request.student_ids, school_id)
+        
+        logger.info(f"[SCHOOL:{school_id}] ✅ Retrieved status for {len(results)} students")
+        return results
+    except Exception as e:
+        logger.error(f"[SCHOOL:{school_id}] ❌ Failed to get current month status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ==================== ARREARS CARRYFORWARD ====================

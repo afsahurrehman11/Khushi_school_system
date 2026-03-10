@@ -11,6 +11,25 @@ import { api } from '../../../utils/api';
 import logger from '../../../utils/logger';
 import Button from '../../../components/Button';
 
+// Cache for class fee assignments and fee categories (5 min TTL)
+const dataCache = new Map<string, { data: any; expiry: number }>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+const getCachedData = async (key: string, fetcher: () => Promise<any>) => {
+  const now = Date.now();
+  const cached = dataCache.get(key);
+  
+  if (cached && cached.expiry > now) {
+    logger.debug('FEE', `Cache hit for ${key}`);
+    return cached.data;
+  }
+  
+  logger.debug('FEE', `Cache miss for ${key}, fetching...`);
+  const data = await fetcher();
+  dataCache.set(key, { data, expiry: now + CACHE_TTL });
+  return data;
+};
+
 interface FeeOverviewTabProps {
   studentId: string;
   studentName?: string;
@@ -43,20 +62,37 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
   const [feeCategoryComponentsState, setFeeCategoryComponentsState] = useState<{ component_name: string; amount: number }[] | null>(null);
   const [fetchCategoryError, setFetchCategoryError] = useState<string | null>(null);
 
+  // Prevent duplicate API calls (React 18 StrictMode issue)
+  const loadingRef = React.useRef(false);
+
   const loadOverview = async () => {
+    // Prevent concurrent calls
+    if (loadingRef.current) {
+      logger.debug('FEE', 'Overview load already in progress, skipping duplicate call');
+      return;
+    }
+
     try {
+      loadingRef.current = true;
       setLoading(true);
       setError(null);
+      
       const data = await studentFeeService.getFeeOverview(studentId);
       setOverview(data);
       setScholarshipValue(data.scholarship_percent.toString());
-      // also fetch full student details for display
+      
+      // use student info returned by overview to avoid extra DB call
       try {
-        const s = await studentsService.getStudent(studentId);
-        setStudentDetails(s);
+        if ((data as any)?.student) {
+          setStudentDetails((data as any).student);
+        } else {
+          const s = await studentsService.getStudent(studentId);
+          setStudentDetails(s);
+        }
       } catch (e) {
         setStudentDetails(null);
       }
+      
       // Try to fetch fee category details (if assigned) to show full breakdown
       try {
       setFetchCategoryError(null);
@@ -67,7 +103,10 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
         if (!cid && classId) {
           try {
             logger.info('FEE', 'Fetching class assignment for classId: ' + classId);
-            const assignment = await api.get(`/class-fee-assignments/classes/${classId}/active`);
+            const assignment = await getCachedData(
+              `class-assignment:${classId}`,
+              () => api.get(`/class-fee-assignments/classes/${classId}/active`)
+            );
             cid = assignment?.category_id || assignment?.categoryId || assignment?.category?.id || assignment?.category_id || null;
             logger.debug('FEE', 'Class assignment result: ' + JSON.stringify(assignment));
           } catch (ae) {
@@ -77,7 +116,10 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
 
         if (cid) {
           logger.info('FEE', `Fetching fee category ${cid} for student ${studentId}`);
-          const cat = await api.get(`/fee-categories/${cid}`);
+          const cat = await getCachedData(
+            `fee-category:${cid}`,
+            () => api.get(`/fee-categories/${cid}`)
+          );
           const catData = cat?.components ? cat : (cat?.data ? cat.data : cat);
           // detect components under various possible keys
           const rawComponents = catData?.components || catData?.attributes || catData?.items || catData?.components_list || [];
@@ -110,11 +152,15 @@ const FeeOverviewTab: React.FC<FeeOverviewTabProps> = ({
       setError(err.message || 'Failed to load fee overview');
     } finally {
       setLoading(false);
+      loadingRef.current = false;
     }
   };
 
   useEffect(() => {
+    // Reset loading ref when student changes
+    loadingRef.current = false;
     loadOverview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studentId]);
 
   // Listen for external payment events so the UI and parent can refresh status immediately

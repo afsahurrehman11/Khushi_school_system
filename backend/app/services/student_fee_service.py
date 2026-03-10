@@ -20,6 +20,25 @@ from app.models.student_monthly_fee import (
 
 logger = logging.getLogger(__name__)
 
+# Simple in-memory cache for class assignments and fee categories
+_svc_cache: Dict[str, Dict[str, Any]] = {}
+_CACHE_TTL_MS = 5 * 60 * 1000  # 5 minutes
+
+def _cache_get(key: str):
+    entry = _svc_cache.get(key)
+    if not entry:
+        return None
+    if entry.get("expiry", 0) < int(datetime.utcnow().timestamp() * 1000):
+        try:
+            del _svc_cache[key]
+        except KeyError:
+            pass
+        return None
+    return entry.get("value")
+
+def _cache_set(key: str, value: Any, ttl_ms: int = _CACHE_TTL_MS):
+    _svc_cache[key] = {"value": value, "expiry": int(datetime.utcnow().timestamp() * 1000) + int(ttl_ms)}
+
 # ==================== HELPER FUNCTIONS ====================
 
 def get_month_name(month: int) -> str:
@@ -812,47 +831,480 @@ def get_payments_for_fee(monthly_fee_id: str, school_id: str) -> List[Dict[str, 
 # ==================== FEE OVERVIEW SERVICE ====================
 
 def get_student_fee_overview(student_id: str, school_id: str) -> Dict[str, Any]:
-    """Get complete fee overview for a student"""
+    """Get complete fee overview for a student.
+
+    Optimized: minimize DB round-trips by inlining lookups and using aggregation
+    for summaries. If the current month's fee is missing we compute it in-memory
+    (no write) to avoid blocking the overview with inserts.
+    """
     db = get_db()
-    
-    # Get student
+
+    # Fetch student once
     student_query = {"school_id": school_id}
     if ObjectId.is_valid(student_id):
         student_query["_id"] = ObjectId(student_id)
     else:
         student_query["student_id"] = student_id
-    
+
     student = db.students.find_one(student_query)
     if not student:
         return None
-    
+
     student_id_str = str(student["_id"])
-    
-    # Get scholarship info
+
+    # Basic student-level fields
     scholarship_percent = student.get("scholarship_percent", 0.0)
-    arrears_balance = student.get("arrears_balance", student.get("arrears", 0.0))
-    
-    # Get current month fee
-    current_fee = get_current_month_fee(student_id_str, school_id)
-    
-    # Get fee summary
-    fee_summary = get_fee_summary(student_id_str, school_id)
-    
-    # Get payment summary
-    payment_summary = get_payment_summary(student_id_str, school_id)
-    
-    # Get base fee for display
-    base_fee = get_student_base_fee(student_id_str, school_id)
-    
-    return {
+    arrears_balance = student.get("arrears_balance", student.get("arrears", 0.0)) or 0.0
+
+    now = datetime.utcnow()
+    current_month = now.month
+    current_year = now.year
+
+    # Attempt to fetch an existing current-month fee (single query)
+    current_fee = db.student_monthly_fees.find_one({
+        "school_id": school_id,
         "student_id": student_id_str,
+        "month": current_month,
+        "year": current_year
+    })
+
+    auto_computed = False
+    if not current_fee:
+        # Compute base fee quickly from class assignment + fee category (no student re-query)
+        base_fee = 0.0
+        class_id = student.get("class_id")
+        if class_id:
+            assign_key = f"class_assign:{school_id}:{class_id}"
+            assignment = _cache_get(assign_key)
+            if assignment is None:
+                assignment = db.class_fee_assignments.find_one({"school_id": school_id, "class_id": class_id})
+                _cache_set(assign_key, assignment)
+
+            if assignment:
+                category_id = assignment.get("category_id")
+                if category_id:
+                    try:
+                        cat_key = f"fee_cat:{school_id}:{category_id}"
+                        cat = _cache_get(cat_key)
+                        if cat is None:
+                            cat = db.fee_categories.find_one({"_id": ObjectId(category_id) if ObjectId.is_valid(category_id) else None, "school_id": school_id})
+                            _cache_set(cat_key, cat)
+
+                        if cat:
+                            comps = cat.get("components", [])
+                            base_fee = sum(c.get("amount", 0) for c in comps)
+                    except Exception:
+                        base_fee = 0.0
+
+        # compute scholarship and arrears without writing to DB
+        scholarship_amount = round(base_fee * (scholarship_percent / 100.0), 2)
+        fee_after_discount = round(base_fee - scholarship_amount, 2)
+
+        # collect previous outstanding fees to add as arrears
+        prev_query = {
+            "school_id": school_id,
+            "student_id": student_id_str,
+            "$or": [
+                {"year": {"$lt": current_year}},
+                {"year": current_year, "month": {"$lt": current_month}}
+            ],
+            "remaining_amount": {"$gt": 0},
+            "arrears_carried": {"$ne": True}
+        }
+        prev_fees = list(db.student_monthly_fees.find(prev_query))
+        carried_total = sum(f.get("remaining_amount", 0.0) for f in prev_fees)
+
+        initial_arrears = student.get("arrears_balance", student.get("arrears", 0.0)) or 0.0
+        arrears_added = round(initial_arrears + carried_total, 2)
+
+        final_fee = round(fee_after_discount + arrears_added, 2)
+
+        current_fee = {
+            "student_id": student_id_str,
+            "month": current_month,
+            "year": current_year,
+            "base_fee": base_fee,
+            "scholarship_percent": scholarship_percent,
+            "scholarship_amount": scholarship_amount,
+            "fee_after_discount": fee_after_discount,
+            "arrears_added": arrears_added,
+            "final_fee": final_fee,
+            "amount_paid": 0.0,
+            "remaining_amount": final_fee,
+            "status": FeeStatus.UNPAID.value,
+            "generated_by": "computed-on-the-fly",
+            "created_at": now,
+            "updated_at": now,
+            "month_name": get_month_name(current_month)
+        }
+        auto_computed = True
+    else:
+        # Convert ObjectId to id & ensure month_name
+        if "_id" in current_fee:
+            current_fee = convert_objectid(current_fee)
+        if "month_name" not in current_fee and "month" in current_fee:
+            current_fee["month_name"] = get_month_name(current_fee["month"])
+
+    # Use aggregation to compute fee summary (single aggregation)
+    fee_pipeline = [
+        {"$match": {"school_id": school_id, "student_id": student_id_str}},
+        {"$group": {
+            "_id": None,
+            "total_months": {"$sum": 1},
+            "paid_months": {"$sum": {"$cond": [{"$eq": ["$status", FeeStatus.PAID.value]}, 1, 0]}},
+            "partial_months": {"$sum": {"$cond": [{"$eq": ["$status", FeeStatus.PARTIAL.value]}, 1, 0]}},
+            "unpaid_months": {"$sum": {"$cond": [{"$eq": ["$status", FeeStatus.UNPAID.value]}, 1, 0]}},
+            "overdue_months": {"$sum": {"$cond": [{"$eq": ["$status", FeeStatus.OVERDUE.value]}, 1, 0]}},
+            "total_fees_generated": {"$sum": "$final_fee"},
+            "total_paid": {"$sum": "$amount_paid"},
+            "total_remaining": {"$sum": "$remaining_amount"},
+            "total_scholarship_given": {"$sum": "$scholarship_amount"}
+        }}
+    ]
+    fee_summary_res = list(db.student_monthly_fees.aggregate(fee_pipeline))
+    if fee_summary_res:
+        fee_summary = fee_summary_res[0]
+        del fee_summary["_id"]
+    else:
+        fee_summary = {
+            "total_months": 0,
+            "paid_months": 0,
+            "partial_months": 0,
+            "unpaid_months": 0,
+            "overdue_months": 0,
+            "total_fees_generated": 0,
+            "total_paid": 0,
+            "total_remaining": 0,
+            "total_scholarship_given": 0
+        }
+
+    # Payment summary: totals by method + recent payments
+    payment_pipeline = [
+        {"$match": {"school_id": school_id, "student_id": student_id_str}},
+        {"$group": {"_id": "$payment_method", "total": {"$sum": "$amount"}, "count": {"$sum": 1}}}
+    ]
+    method_results = list(db.student_payments.aggregate(payment_pipeline))
+
+    payments_by_method = {}
+    total_amount = 0
+    total_count = 0
+    for r in method_results:
+        payments_by_method[r["_id"]] = r["total"]
+        total_amount += r["total"]
+        total_count += r["count"]
+
+    recent = list(db.student_payments.find({"school_id": school_id, "student_id": student_id_str}).sort("payment_date", -1).limit(5))
+    recent_payments = []
+    for p in recent:
+        p = convert_objectid(p)
+        if p.get("monthly_fee_id"):
+            try:
+                fee = db.student_monthly_fees.find_one({"_id": ObjectId(p["monthly_fee_id"])})
+                if fee:
+                    p["month"] = fee["month"]
+                    p["year"] = fee["year"]
+                    p["month_name"] = get_month_name(fee["month"])
+            except Exception:
+                pass
+        recent_payments.append(p)
+
+    payment_summary = {
+        "total_payments": total_count,
+        "total_amount_paid": total_amount,
+        "payments_by_method": payments_by_method,
+        "recent_payments": recent_payments
+    }
+
+    # base fee: reuse computed base_fee if we computed it above, otherwise compute quickly
+    try:
+        if 'base_fee' in locals():
+            base_fee_val = base_fee
+        else:
+            base_fee_val = 0.0
+            class_id = student.get("class_id")
+            if class_id:
+                assign_key = f"class_assign:{school_id}:{class_id}"
+                assignment = _cache_get(assign_key)
+                if assignment is None:
+                    assignment = db.class_fee_assignments.find_one({"school_id": school_id, "class_id": class_id})
+                    _cache_set(assign_key, assignment)
+
+                if assignment:
+                    category_id = assignment.get("category_id")
+                    if category_id:
+                        cat_key = f"fee_cat:{school_id}:{category_id}"
+                        cat = _cache_get(cat_key)
+                        if cat is None:
+                            cat = db.fee_categories.find_one({"_id": ObjectId(category_id) if ObjectId.is_valid(category_id) else None, "school_id": school_id})
+                            _cache_set(cat_key, cat)
+                        if cat:
+                            base_fee_val = sum(c.get("amount", 0) for c in cat.get("components", []))
+    except Exception:
+        base_fee_val = 0.0
+
+    # ensure current_fee has month_name
+    if isinstance(current_fee, dict) and "month" in current_fee and "month_name" not in current_fee:
+        current_fee["month_name"] = get_month_name(current_fee["month"])
+
+    # Return overview payload
+    # minimal student info to avoid extra student fetch on frontend
+    student_public = {
+        "id": student_id_str,
+        "name": student.get("name") or student.get("full_name") or student.get("first_name") or "",
+        "student_code": student.get("student_code") or student.get("admission_number") or "",
+        "class_id": student.get("class_id")
+    }
+
+    overview = {
+        "student_id": student_id_str,
+        "student": student_public,
         "scholarship_percent": scholarship_percent,
         "arrears_balance": arrears_balance,
-        "base_fee": base_fee,
+        "base_fee": base_fee_val,
         "current_month_fee": current_fee,
         "fee_summary": fee_summary,
-        "payment_summary": payment_summary
+        "payment_summary": payment_summary,
+        "current_fee_auto_computed": auto_computed
     }
+
+    return overview
+
+
+def get_students_current_month_status(student_ids: List[str], school_id: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Get current month fee status for multiple students efficiently.
+    Returns a mapping of student_id -> current month fee data.
+    
+    OPTIMIZED: Bulk-fetches all data and batch-generates missing fees.
+    """
+    db = get_db()
+    now = datetime.utcnow()
+    current_month = now.month
+    current_year = now.year
+    
+    logger.info(f"[FEE_STATUS] Fetching current month status for {len(student_ids)} students (month: {current_month}/{current_year})")
+    
+    # Step 1: Query current month fees for all students in ONE query
+    fees_query = {
+        "school_id": school_id,
+        "student_id": {"$in": student_ids},
+        "month": current_month,
+        "year": current_year
+    }
+    
+    current_fees = list(db.student_monthly_fees.find(fees_query))
+    fees_map = {fee["student_id"]: fee for fee in current_fees}
+    logger.info(f"[FEE_STATUS] Found {len(current_fees)} existing fee records")
+    
+    # Step 2: Find students missing fees
+    students_needing_generation = [sid for sid in student_ids if sid not in fees_map]
+    
+    if not students_needing_generation:
+        # All students have fees - fast path
+        results = {}
+        for student_id, fee in fees_map.items():
+            results[student_id] = {
+                "status": fee.get("status", "UNPAID"),
+                "base_fee": fee.get("base_fee", 0.0),
+                "scholarship_percent": fee.get("scholarship_percent", 0.0),
+                "scholarship_amount": fee.get("scholarship_amount", 0.0),
+                "fee_after_discount": fee.get("fee_after_discount", 0.0),
+                "arrears_added": fee.get("arrears_added", 0.0),
+                "final_fee": fee.get("final_fee", 0.0),
+                "amount_paid": fee.get("amount_paid", 0.0),
+                "remaining_amount": fee.get("remaining_amount", 0.0),
+                "month": fee.get("month"),
+                "year": fee.get("year"),
+                "month_name": get_month_name(fee.get("month", current_month))
+            }
+        logger.info(f"[FEE_STATUS] ✓ All fees exist, returning {len(results)} students")
+        return results
+    
+    # Step 3: Bulk-fetch student data for those needing generation
+    logger.info(f"[FEE_STATUS] Need to generate fees for {len(students_needing_generation)} students")
+    
+    student_obj_ids = []
+    for sid in students_needing_generation:
+        try:
+            student_obj_ids.append(ObjectId(sid))
+        except:
+            pass
+    
+    students = list(db.students.find({
+        "_id": {"$in": student_obj_ids},
+        "school_id": school_id
+    }))
+    students_map = {str(s["_id"]): s for s in students}
+    
+    # Step 4: Bulk-fetch class assignments and categories
+    class_ids = list({s.get("class_id") for s in students if s.get("class_id")})
+    
+    assignments = {}
+    categories = {}
+    
+    if class_ids:
+        class_assignments = list(db.class_fee_assignments.find({
+            "class_id": {"$in": class_ids},
+            "school_id": school_id
+        }))
+        
+        for ca in class_assignments:
+            assignments[ca["class_id"]] = ca.get("category_id")
+        
+        category_ids = [ObjectId(cid) for cid in assignments.values() if ObjectId.is_valid(cid)]
+        
+        if category_ids:
+            cats = list(db.fee_categories.find({
+                "_id": {"$in": category_ids},
+                "school_id": school_id
+            }))
+            
+            for cat in cats:
+                components = cat.get("components", [])
+                total = sum(comp.get("amount", 0) for comp in components)
+                categories[str(cat["_id"])] = total
+    
+    # Step 5: Bulk-fetch previous month fees for arrears calculation
+    prev_fees_query = {
+        "school_id": school_id,
+        "student_id": {"$in": students_needing_generation},
+        "$or": [
+            {"year": {"$lt": current_year}},
+            {"year": current_year, "month": {"$lt": current_month}}
+        ],
+        "remaining_amount": {"$gt": 0},
+        "arrears_carried": {"$ne": True}
+    }
+    
+    prev_fees = list(db.student_monthly_fees.find(prev_fees_query))
+    
+    # Group previous fees by student_id
+    prev_fees_by_student = {}
+    for pf in prev_fees:
+        sid = pf["student_id"]
+        if sid not in prev_fees_by_student:
+            prev_fees_by_student[sid] = []
+        prev_fees_by_student[sid].append(pf)
+    
+    # Step 6: Batch-generate fees
+    fees_to_insert = []
+    fees_to_mark_carried = []
+    students_to_clear_arrears = []
+    
+    for student_id in students_needing_generation:
+        student = students_map.get(student_id)
+        if not student:
+            continue
+        
+        # Calculate base fee from cached data
+        class_id = student.get("class_id")
+        base_fee = 0.0
+        
+        if class_id and class_id in assignments:
+            category_id = assignments[class_id]
+            base_fee = categories.get(str(category_id), 0.0)
+        
+        # Get scholarship
+        scholarship_percent = student.get("scholarship_percent", 0.0)
+        scholarship_amount = round(base_fee * (scholarship_percent / 100), 2)
+        fee_after_discount = round(base_fee - scholarship_amount, 2)
+        
+        # Calculate arrears
+        initial_arrears = student.get("arrears_balance", student.get("arrears", 0.0)) or 0.0
+        carried_total = sum(pf.get("remaining_amount", 0) for pf in prev_fees_by_student.get(student_id, []))
+        arrears_added = round(initial_arrears + carried_total, 2)
+        
+        # Schedule marking previous fees as carried
+        for pf in prev_fees_by_student.get(student_id, []):
+            fees_to_mark_carried.append(pf["_id"])
+        
+        # Schedule clearing student arrears
+        if arrears_added > 0:
+            students_to_clear_arrears.append(student_id)
+        
+        # Calculate final fee
+        final_fee = round(fee_after_discount + arrears_added, 2)
+        
+        fee_record = {
+            "school_id": school_id,
+            "student_id": student_id,
+            "month": current_month,
+            "year": current_year,
+            "base_fee": base_fee,
+            "scholarship_percent": scholarship_percent,
+            "scholarship_amount": scholarship_amount,
+            "fee_after_discount": fee_after_discount,
+            "arrears_added": arrears_added,
+            "final_fee": final_fee,
+            "amount_paid": 0.0,
+            "remaining_amount": final_fee,
+            "status": FeeStatus.UNPAID.value,
+            "created_at": now,
+            "updated_at": now,
+            "generated_by": "auto-bulk-generate"
+        }
+        
+        fees_to_insert.append(fee_record)
+    
+    # Step 7: Batch insert and update
+    if fees_to_insert:
+        logger.info(f"[FEE_STATUS] Batch-inserting {len(fees_to_insert)} fee records")
+        db.student_monthly_fees.insert_many(fees_to_insert)
+    
+    if fees_to_mark_carried:
+        logger.info(f"[FEE_STATUS] Marking {len(fees_to_mark_carried)} previous fees as carried")
+        db.student_monthly_fees.update_many(
+            {"_id": {"$in": fees_to_mark_carried}},
+            {"$set": {"arrears_carried": True, "status": FeeStatus.OVERDUE.value, "updated_at": now}}
+        )
+    
+    if students_to_clear_arrears:
+        logger.info(f"[FEE_STATUS] Clearing arrears for {len(students_to_clear_arrears)} students")
+        student_clear_ids = [ObjectId(sid) for sid in students_to_clear_arrears if ObjectId.is_valid(sid)]
+        db.students.update_many(
+            {"_id": {"$in": student_clear_ids}},
+            {"$set": {"arrears_balance": 0.0, "arrears": 0.0, "updated_at": now}}
+        )
+    
+    # Step 8: Build results from both existing and newly generated fees
+    results = {}
+    
+    # Add existing fees
+    for student_id, fee in fees_map.items():
+        results[student_id] = {
+            "status": fee.get("status", "UNPAID"),
+            "base_fee": fee.get("base_fee", 0.0),
+            "scholarship_percent": fee.get("scholarship_percent", 0.0),
+            "scholarship_amount": fee.get("scholarship_amount", 0.0),
+            "fee_after_discount": fee.get("fee_after_discount", 0.0),
+            "arrears_added": fee.get("arrears_added", 0.0),
+            "final_fee": fee.get("final_fee", 0.0),
+            "amount_paid": fee.get("amount_paid", 0.0),
+            "remaining_amount": fee.get("remaining_amount", 0.0),
+            "month": fee.get("month"),
+            "year": fee.get("year"),
+            "month_name": get_month_name(fee.get("month", current_month))
+        }
+    
+    # Add newly generated fees
+    for fee in fees_to_insert:
+        results[fee["student_id"]] = {
+            "status": fee.get("status", "UNPAID"),
+            "base_fee": fee.get("base_fee", 0.0),
+            "scholarship_percent": fee.get("scholarship_percent", 0.0),
+            "scholarship_amount": fee.get("scholarship_amount", 0.0),
+            "fee_after_discount": fee.get("fee_after_discount", 0.0),
+            "arrears_added": fee.get("arrears_added", 0.0),
+            "final_fee": fee.get("final_fee", 0.0),
+            "amount_paid": fee.get("amount_paid", 0.0),
+            "remaining_amount": fee.get("remaining_amount", 0.0),
+            "month": current_month,
+            "year": current_year,
+            "month_name": get_month_name(current_month)
+        }
+    
+    logger.info(f"[FEE_STATUS] ✓ Returning status for {len(results)} students")
+    return results
 
 # ==================== ARREARS CARRYFORWARD SERVICE ====================
 

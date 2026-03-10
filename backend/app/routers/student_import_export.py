@@ -799,7 +799,7 @@ async def print_student_forms(
             pagesize=landscape(A4),
             leftMargin=24,
             rightMargin=24,
-            topMargin=24,
+            topMargin=72,
             bottomMargin=24,
         )
 
@@ -833,7 +833,7 @@ async def print_student_forms(
             canvas.saveState()
             canvas.setFont('Helvetica-Bold', 14)
             page_width = doc.pagesize[0]
-            # Move header slightly down to provide top padding above the title
+            # Draw header with top padding so it never overlaps flowables
             canvas.drawCentredString(page_width / 2.0, doc.pagesize[1] - 36, header_text)
             canvas.restoreState()
 
@@ -861,81 +861,70 @@ async def print_student_forms(
 
         def build_student_card(s: dict):
             s = s or {}
-            full_name = s.get('full_name', '')
-            roll = s.get('roll_number', '')
+            full_name = s.get('full_name', '') or ''
+            roll = s.get('roll_number', '') or ''
             cls_raw = s.get('class_id') or s.get('class_name') or ''
-            cls_display = class_map.get(str(cls_raw), cls_raw)
-            dob = s.get('date_of_birth', '')
-            phone = s.get('phone') or (s.get('contact_info') or {}).get('phone') or s.get('contact_number', '')
-            gender = s.get('gender', '')
-            adm = s.get('admission_date', '')
+            cls_display = class_map.get(str(cls_raw), cls_raw) or ''
+            dob = s.get('date_of_birth', '') or ''
+            phone = s.get('phone') or (s.get('contact_info') or {}).get('phone') or s.get('contact_number', '') or ''
+            gender = s.get('gender', '') or ''
+            adm = s.get('admission_date', '') or ''
             guardian = s.get('guardian_info', {}) or {}
-            parent_name = guardian.get('guardian_name') or guardian.get('father_name') or guardian.get('parent_name') or s.get('parent_name', '')
-            parent_cnic = guardian.get('parent_cnic') or guardian.get('father_cnic') or s.get('father_cnic', '')
-            parent_contact = guardian.get('guardian_contact') or guardian.get('parent_contact') or s.get('parent_contact', '')
-            # Address consolidated into a single label but displayed on two lines
+            parent_name = guardian.get('guardian_name') or guardian.get('father_name') or guardian.get('parent_name') or s.get('parent_name', '') or ''
+            parent_cnic = guardian.get('parent_cnic') or guardian.get('father_cnic') or s.get('father_cnic', '') or ''
+            parent_contact = guardian.get('guardian_contact') or guardian.get('parent_contact') or s.get('parent_contact', '') or ''
+            # Address consolidated into a single label but displayed on two lines (always reserve two lines)
             address = guardian.get('address') or s.get('address') or ''
             addr_lines = [ln.strip() for ln in address.splitlines() if ln.strip()]
-            addr1 = addr_lines[0] if len(addr_lines) > 0 else (address[:60] if address else '')
-            addr2 = addr_lines[1] if len(addr_lines) > 1 else (address[60:120] if len(address) > 60 else '')
+            addr1 = addr_lines[0] if len(addr_lines) > 0 else ''
+            addr2 = addr_lines[1] if len(addr_lines) > 1 else ''
 
-            # Financial fields
-            arrears = s.get('arrears') if s.get('arrears') is not None else s.get('outstanding_fees') or 0.0
+            # Financial fields: show empty instead of 0
+            arrears = s.get('arrears') if s.get('arrears') is not None else s.get('outstanding_fees')
             try:
-                arrears_display = f"{float(arrears):.2f}"
+                arrears_val = float(arrears)
+                arrears_display = f"{arrears_val:.2f}" if arrears_val != 0.0 else ''
             except Exception:
-                arrears_display = str(arrears or '0.00')
+                arrears_display = str(arrears) if arrears not in (None, 0, 0.0, '') else ''
 
-            scholarship = s.get('scholarship_percentage') if s.get('scholarship_percentage') is not None else s.get('scholarship') or 0
+            scholarship = s.get('scholarship_percentage') if s.get('scholarship_percentage') is not None else s.get('scholarship')
+            try:
+                scholarship_val = float(scholarship)
+                scholarship_display = str(int(scholarship_val)) if scholarship_val != 0.0 else ''
+            except Exception:
+                scholarship_display = str(scholarship) if scholarship not in (None, 0, 0.0, '') else ''
 
             # Image availability based on stored profile image fields
             has_image = bool(s.get('profile_image_url') or s.get('profile_image_blob') or s.get('profile_image_path'))
             image_status = 'Present' if has_image else 'Not present'
 
-            # Placeholders when values are missing (as per user's requested hints)
-            placeholders = {
-                'full_name': 'Enter student name',
-                'roll': 'e.g. 101',
-                'class': 'Select class',
-                'dob': 'mm/dd/yyyy',
-                'phone': '92XXXXXXXXXX',
-                'gender': 'Select gender',
-                'adm': '03/10/2026',
-                'parent_name': 'Parent or guardian name',
-                'parent_cnic': 'e.g. 3520112345678\nEnter 13 digits without dashes (e.g. 3520112345678)',
-                'address': 'Student address',
-                'parent_contact': '92XXXXXXXXXX',
-                'arrears': '0.00',
-                'scholarship': '0',
-            }
-
             card_rows = []
-            header_para = Paragraph(f"<b>{full_name or placeholders['full_name']}</b>", value_style)
+            header_para = Paragraph(f"<b>{full_name}</b>", value_style)
             card_rows.append([header_para])
 
-            # Build simplified key/value rows exactly as requested
+            # Build simplified key/value rows (show only DB values; empty if not present)
             kv_pairs = [
-                ("Full Name *", full_name or placeholders['full_name']),
-                ("Roll Number *", roll or placeholders['roll']),
-                ("Class *", cls_display or placeholders['class']),
-                ("Date of Birth", dob or placeholders['dob']),
-                ("Phone", phone or placeholders['phone']),
-                ("Gender", gender or placeholders['gender']),
-                ("Admission Date", adm or placeholders['adm']),
-                ("Parent / Guardian Name", parent_name or placeholders['parent_name']),
-                ("Parent / Guardian CNIC *", parent_cnic or placeholders['parent_cnic']),
-                # Address: single label, two-line value
-                ("Address", f"{addr1}<br/>{addr2}" if (addr1 or addr2) else placeholders['address']),
-                ("Parent / Guardian Contact", parent_contact or placeholders['parent_contact']),
-                ("Arrears (PKR)", arrears_display or placeholders['arrears']),
-                ("Scholarship (%)", str(scholarship) or placeholders['scholarship']),
+                ("Full Name", full_name),
+                ("Roll Number", roll),
+                ("Class", cls_display),
+                ("Date of Birth", dob),
+                ("Phone", phone),
+                ("Gender", gender),
+                ("Admission Date", adm),
+                ("Parent / Guardian Name", parent_name),
+                ("Parent / Guardian CNIC", parent_cnic),
+                # Address: single label, two-line value (always reserve two lines)
+                ("Address", f"{addr1}<br/>{addr2}" if (addr1 or addr2) else "<br/>"),
+                ("Parent / Guardian Contact", parent_contact),
+                ("Arrears (PKR)", arrears_display),
+                ("Scholarship (%)", scholarship_display),
                 ("Image", image_status),
             ]
 
             # Render each kv as a two-column table row inside the card
             for label, val in kv_pairs:
                 left = Paragraph(label, label_style)
-                right = Paragraph(str(val), value_style)
+                right = Paragraph(str(val or ''), value_style)
                 row_table = Table([[left, right]], colWidths=[1.6 * inch, half_width - 1.6 * inch - 12])
                 row_table.setStyle(TableStyle([
                     ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -1057,6 +1046,22 @@ OPTIONAL_STUDENT_FIELDS = {
     "registration_number": {"path": "registration_number", "label": "Registration Number", "type": "string"},
 }
 
+# Define admission form fields only — used for incomplete-data detection and UI
+ADMISSION_FIELDS = {
+    "full_name": {"path": "full_name", "label": "Full Name", "type": "string"},
+    "roll_number": {"path": "roll_number", "label": "Roll Number", "type": "string"},
+    "class_id": {"path": "class_id", "label": "Class", "type": "string"},
+    "section": {"path": "section", "label": "Section", "type": "string"},
+    "date_of_birth": {"path": "date_of_birth", "label": "Date of Birth", "type": "date"},
+    "phone": {"path": "contact_info.phone", "label": "Phone", "type": "phone"},
+    "gender": {"path": "gender", "label": "Gender", "type": "string"},
+    "admission_date": {"path": "admission_date", "label": "Admission Date", "type": "date"},
+    "parent_name": {"path": "guardian_info.father_name", "label": "Parent / Guardian Name", "type": "string"},
+    "parent_cnic": {"path": "guardian_info.parent_cnic", "label": "Parent / Guardian CNIC", "type": "string"},
+    "address": {"path": "guardian_info.address", "label": "Address", "type": "string"},
+    "parent_contact": {"path": "guardian_info.guardian_contact", "label": "Parent / Guardian Contact", "type": "phone"},
+}
+
 
 def get_nested_value(obj: dict, path: str):
     """Get value from nested dict using dot notation"""
@@ -1071,23 +1076,19 @@ def get_nested_value(obj: dict, path: str):
 
 
 def check_missing_fields(student: dict) -> list:
-    """Dynamically check all student fields for missing data"""
+    """Check student data for missing admission fields only (plus image). Returns list of keys."""
     missing = []
-    
-    # Check all defined fields
-    all_fields = {**REQUIRED_STUDENT_FIELDS, **OPTIONAL_STUDENT_FIELDS}
-    
-    for field_key, field_info in all_fields.items():
+
+    # Only consider admission form fields for the incomplete-data UI
+    for field_key, field_info in ADMISSION_FIELDS.items():
         value = get_nested_value(student, field_info['path'])
-        
-        # Check if value is missing (None, empty string, or empty dict/list)
         if value is None or value == "" or (isinstance(value, (dict, list)) and not value):
             missing.append(field_key)
-    
-    # Also check for profile image
-    if not student.get("profile_image_blob"):
+
+    # Also check for profile image (support both blob and legacy url)
+    if not (student.get("profile_image_blob") or student.get("profile_image_url")):
         missing.append("profile_image")
-    
+
     return missing
 
 
@@ -1171,20 +1172,21 @@ async def get_incomplete_students(
             # Build current data object for all fields
             guardian = student.get("guardian_info", {}) or {}
             contact = student.get("contact_info", {}) or {}
-            
+
             current_data = {
+                "full_name": student.get("full_name", ""),
+                "roll_number": student.get("roll_number", ""),
                 "section": student.get("section", ""),
                 "gender": student.get("gender", ""),
                 "date_of_birth": student.get("date_of_birth", ""),
                 "admission_date": student.get("admission_date", ""),
                 "registration_number": student.get("registration_number", ""),
-                "father_name": guardian.get("father_name", ""),
-                "mother_name": guardian.get("mother_name", ""),
-                "father_cnic": guardian.get("parent_cnic", ""),
+                "parent_name": guardian.get("father_name", ""),
+                "parent_cnic": guardian.get("parent_cnic", ""),
                 "parent_contact": guardian.get("guardian_contact", ""),
-                "guardian_email": guardian.get("guardian_email", ""),
                 "address": guardian.get("address", ""),
-                "emergency_contact": contact.get("emergency_contact", ""),
+                "phone": (contact.get("phone") or student.get("phone") or ""),
+                "has_image": bool(student.get("profile_image_blob") or student.get("profile_image_url")),
             }
             
             student_data = {
@@ -1214,7 +1216,8 @@ async def get_incomplete_students(
         return {
             "total_incomplete_students": total_incomplete,
             "classes": result,
-            "field_definitions": {**REQUIRED_STUDENT_FIELDS, **OPTIONAL_STUDENT_FIELDS}
+            # Return admission-only field definitions so UI shows only admission fields
+            "field_definitions": ADMISSION_FIELDS
         }
     except Exception as e:
         logger.exception(f"[SCHOOL:{school_id}] ❌ Failed to fetch incomplete students: {str(e)}")
@@ -1260,6 +1263,9 @@ async def update_incomplete_student(
             "date_of_birth": "date_of_birth",
             "admission_date": "admission_date",
             "registration_number": "registration_number",
+            "full_name": "full_name",
+            "roll_number": "roll_number",
+            "phone": "phone",
         }
         
         for api_field, db_field in direct_fields.items():
@@ -1451,8 +1457,8 @@ async def print_incomplete_student_forms(
         )
         
         # Process students 2 per page
-        studentsper_page = 2
-        
+        students_per_page = 2
+
         for idx, item in enumerate(students_list):
             student = item["student"]
             missing_fields = item["missing"]

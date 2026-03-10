@@ -37,7 +37,6 @@ import {
   confirmImport,
   getImportStatus,
   downloadSampleTemplate,
-  exportStudents,
   getImportHistory,
   getIncompleteStudents,
   updateIncompleteStudent,
@@ -73,7 +72,7 @@ const StudentImportExportPage: React.FC = () => {
   } | null>(null);
 
   // Export state
-  const [exporting, setExporting] = useState(false);
+  const [exporting] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
   // Export modal
@@ -360,16 +359,6 @@ const StudentImportExportPage: React.FC = () => {
     }
   };
 
-  const handleExport = async () => {
-    setExporting(true);
-    try {
-      await exportStudents();
-    } catch (err: any) {
-      setError(err.message || 'Export failed');
-    } finally {
-      setExporting(false);
-    }
-  };
 
   const handleViewHistory = async () => {
     setHistoryOpen(true);

@@ -54,6 +54,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# ReportLab imports for PDF generation (print forms)
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
+from io import BytesIO
+
 # ---------------------------------------------------------------------------
 # In-memory notification bus (per-process; works for single-server deployments)
 # ---------------------------------------------------------------------------
@@ -753,6 +761,230 @@ async def get_import_history(
     except Exception as e:
         logger.error(f"[SCHOOL:{school_id}] ❌ Failed to retrieve history: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve history: {str(e)}")
+
+
+@router.post("/incomplete-students/print-forms")
+async def print_student_forms(
+    class_id: str = Query(...),
+    section: Optional[str] = Query(None),
+    current_user: dict = Depends(require_school_admin),
+):
+    """Generate a single PDF containing fill-in-the-blank profile forms for all students in a class/section.
+
+    The backend will fill available fields and leave missing fields blank. The PDF is A4 landscape
+    and designed to fit approximately 3 student forms per page (stacked vertically).
+    """
+    school_id = current_user.get("school_id")
+    admin_email = current_user.get("email", "")
+    logger.info(f"[SCHOOL:{school_id}] [ADMIN:{admin_email}] Generating print forms for class={class_id} section={section}")
+
+    try:
+        # Fetch students matching filters
+        filters = {"school_id": school_id}
+        if class_id:
+            filters["class_id"] = class_id
+        if section:
+            filters["section"] = section
+
+        students = get_all_students(filters)
+        logger.info(f"[SCHOOL:{school_id}] Found {len(students)} students to render")
+
+        if not students:
+            raise HTTPException(status_code=404, detail="No students found for the given class/section")
+
+        # Prepare PDF
+        bio = BytesIO()
+        doc = SimpleDocTemplate(
+            bio,
+            pagesize=landscape(A4),
+            leftMargin=24,
+            rightMargin=24,
+            topMargin=24,
+            bottomMargin=24,
+        )
+
+        styles = getSampleStyleSheet()
+        # Increased font sizes for readability
+        label_style = ParagraphStyle(name='Label', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=12)
+        value_style = ParagraphStyle(name='Value', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=12)
+        title_style = ParagraphStyle(name='Title', parent=styles['Title'], fontSize=14, leading=16)
+
+        elements = []
+
+        # Resolve human-readable class name (fallback to provided id)
+        db = get_db()
+        class_name = str(class_id)
+        try:
+            try:
+                cid_obj = ObjectId(class_id)
+            except Exception:
+                cid_obj = class_id
+            cls_doc = db.classes.find_one({"_id": cid_obj, "school_id": school_id}) if cid_obj else None
+            if cls_doc:
+                class_name = cls_doc.get('class_name') or cls_doc.get('name') or class_name
+        except Exception:
+            # ignore and keep class_id as fallback
+            pass
+
+        # We'll draw the document title in the page header so it doesn't consume flowable space
+        header_text = f"Student Profile Forms — Class: {class_name}{(' - ' + section) if section else ''}"
+
+        def _draw_header(canvas, doc):
+            canvas.saveState()
+            canvas.setFont('Helvetica-Bold', 14)
+            page_width = doc.pagesize[0]
+            # Move header slightly down to provide top padding above the title
+            canvas.drawCentredString(page_width / 2.0, doc.pagesize[1] - 36, header_text)
+            canvas.restoreState()
+
+        # Prepare a class_id -> class_name map so student cards show readable class names
+        db = get_db()
+        class_ids = list({s.get('class_id') for s in students if s.get('class_id')})
+        oid_list = []
+        for cid in class_ids:
+            try:
+                oid_list.append(ObjectId(cid))
+            except Exception:
+                # ignore non-ObjectId class ids
+                pass
+        class_map = {}
+        if oid_list:
+            for c in db.classes.find({"_id": {"$in": oid_list}}):
+                class_map[str(c.get("_id"))] = c.get('class_name') or c.get('name') or ''
+
+        # Two-column layout: build rows of two student cards per row
+        gutter = 12  # points between columns
+        half_width = (doc.width - gutter) / 2
+
+        # Add a little space after the header so tables start a bit lower on the page
+        elements.append(Spacer(1, 0.18 * inch))
+
+        def build_student_card(s: dict):
+            s = s or {}
+            full_name = s.get('full_name', '')
+            roll = s.get('roll_number', '')
+            cls_raw = s.get('class_id') or s.get('class_name') or ''
+            cls_display = class_map.get(str(cls_raw), cls_raw)
+            dob = s.get('date_of_birth', '')
+            phone = s.get('phone') or (s.get('contact_info') or {}).get('phone') or s.get('contact_number', '')
+            gender = s.get('gender', '')
+            adm = s.get('admission_date', '')
+            guardian = s.get('guardian_info', {}) or {}
+            parent_name = guardian.get('guardian_name') or guardian.get('father_name') or guardian.get('parent_name') or s.get('parent_name', '')
+            parent_cnic = guardian.get('parent_cnic') or guardian.get('father_cnic') or s.get('father_cnic', '')
+            parent_contact = guardian.get('guardian_contact') or guardian.get('parent_contact') or s.get('parent_contact', '')
+            # Address consolidated into a single label but displayed on two lines
+            address = guardian.get('address') or s.get('address') or ''
+            addr_lines = [ln.strip() for ln in address.splitlines() if ln.strip()]
+            addr1 = addr_lines[0] if len(addr_lines) > 0 else (address[:60] if address else '')
+            addr2 = addr_lines[1] if len(addr_lines) > 1 else (address[60:120] if len(address) > 60 else '')
+
+            # Financial fields
+            arrears = s.get('arrears') if s.get('arrears') is not None else s.get('outstanding_fees') or 0.0
+            try:
+                arrears_display = f"{float(arrears):.2f}"
+            except Exception:
+                arrears_display = str(arrears or '0.00')
+
+            scholarship = s.get('scholarship_percentage') if s.get('scholarship_percentage') is not None else s.get('scholarship') or 0
+
+            # Image availability based on stored profile image fields
+            has_image = bool(s.get('profile_image_url') or s.get('profile_image_blob') or s.get('profile_image_path'))
+            image_status = 'Present' if has_image else 'Not present'
+
+            # Placeholders when values are missing (as per user's requested hints)
+            placeholders = {
+                'full_name': 'Enter student name',
+                'roll': 'e.g. 101',
+                'class': 'Select class',
+                'dob': 'mm/dd/yyyy',
+                'phone': '92XXXXXXXXXX',
+                'gender': 'Select gender',
+                'adm': '03/10/2026',
+                'parent_name': 'Parent or guardian name',
+                'parent_cnic': 'e.g. 3520112345678\nEnter 13 digits without dashes (e.g. 3520112345678)',
+                'address': 'Student address',
+                'parent_contact': '92XXXXXXXXXX',
+                'arrears': '0.00',
+                'scholarship': '0',
+            }
+
+            card_rows = []
+            header_para = Paragraph(f"<b>{full_name or placeholders['full_name']}</b>", value_style)
+            card_rows.append([header_para])
+
+            # Build simplified key/value rows exactly as requested
+            kv_pairs = [
+                ("Full Name *", full_name or placeholders['full_name']),
+                ("Roll Number *", roll or placeholders['roll']),
+                ("Class *", cls_display or placeholders['class']),
+                ("Date of Birth", dob or placeholders['dob']),
+                ("Phone", phone or placeholders['phone']),
+                ("Gender", gender or placeholders['gender']),
+                ("Admission Date", adm or placeholders['adm']),
+                ("Parent / Guardian Name", parent_name or placeholders['parent_name']),
+                ("Parent / Guardian CNIC *", parent_cnic or placeholders['parent_cnic']),
+                # Address: single label, two-line value
+                ("Address", f"{addr1}<br/>{addr2}" if (addr1 or addr2) else placeholders['address']),
+                ("Parent / Guardian Contact", parent_contact or placeholders['parent_contact']),
+                ("Arrears (PKR)", arrears_display or placeholders['arrears']),
+                ("Scholarship (%)", str(scholarship) or placeholders['scholarship']),
+                ("Image", image_status),
+            ]
+
+            # Render each kv as a two-column table row inside the card
+            for label, val in kv_pairs:
+                left = Paragraph(label, label_style)
+                right = Paragraph(str(val), value_style)
+                row_table = Table([[left, right]], colWidths=[1.6 * inch, half_width - 1.6 * inch - 12])
+                row_table.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0,0), (-1,-1), 0),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 0),
+                    ('TOPPADDING', (0,0), (-1,-1), 2),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+                ]))
+                card_rows.append([row_table])
+
+            # Wrap into a single cell table to create border and padding
+            inner = Table(card_rows, colWidths=[half_width])
+            inner.setStyle(TableStyle([
+                ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor('#BBBBBB')),
+                ('INNERGRID', (0,0), (-1,-1), 0.25, colors.HexColor('#EEEEEE')),
+                ('LEFTPADDING', (0,0), (-1,-1), 6),
+                ('RIGHTPADDING', (0,0), (-1,-1), 6),
+                ('TOPPADDING', (0,0), (-1,-1), 6),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ]))
+            return inner
+
+        # Build rows of two cards
+        i = 0
+        while i < len(students):
+            left = build_student_card(students[i])
+            right = build_student_card(students[i+1]) if (i+1) < len(students) else Spacer(1, 0)
+            outer = Table([[left, right]], colWidths=[half_width, half_width], style=[('VALIGN', (0,0), (-1,-1), 'TOP'), ('LEFTPADDING', (0,0), (-1,-1), 6), ('RIGHTPADDING', (0,0), (-1,-1), 6)])
+            elements.append(outer)
+            elements.append(Spacer(1, 0.12 * inch))
+            i += 2
+
+        # Build PDF with header drawn on each page so title doesn't take flowable space
+        doc.build(elements, onFirstPage=_draw_header, onLaterPages=_draw_header)
+        bio.seek(0)
+
+        filename = f"student_forms_{class_id}_{section or 'all'}_{datetime.utcnow().strftime('%Y%m%d')}.pdf"
+
+        return StreamingResponse(
+            bio,
+            media_type='application/pdf',
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"[SCHOOL:{school_id}] ❌ Failed to generate print forms: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
 
 
 @router.get("/notifications/stream")

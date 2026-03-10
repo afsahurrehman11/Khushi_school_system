@@ -563,8 +563,13 @@ const FeePage: React.FC = () => {
       });
       const fetchTime = (performance.now() - startTime).toFixed(2);
 
+      const contentType = response.headers.get('content-type');
       console.log(`[EXPORT] Response status: ${response.status} | Time: ${fetchTime}ms`);
-      console.log(`[EXPORT] Content-Type: ${response.headers.get('content-type')}`);
+      console.log(`[EXPORT] Content-Type: ${contentType}`);
+      if (!contentType || !contentType.includes('pdf')) {
+        console.warn('[EXPORT] ⚠️ Response Content-Type is not PDF! File may be corrupted.');
+        InAppNotificationService.error('Export failed: Server did not return a PDF. Please contact support.');
+      }
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({ detail: 'Failed to export' }));
@@ -583,6 +588,14 @@ const FeePage: React.FC = () => {
         } catch (e) {
           console.log('[EXPORT] (binary blob, skipped preview)');
         }
+      } else if (!blob.type.includes('pdf')) {
+        // Show preview for non-PDF blobs
+        try {
+          const text = await blob.slice(0, 500).text();
+          console.log(`[EXPORT] Blob preview (first 500 chars): ${text.substring(0, 200)}`);
+        } catch (e) {
+          console.log('[EXPORT] (binary blob, skipped preview)');
+        }
       }
 
       // Trigger download
@@ -591,7 +604,7 @@ const FeePage: React.FC = () => {
       a.href = url_obj;
       const date = new Date().toISOString().split('T')[0];
       const sectionSuffix = selectedClass.section ? `_${selectedClass.section.replace(/ /g, '_')}` : '';
-      a.download = `fee_report_${selectedClass.class_name.replace(/ /g, '_')}${sectionSuffix}_${statusToUse}_${date}.xlsx`;
+      a.download = `fee_report_${selectedClass.class_name.replace(/ /g, '_')}${sectionSuffix}_${statusToUse}_${date}.pdf`;
       
       console.log(`[EXPORT] Creating download link: ${a.download}`);
       document.body.appendChild(a);
@@ -601,7 +614,7 @@ const FeePage: React.FC = () => {
 
       console.log(`[EXPORT] ✅ Download initiated: ${a.download}`);
       console.log(`[EXPORT] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
-      InAppNotificationService.success(`${statusToUse} students exported successfully`);
+      InAppNotificationService.success(`${statusToUse} students PDF exported successfully`);
       setExportStatus(null);
     } catch (error: any) {
       console.error('[EXPORT] ❌ Exception caught:', error);
@@ -751,12 +764,12 @@ const FeePage: React.FC = () => {
                 onClick={() => handleOpenExportModal()}
                 disabled={exporting}
                 className={`flex items-center gap-2 px-4 py-2 ${exporting ? 'bg-success-300 cursor-not-allowed' : 'bg-success-600 hover:bg-success-700'} text-white rounded-lg text-sm font-medium transition-colors shadow-sm`}
-                title="Export Students by Fee Status"
+                title="Export Students by Fee Status as PDF"
               >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              Export Excel
+              Export PDF
               </button>
 
               {showExportInline && (

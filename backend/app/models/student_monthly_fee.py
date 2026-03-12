@@ -125,6 +125,7 @@ class StudentPaymentCreate(BaseModel):
     monthly_fee_id: str  # Reference to student_monthly_fees collection
     amount: float
     payment_method: PaymentMethod = PaymentMethod.CASH
+    payment_method_id: Optional[str] = None  # Reference to payment_methods collection
     transaction_reference: Optional[str] = None
     notes: Optional[str] = None
     received_by: Optional[str] = None  # User ID who received payment

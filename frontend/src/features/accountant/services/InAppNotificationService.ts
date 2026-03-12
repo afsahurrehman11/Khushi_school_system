@@ -1,6 +1,6 @@
 import api from '../../../utils/api';
 
-type Notification = { id: string; type: 'success' | 'error' | 'info'; message: string; created_at: string };
+type Notification = { id: string; type: 'success' | 'error' | 'info' | 'warning'; message: string; created_at: string };
 
 class InAppNotificationServiceClass {
   private listeners: ((n: Notification) => void)[] = [];
@@ -51,6 +51,12 @@ class InAppNotificationServiceClass {
     const n = this.make(String(Date.now()), 'info', message);
     this.emit(n);
     this.persistRemote({ type: 'info', message });
+    return n;
+  }
+  warning(message: string) {
+    const n = this.make(String(Date.now()), 'warning', message);
+    this.emit(n);
+    this.persistRemote({ type: 'warning', message });
     return n;
   }
 }

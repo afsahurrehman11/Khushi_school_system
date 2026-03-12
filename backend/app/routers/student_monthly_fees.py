@@ -65,6 +65,7 @@ class CreatePaymentRequest(BaseModel):
     monthly_fee_id: str
     amount: float
     payment_method: str = "CASH"
+    payment_method_id: Optional[str] = None  # Reference to payment_methods collection
     transaction_reference: Optional[str] = None
     notes: Optional[str] = None
 
@@ -297,7 +298,57 @@ async def record_payment(
 ):
     """Record a payment for a monthly fee"""
     school_id = current_user.get("school_id")
-    user_id = current_user.get("sub")
+    user_id = current_user.get("id") or current_user.get("sub")
+    user_role = current_user.get("role", "").lower()
+    user_name = current_user.get("name", "Unknown")
+    
+    # TASK 1: Fix received_by bug
+    received_by = user_id
+    logger.info(f"💰 Recording payment for student {student_id} by user {received_by}")
+    
+    # TASK 2: Enforce role permission (admin or accountant only)
+    if user_role not in ["admin", "accountant"]:
+        logger.warning(f"⚠️ Unauthorized payment attempt by role {user_role}")
+        raise HTTPException(
+            status_code=403,
+            detail=f"Only admin and accountant roles can record payments. Your role: {user_role}"
+        )
+    
+    # MODULE 2: Check accounting session first (new system)
+    accounting_session_id = None
+    try:
+        from app.services.accounting_service import get_active_accounting_session
+        accounting_session = get_active_accounting_session(user_id, school_id)
+        if accounting_session and accounting_session.get("status") == "OPEN":
+            accounting_session_id = accounting_session.get("id")
+            logger.info(f"📂 Accounting session verified: {accounting_session_id}")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not verify accounting session: {e}")
+    
+    # TASK 3: Enforce active cash session (existing system - backward compatible)
+    from app.services.cash_session_service import get_or_create_session
+    try:
+        session = get_or_create_session(user_id, school_id)
+        if session.get("status") != "active":
+            # Check if accounting session is open instead
+            if accounting_session_id:
+                logger.info(f"✅ Using accounting session instead of cash session")
+            else:
+                logger.warning(f"⚠️ Payment blocked because session not active (status: {session.get('status')})")
+                raise HTTPException(
+                    status_code=403,
+                    detail="You must open your accounting session before recording payments."
+                )
+        logger.info(f"🏫 Tenant database resolved for school {school_id}")
+        logger.info(f"✅ Active session verified: {session.get('id')}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Session validation failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to validate accounting session")
+    
+    # Use accounting session ID if available, otherwise use cash session ID
+    session_id_to_use = accounting_session_id or session.get("id")
     
     try:
         payment = create_payment(
@@ -308,13 +359,19 @@ async def record_payment(
             payment_method=request.payment_method,
             transaction_reference=request.transaction_reference,
             notes=request.notes,
-            received_by=received_by
+            received_by=received_by,
+            received_by_name=user_name,
+            received_by_role=user_role,
+            session_id=session_id_to_use,
+            payment_method_id=getattr(request, "payment_method_id", None)
         )
+        logger.info(f"✅ Payment recorded successfully: {payment.get('id')}")
         return payment
     except ValueError as e:
+        logger.error(f"❌ Payment validation failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to record payment: {e}")
+        logger.error(f"❌ Failed to record payment: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/payments/{student_id}")

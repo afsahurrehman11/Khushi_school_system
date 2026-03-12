@@ -26,6 +26,9 @@ export const apiCall = async (
   }
   const headers = {
     ...getAuthHeaders(),
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
     ...options.headers,
   };
 
@@ -33,6 +36,7 @@ export const apiCall = async (
   const response = await fetch(url, {
     ...options,
     headers,
+    cache: 'no-store',
   });
   logger.info('API', `Response ${response.status} ${url}`);
 

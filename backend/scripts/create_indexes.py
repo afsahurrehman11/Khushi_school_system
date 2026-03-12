@@ -197,7 +197,11 @@ def create_indexes():
         db.student_payments.create_index([("school_id", 1), ("payment_date", -1)])
         db.student_payments.create_index([("school_id", 1), ("student_id", 1), ("payment_date", -1)])
         db.student_payments.create_index([("school_id", 1), ("created_at", -1)])
-        indexes_created += 5
+        # TASK 10: Add indexes for audit trail
+        db.student_payments.create_index([("school_id", 1), ("received_by", 1)])
+        db.student_payments.create_index([("school_id", 1), ("session_id", 1)])
+        db.student_payments.create_index([("school_id", 1), ("payment_method_id", 1)])
+        indexes_created += 8
         logger.debug("Student payments indexes created")
     except Exception as e:
         logger.error(f"❌ Failed to create student payments indexes: {str(e)}")
@@ -212,6 +216,103 @@ def create_indexes():
     except Exception as e:
         logger.error(f"❌ Failed to create additional student indexes: {str(e)}")
     
+    # MODULE 2: Accounting Engine Indexes
+    try:
+        # Accounting Sessions
+        logger.debug("Creating accounting sessions indexes")
+        db.accounting_sessions.create_index([("school_id", 1), ("user_id", 1)])
+        db.accounting_sessions.create_index([("school_id", 1), ("session_date", 1)])
+        db.accounting_sessions.create_index([("school_id", 1), ("status", 1)])
+        db.accounting_sessions.create_index([("school_id", 1), ("user_id", 1), ("session_date", 1)], unique=True)
+        db.accounting_sessions.create_index([("school_id", 1), ("opened_at", -1)])
+        indexes_created += 5
+        logger.debug("Accounting sessions indexes created")
+    except Exception as e:
+        logger.error(f"❌ Failed to create accounting sessions indexes: {str(e)}")
+    
+    try:
+        # Principal Payments
+        logger.debug("Creating principal payments indexes")
+        db.principal_payments.create_index([("school_id", 1), ("session_id", 1)])
+        db.principal_payments.create_index([("school_id", 1), ("accountant_id", 1)])
+        db.principal_payments.create_index([("school_id", 1), ("status", 1)])
+        db.principal_payments.create_index([("school_id", 1), ("created_at", -1)])
+        db.principal_payments.create_index([("school_id", 1), ("accountant_id", 1), ("status", 1)])
+        indexes_created += 5
+        logger.debug("Principal payments indexes created")
+    except Exception as e:
+        logger.error(f"❌ Failed to create principal payments indexes: {str(e)}")
+    
+    try:
+        # Accountant Ledger
+        logger.debug("Creating accountant ledger indexes")
+        db.accountant_ledger.create_index([("school_id", 1), ("user_id", 1)])
+        db.accountant_ledger.create_index([("school_id", 1), ("session_id", 1)])
+        db.accountant_ledger.create_index([("school_id", 1), ("transaction_type", 1)])
+        db.accountant_ledger.create_index([("school_id", 1), ("created_at", -1)])
+        db.accountant_ledger.create_index([("school_id", 1), ("user_id", 1), ("created_at", -1)])
+        indexes_created += 5
+        logger.debug("Accountant ledger indexes created")
+    except Exception as e:
+        logger.error(f"❌ Failed to create accountant ledger indexes: {str(e)}")
+    
+    # MODULE 3: Finance Analytics Indexes
+    try:
+        logger.debug("Creating finance analytics indexes")
+        # Student payments for monthly trends and class revenue
+        db.student_payments.create_index([("school_id", 1), ("created_at", -1)])
+        db.student_payments.create_index([("school_id", 1), ("student_snapshot.class_name", 1)])
+        db.student_payments.create_index([("school_id", 1), ("accountant_id", 1), ("created_at", -1)])
+        
+        # Student monthly fees for outstanding analytics
+        db.student_monthly_fees.create_index([("school_id", 1), ("status", 1)])
+        db.student_monthly_fees.create_index([("school_id", 1), ("student_id", 1), ("status", 1)])
+        
+        # Principal payments for payout reports
+        db.principal_payments.create_index([("school_id", 1), ("status", 1), ("created_at", -1)])
+        
+        indexes_created += 6
+        logger.info("⚡ Finance analytics indexes verified")
+    except Exception as e:
+        logger.error(f"❌ Failed to create finance analytics indexes: {str(e)}")
+    
+    # MODULE 4: Daily Workflow Indexes
+    try:
+        logger.debug("Creating daily audit log indexes")
+        # Daily Audit Log for audit trail
+        db.daily_audit_log.create_index([("school_id", 1), ("timestamp", -1)])
+        db.daily_audit_log.create_index([("school_id", 1), ("action_type", 1)])
+        db.daily_audit_log.create_index([("school_id", 1), ("performed_by_id", 1)])
+        db.daily_audit_log.create_index([("school_id", 1), ("target_type", 1), ("target_id", 1)])
+        db.daily_audit_log.create_index([("school_id", 1), ("performed_by_role", 1), ("timestamp", -1)])
+        
+        indexes_created += 5
+        logger.info("⚡ Daily workflow (audit log) indexes verified")
+    except Exception as e:
+        logger.error(f"❌ Failed to create daily audit log indexes: {str(e)}")
+    
+    # MODULE 5: Advanced Accounting Statistics Indexes
+    try:
+        logger.debug("Creating MODULE 5 accounting statistics indexes")
+        # Student payments - indexes for statistics queries (TASK 8)
+        db.student_payments.create_index([("school_id", 1), ("received_by", 1), ("created_at", -1)])
+        db.student_payments.create_index([("school_id", 1), ("payment_method_name", 1)])
+        db.student_payments.create_index([("school_id", 1), ("student_snapshot.class_name", 1), ("created_at", -1)])
+        db.student_payments.create_index([("school_id", 1), ("student_snapshot.class_id", 1)])
+        
+        # Principal payments - for payout analytics
+        db.principal_payments.create_index([("school_id", 1), ("accountant_id", 1), ("created_at", -1)])
+        
+        # Accounting sessions - for session statistics
+        db.accounting_sessions.create_index([("school_id", 1), ("opened_at", -1)])
+        db.accounting_sessions.create_index([("school_id", 1), ("closed_at", -1)])
+        
+        indexes_created += 7
+        logger.info("⚡ MODULE 5 accounting statistics indexes verified")
+    except Exception as e:
+        logger.error(f"❌ Failed to create MODULE 5 indexes: {str(e)}")
+    
+    logger.info(f"⚡ Accounting indexes verified")
     logger.info(f"Total indexes created: {indexes_created}")
 
 if __name__ == "__main__":

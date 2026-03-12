@@ -49,6 +49,14 @@ opencv-python-headless==4.8.0.76
 # ONNX Runtime CPU (~15MB) - Much lighter than PyTorch (~280MB)
 onnxruntime==1.17.0
 
+# --- Cryptography / password hashing ---
+# Required for bcrypt password hashing used in auth
+bcrypt==4.0.1
+
+# --- DNS for MongoDB+SRV ---
+# Required when using mongodb+srv URIs
+dnspython==2.4.2
+
 # ============================================
 # MODEL: MobileFaceNet (downloaded at runtime)
 # - Size: ~4MB (vs FaceNet's 107MB)

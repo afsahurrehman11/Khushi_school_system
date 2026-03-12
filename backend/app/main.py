@@ -39,7 +39,8 @@ from datetime import datetime
 from app.config import settings
 from app.database import get_db
 from app.startup import ensure_collections_exist
-from app.routers import auth, users, students, fees, classes, teachers, grades, accounting, payments, reports, root, student_import_export, chalans, fee_categories, class_fee_assignments, notifications, fee_payments, accountant, payment_methods, schools, root_admin, cash_sessions, statistics, attendance, whatsapp, face, teacher_attendance, fee_vouchers, fee_voucher_settings, student_monthly_fees
+from app.routers import auth, users, students, fees, classes, teachers, grades, accounting, payments, reports, root, student_import_export, chalans, fee_categories, class_fee_assignments, notifications, fee_payments, accountant, payment_methods, schools, root_admin, cash_sessions, statistics, attendance, whatsapp, face, teacher_attendance, fee_vouchers, fee_voucher_settings, student_monthly_fees, finance, daily_workflow
+from app.routers import accounting_stats as accounting_stats_router
 from app.routers import saas as saas_router
 from app.routers import billing as billing_router
 from app.routers import analytics as analytics_router
@@ -228,6 +229,8 @@ try:
         app.include_router(teachers, prefix="/api", tags=["Teachers"])
         app.include_router(grades, prefix="/api", tags=["Grades"])
         app.include_router(accounting, prefix="/api", tags=["Accounting"])
+        app.include_router(finance.router, prefix="/api", tags=["Finance Analytics"])
+        app.include_router(daily_workflow.router, prefix="/api", tags=["Daily Workflow"])
         app.include_router(payments, tags=["Payments"])
         app.include_router(reports, prefix="/api", tags=["Reports"])
         app.include_router(root, prefix="/api/root", tags=["Root"])
@@ -250,6 +253,7 @@ try:
         app.include_router(fee_vouchers, tags=["Fee Vouchers"])
         app.include_router(fee_voucher_settings, tags=["Fee Voucher Settings"])
         app.include_router(analytics_router, prefix="/api/analytics", tags=["Analytics"])
+        app.include_router(accounting_stats_router.router, prefix="/api", tags=["Accounting Statistics"])
         app.include_router(student_monthly_fees, tags=["Student Monthly Fees"])
         logger.info("✅ All routers included successfully")
     except Exception as e:

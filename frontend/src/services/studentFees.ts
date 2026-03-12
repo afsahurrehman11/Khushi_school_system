@@ -340,10 +340,11 @@ class StudentFeeService {
     amount: number,
     paymentMethod: PaymentMethodType = 'CASH',
     transactionReference?: string,
-    notes?: string
+    notes?: string,
+    paymentMethodId?: string
   ): Promise<StudentPayment> {
     try {
-      logger.info('STUDENT_FEE', `Recording payment of ${amount} for ${studentId}`);
+      logger.info('STUDENT_FEE', `💳 Recording payment of ${amount} for ${studentId}`);
       
       const response = await fetch(`${this.endpoint}/payments/${studentId}`, {
         method: 'POST',
@@ -355,6 +356,7 @@ class StudentFeeService {
           monthly_fee_id: monthlyFeeId,
           amount,
           payment_method: paymentMethod,
+          payment_method_id: paymentMethodId,
           transaction_reference: transactionReference,
           notes,
         }),
@@ -365,9 +367,11 @@ class StudentFeeService {
         throw new Error(errorData.detail || 'Failed to record payment');
       }
 
-      return await response.json();
+      const result = await response.json();
+      logger.info('STUDENT_FEE', `✅ Payment recorded successfully: ${result.id}`);
+      return result;
     } catch (error: any) {
-      logger.error('STUDENT_FEE', `Error recording payment: ${error.message}`);
+      logger.error('STUDENT_FEE', `❌ Error recording payment: ${error.message}`);
       throw error;
     }
   }

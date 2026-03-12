@@ -625,10 +625,16 @@ def create_payment(
     payment_method: str = "CASH",
     transaction_reference: Optional[str] = None,
     notes: Optional[str] = None,
-    received_by: Optional[Any] = None
+    received_by: Optional[Any] = None,
+    received_by_name: Optional[str] = None,
+    received_by_role: Optional[str] = None,
+    session_id: Optional[str] = None,
+    payment_method_id: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Create a payment record and update monthly fee"""
+    """Create a payment record and update monthly fee with full audit trail"""
     db = get_db()
+    
+    logger.info(f"💳 Creating payment: student={student_id}, amount={amount}, method={payment_method}, method_id={payment_method_id}")
     
     # Get the monthly fee
     fee = db.student_monthly_fees.find_one({
@@ -637,34 +643,123 @@ def create_payment(
     })
     
     if not fee:
+        logger.error(f"❌ Monthly fee {monthly_fee_id} not found")
         raise ValueError("Monthly fee record not found")
     
     if amount <= 0:
+        logger.error(f"❌ Invalid payment amount: {amount}")
         raise ValueError("Payment amount must be greater than 0")
     
     if amount > fee["remaining_amount"]:
+        logger.warning(f"⚠️ Payment amount {amount} exceeds remaining {fee['remaining_amount']}")
         raise ValueError(f"Payment amount ({amount}) exceeds remaining amount ({fee['remaining_amount']})")
     
     now = datetime.utcnow()
     
-    # Create payment record
+    # TASK 5: Resolve payment method from payment_methods collection
+    payment_method_name = payment_method  # Default fallback
+    if payment_method_id:
+        try:
+            method = db.payment_methods.find_one({"_id": ObjectId(payment_method_id), "school_id": school_id})
+            if method:
+                payment_method_name = method.get("method_name", payment_method)
+                logger.info(f"💳 Payment method resolved: {payment_method_id} -> {payment_method_name}")
+            else:
+                logger.warning(f"⚠️ Payment method {payment_method_id} not found, using: {payment_method}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to resolve payment method: {e}")
+    
+    # TASK 6: Create student snapshot for historical accuracy
+    student_snapshot = {}
+    try:
+        student = db.students.find_one({"_id": ObjectId(student_id), "school_id": school_id})
+        if student:
+            class_info = {}
+            if student.get("class_id"):
+                class_doc = db.classes.find_one({"_id": ObjectId(student["class_id"]), "school_id": school_id})
+                if class_doc:
+                    class_info = {
+                        "class_id": str(student["class_id"]),
+                        "class_name": class_doc.get("class_name", "Unknown"),
+                        "section": student.get("section", "")
+                    }
+            
+            student_snapshot = {
+                "student_name": student.get("student_name", "Unknown"),
+                "father_name": student.get("father_name", ""),
+                "roll_number": student.get("roll_number", ""),
+                "class_info": class_info
+            }
+            logger.info(f"📚 Student snapshot stored: {student_snapshot.get('student_name')}")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to create student snapshot: {e}")
+    
+    # TASK 7: Collector metadata
+    collector_info = {
+        "user_id": received_by,
+        "name": received_by_name or "Unknown",
+        "role": received_by_role or "Unknown"
+    }
+    
+    # Create payment record with enhanced fields
     payment = {
         "school_id": school_id,
         "student_id": student_id,
         "monthly_fee_id": monthly_fee_id,
         "amount": amount,
-        "payment_method": payment_method,
+        "payment_method": payment_method_name,  # TASK 5: Use resolved name
+        "payment_method_id": payment_method_id,  # TASK 5: Store ID reference
         "transaction_reference": transaction_reference,
         "notes": notes,
-        "received_by": received_by,
-        "payment_date": now,
-        "created_at": now
+        "received_by": received_by,  # TASK 1: Fixed
+        "collector_info": collector_info,  # TASK 7: Collector metadata
+        "student_snapshot": student_snapshot,  # TASK 6: Student snapshot
+        "session_id": session_id,  # TASK 4: Link to cash session
+        "payment_date": now,  # TASK 8: Timestamp
+        "created_at": now  # TASK 8: Timestamp
     }
     
     result = db.student_payments.insert_one(payment)
     payment["id"] = str(result.inserted_id)
+    logger.info(f"✅ Payment document inserted: {payment['id']}")
     
-    # Update monthly fee
+    # TASK 4: Auto-record cash session transaction
+    if session_id and payment_method_name.upper() in ["CASH", "کیش"]:
+        try:
+            from app.services.cash_session_service import record_transaction
+            transaction = record_transaction(
+                session_id=session_id,
+                amount=amount,
+                transaction_type="INCOME",
+                description=f"Fee payment by {student_snapshot.get('student_name', 'Student')}",
+                reference_type="STUDENT_FEE_PAYMENT",
+                reference_id=payment["id"],
+                notes=notes,
+                school_id=school_id
+            )
+            logger.info(f"🧾 Cash session transaction recorded: {transaction.get('id')}")
+        except Exception as e:
+            logger.error(f"❌ Failed to record cash session transaction: {e}")
+            # Don't fail payment if transaction recording fails
+    
+    # MODULE 2: Record payment in accounting ledger
+    if session_id:
+        try:
+            from app.services.accounting_service import record_student_payment_to_ledger
+            ledger_entry = record_student_payment_to_ledger(
+                school_id=school_id,
+                session_id=session_id,
+                user_id=received_by,
+                payment_id=payment["id"],
+                amount=amount,
+                student_name=student_snapshot.get("student_name", "Student")
+            )
+            logger.info(f"📒 Ledger entry created: {ledger_entry.get('id')}")
+        except Exception as e:
+            logger.error(f"❌ Failed to create ledger entry: {e}")
+            # Don't fail payment if ledger recording fails
+    
+    # TASK 9: Update monthly fee (no breaking changes to existing logic)
     new_amount_paid = fee["amount_paid"] + amount
     new_remaining = fee["remaining_amount"] - amount
     
@@ -685,16 +780,17 @@ def create_payment(
             }
         }
     )
+    logger.info(f"📊 Monthly fee updated: paid={new_amount_paid}, remaining={new_remaining}, status={new_status}")
     
     # Recompute and update student's arrears balance from fee records
     try:
         new_arrears_balance = compute_student_arrears_balance(student_id, school_id)
         update_student_arrears(student_id, school_id, new_arrears_balance)
-    except Exception:
+        logger.info(f"💰 Student arrears recomputed: {new_arrears_balance}")
+    except Exception as e:
+        logger.warning(f"⚠️ Arrears recompute failed, using fallback: {e}")
         # If recompute fails, fall back to conservative behavior of setting arrears to sum of new_remaining
         update_student_arrears(student_id, school_id, new_remaining if new_remaining > 0 else 0.0)
-    
-    logger.info(f"Payment recorded: {amount} for fee {monthly_fee_id}. Status: {new_status}")
     
     # Add month info to payment response
     payment["month"] = fee["month"]
@@ -707,6 +803,8 @@ def create_payment(
         # Fall back: ensure inserted id exists as string
         if "id" not in payment and hasattr(result, "inserted_id"):
             payment["id"] = str(result.inserted_id)
+    
+    logger.info(f"✅ Payment completed successfully: {payment['id']} for {amount} PKR")
     return payment
 
 def get_student_payments(

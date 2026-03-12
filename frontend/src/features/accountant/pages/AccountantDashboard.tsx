@@ -22,6 +22,7 @@ import logger from '../../../utils/logger';
 import { useCashSession } from '../hooks/useCashSession';
 import { cashSessionService, SchoolDailySummary, AccountantStat } from '../services/cashSessionService';
 import CloseSessionModal from '../components/CloseSessionModal';
+import AdminPendingPayments from '../components/AdminPendingPayments';
 
 // Helper to get current user role and info from localStorage
 const getCurrentUser = (): { role: string; email: string; name: string } => {
@@ -556,6 +557,11 @@ const AccountantDashboard: React.FC = () => {
                   </div>
                 </div>
               </div>
+            )}
+
+            {/* Admin: Pending Cash Submissions */}
+            {isAdmin && (
+              <AdminPendingPayments />
             )}
 
             {/* Accountant Details - Admin sees all, Accountant sees only own */}

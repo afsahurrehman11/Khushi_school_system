@@ -204,6 +204,33 @@ class PaymentsService {
       throw error;
     }
   }
+
+  // ========== Payment Methods ==========
+
+  /**
+   * Get all payment methods for the school
+   */
+  async getPaymentMethods(): Promise<any[]> {
+    try {
+      const schoolId = authService.getSchoolId();
+      logger.info('PAYMENTS', `Fetching payment methods for school ${schoolId}`);
+      
+      const response = await fetch(`${API_BASE_URL}/payment-methods`, {
+        headers: authService.getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch payment methods: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      logger.info('PAYMENTS', `Fetched ${data.length || 0} payment methods`);
+      return data;
+    } catch (error: any) {
+      logger.error('PAYMENTS', `Error fetching payment methods: ${error.message}`);
+      throw error;
+    }
+  }
 }
 
 export const paymentsService = new PaymentsService();

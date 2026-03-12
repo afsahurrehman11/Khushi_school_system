@@ -22,6 +22,8 @@ import FeeVoucherPrintPage from './pages/FeeVoucherPrintPage';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
 import SchoolSettings from './pages/SchoolSettings';
 import { authService } from './services/auth';
+import AccountantStatsPage from './pages/AccountantStatsPage';
+import AdminAccountingStatsPage from './pages/AdminAccountingStatsPage';
 
 interface ProtectedRouteProps {
   element: React.ReactNode;
@@ -275,6 +277,15 @@ function App() {
                 <Route path="/settings" element={
                   <ProtectedRoute element={<SchoolSettings />} requiredRoles={['Admin', 'Root', 'Accountant']} />
                 } />
+                {/* Accounting Stats Routes - MODULE 5 */}
+                <Route
+                  path="/dashboard/accountant/stats"
+                  element={<ProtectedRoute element={<AccountantStatsPage />} requiredRoles={['Accountant', 'Admin', 'Root']} />}
+                />
+                <Route
+                  path="/dashboard/admin/accounting-stats"
+                  element={<ProtectedRoute element={<AdminAccountingStatsPage />} requiredRoles={['Admin', 'Root']} />}
+                />
               </Routes>
             </Layout>
           }

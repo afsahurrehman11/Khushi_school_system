@@ -178,6 +178,27 @@ async def get_current_root(current_user: dict = Depends(get_current_user)) -> di
     return current_user
 
 
+def require_role(allowed_roles: list):
+    """
+    Dependency factory that creates a role validator.
+    Usage: current_user: dict = Depends(require_role(["Admin", "Root"]))
+    """
+    async def role_validator(current_user: dict = Depends(get_current_user)) -> dict:
+        # Normalize role comparison (case-insensitive)
+        user_role = current_user.get("role", "").lower()
+        allowed_roles_lower = [role.lower() for role in allowed_roles]
+        
+        if user_role not in allowed_roles_lower:
+            logger.warning(f"❌ Insufficient permissions for {current_user.get('email')}: role={user_role}, required={allowed_roles}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"One of the following roles is required: {', '.join(allowed_roles)}"
+            )
+        return current_user
+    
+    return role_validator
+
+
 def check_permission(required_permission: str):
     """Check if user has required permission"""
     async def permission_checker(current_user: dict = Depends(get_current_user)):

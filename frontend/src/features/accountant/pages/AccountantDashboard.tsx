@@ -21,8 +21,11 @@ import Button from '../../../components/Button';
 import logger from '../../../utils/logger';
 import { useCashSession } from '../hooks/useCashSession';
 import { cashSessionService, SchoolDailySummary, AccountantStat } from '../services/cashSessionService';
+import { accountingStatsService, AccountantPersonalStats, PaymentMethodStat } from '../../../services/accountingStatsService';
 import CloseSessionModal from '../components/CloseSessionModal';
 import AdminPendingPayments from '../components/AdminPendingPayments';
+import ReportsPage from './ReportsPage';
+import AdminAccountingStatsPage from '../../../pages/AdminAccountingStatsPage';
 
 // Helper to get current user role and info from localStorage
 const getCurrentUser = (): { role: string; email: string; name: string } => {
@@ -115,8 +118,11 @@ const AccountantDashboard: React.FC = () => {
   const [schoolSummary, setSchoolSummary] = useState<SchoolDailySummary | null>(null);
   const [accountantStats, setAccountantStats] = useState<AccountantStat[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
+  const [myStats, setMyStats] = useState<AccountantPersonalStats | null>(null);
+  const [myStatsLoading, setMyStatsLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [expandedAccountant, setExpandedAccountant] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'session' | 'dashboard'>('session');
 
   // Check if session is active
   const isSessionActive = session?.status === 'active';
@@ -132,6 +138,10 @@ const AccountantDashboard: React.FC = () => {
   useEffect(() => {
     if (isAdmin) {
       loadAdminData();
+    }
+    // Load accountant's monthly stats for payment-method analytics
+    if (!isAdmin) {
+      loadMyMonthlyStats();
     }
   }, [isAdmin, selectedDate]);
 
@@ -169,6 +179,7 @@ const AccountantDashboard: React.FC = () => {
     setError(null);
     try {
       await refreshSession();
+      if (!isAdmin) await loadMyMonthlyStats();
       if (isAdmin) await loadAdminData();
       logger.info('ACCOUNTANT_DASH', '✅ Dashboard refreshed');
     } catch (err: any) {
@@ -177,6 +188,19 @@ const AccountantDashboard: React.FC = () => {
       setRefreshing(false);
     }
   }, [isAdmin, refreshSession, selectedDate]);
+
+  const loadMyMonthlyStats = async () => {
+    setMyStatsLoading(true);
+    try {
+      const data = await accountingStatsService.getMyStats(30);
+      setMyStats(data);
+      logger.info('ACCOUNTANT_DASH', '✅ Loaded personal monthly stats');
+    } catch (err: any) {
+      logger.error('ACCOUNTANT_DASH', `❌ Failed to load my stats: ${err?.message}`);
+    } finally {
+      setMyStatsLoading(false);
+    }
+  };
 
   const handleActivateSession = async () => {
     logger.info('ACCOUNTANT_DASH', 'Activating session...');
@@ -292,6 +316,7 @@ const AccountantDashboard: React.FC = () => {
   // Payment breakdown (for accountant's own session)
   type PaymentItem = { method: string; amount: number; percentage: number; count?: number };
   const paymentBreakdown = useMemo<PaymentItem[]>(() => {
+    // Admin uses schoolSummary (daily)
     if (isAdmin && schoolSummary?.breakdown_by_method) {
       return Object.entries(schoolSummary.breakdown_by_method).map(([method, amount]) => ({
         method,
@@ -300,7 +325,19 @@ const AccountantDashboard: React.FC = () => {
           ? ((amount as number) / schoolSummary.total_collected) * 100 : 0
       }));
     }
-    
+
+    // Prefer monthly accountant stats when available (shows full month analytics)
+    if (!isAdmin && myStats && Array.isArray(myStats.payment_method_distribution)) {
+      const total = myStats.payment_method_distribution.reduce((s, it) => s + (it.total_amount || 0), 0) || 1;
+      return myStats.payment_method_distribution.map((it) => ({
+        method: it.method_name,
+        amount: it.total_amount,
+        percentage: total > 0 ? (it.total_amount / total) * 100 : 0,
+        count: it.total_transactions
+      }));
+    }
+
+    // Fallback to today's session breakdown
     if (isSessionActive && summary?.breakdown_by_method) {
       const total = Object.values(summary.breakdown_by_method).reduce((sum, b) => sum + b.total, 0);
       return Object.entries(summary.breakdown_by_method).map(([method, data]) => ({
@@ -412,8 +449,29 @@ const AccountantDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Error Display */}
-        {error && (
+        {/* Tabs */}
+        <div className="mb-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveTab('session')}
+              className={`px-3 py-1 rounded-md text-sm font-medium ${activeTab === 'session' ? 'bg-indigo-600 text-white' : 'bg-white border border-secondary-200 text-secondary-700'}`}
+            >
+              My Accounting Session
+            </button>
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`px-3 py-1 rounded-md text-sm font-medium ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white' : 'bg-white border border-secondary-200 text-secondary-700'}`}
+            >
+              Finance Dashboard
+            </button>
+          </div>
+        </div>
+
+        {/* Session tab content (show only when My Accounting Session is active) */}
+        {activeTab === 'session' && (
+          <>
+            {/* Error Display */}
+            {error && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -423,7 +481,7 @@ const AccountantDashboard: React.FC = () => {
             <p className="flex-1">{error}</p>
             <button onClick={() => setError(null)} className="text-danger-500 hover:text-danger-700 text-xl">&times;</button>
           </motion.div>
-        )}
+            )}
 
         {/* Session Inactive Notice (for Accountants only) */}
         {!isAdmin && !isSessionActive && (
@@ -446,8 +504,8 @@ const AccountantDashboard: React.FC = () => {
           </motion.div>
         )}
 
-        {/* Money Owed Warning */}
-        {!isAdmin && moneyOwedToSchool > 0 && (
+            {/* Money Owed Warning */}
+            {!isAdmin && moneyOwedToSchool > 0 && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -458,17 +516,17 @@ const AccountantDashboard: React.FC = () => {
                 <AlertTriangle className="w-6 h-6 text-danger-600" />
               </div>
               <div className="flex-1">
-                <h3 className="font-bold text-danger-800">Outstanding Amount</h3>
+                <h3 className="font-bold text-danger-800">Amount Due</h3>
                 <p className="text-danger-700">
-                  You owe <span className="font-bold text-xl">PKR {moneyOwedToSchool.toLocaleString()}</span> to the school from previous session discrepancy.
+                  You owe <span className="font-bold text-xl">PKR {moneyOwedToSchool.toLocaleString()}</span> to the school from a previous session.
                 </p>
               </div>
             </div>
           </motion.div>
         )}
 
-        {/* Quick Stats Grid */}
-        {quickStats.length > 0 && (
+          {/* Quick Stats Grid */}
+          {quickStats.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {quickStats.map((stat, index) => (
               <motion.div
@@ -493,8 +551,8 @@ const AccountantDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main Content */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Payment Methods Chart */}
           <motion.div
             initial={{ opacity: 0, x: -20 }}
@@ -819,7 +877,25 @@ const AccountantDashboard: React.FC = () => {
               </div>
             </div>
           </motion.div>
-        </div>
+            </div>
+          </>
+        )}
+        {/* Tabs content: show Finance Dashboard & Reports only when dashboard tab is selected */}
+        {activeTab === 'dashboard' && (
+          <div className="mt-8 space-y-6">
+            <div className="max-w-7xl mx-auto">
+              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                <AdminAccountingStatsPage compact />
+              </div>
+            </div>
+
+            <div className="max-w-7xl mx-auto">
+              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                <ReportsPage />
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Close Session Modal */}
         <CloseSessionModal

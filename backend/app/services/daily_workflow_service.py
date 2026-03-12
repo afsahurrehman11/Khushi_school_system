@@ -249,9 +249,101 @@ def close_session_with_verification(
             "session_date": today,
             "status": "OPEN"
         })
-        
+
+        # If no accounting_sessions entry exists, try to find an active cash_sessions
         if not session:
-            raise ValueError("No active session found for today")
+            logger.info(f"🔒 No accounting_sessions.OPEN found for user {user_email}, checking cash_sessions fallback")
+            cash_session = db.cash_sessions.find_one({
+                "user_id": user_id,
+                "school_id": school_id,
+                "session_date": today,
+                "status": {"$ne": "closed"}
+            })
+
+            if not cash_session:
+                raise ValueError("No active session found for today")
+
+            # Use cash_session close helper to close the cash session
+            try:
+                from app.services.cash_session_service import close_session as close_cash_session
+
+                closed_cash = close_cash_session(str(cash_session.get("_id") or cash_session.get("id")), closing_balance_by_method, discrepancy_notes, user_email)
+
+                # Log audit entry for fallback close
+                audit_entry = {
+                    "school_id": school_id,
+                    "action_type": "SESSION_CLOSE",
+                    "action_description": f"Cash session closed by {user_name} (fallback accounting) - via daily-workflow",
+                    "performed_by_id": user_id,
+                    "performed_by_name": user_name,
+                    "performed_by_email": user_email,
+                    "performed_by_role": "Accountant",
+                    "target_type": "cash_session",
+                    "target_id": str(closed_cash.get("id") or closed_cash.get("_id")),
+                    "metadata": {
+                        "closing_balance": closed_cash.get("closing_balance"),
+                        "discrepancy": closed_cash.get("discrepancy"),
+                        "payment_count": closed_cash.get("transaction_count") or 0
+                    },
+                    "timestamp": now
+                }
+
+                db.daily_audit_log.insert_one(audit_entry)
+
+                # Create a ledger entry summarizing the close (minimal)
+                try:
+                    ledger_entry = {
+                        "school_id": school_id,
+                        "session_id": str(closed_cash.get("id") or closed_cash.get("_id")),
+                        "user_id": user_id,
+                        "transaction_type": "SESSION_CLOSE",
+                        "reference_id": str(closed_cash.get("id") or closed_cash.get("_id")),
+                        "debit": 0.0,
+                        "credit": 0.0,
+                        "balance_after": closed_cash.get("closing_balance", 0.0),
+                        "description": "Cash session closed via daily-workflow fallback",
+                        "metadata": {
+                            "closing_balance_by_method": closed_cash.get("closing_balance_by_method", {}),
+                            "discrepancy": closed_cash.get("discrepancy", 0.0)
+                        },
+                        "created_at": now
+                    }
+                    db.accountant_ledger.insert_one(ledger_entry)
+                except Exception:
+                    logger.exception("Failed to insert ledger entry for cash session fallback close")
+
+                # Build a response compatible with ClosedSessionSummary
+                result = {
+                    "session_id": str(closed_cash.get("id") or closed_cash.get("_id")),
+                    "session_date": today,
+                    "accountant_id": user_id,
+                    "accountant_name": user_name,
+
+                    "opening_balance": closed_cash.get("opening_balance", 0.0),
+                    "closing_balance": closed_cash.get("closing_balance", 0.0),
+
+                    "total_collected": closed_cash.get("current_balance", 0.0) - closed_cash.get("opening_balance", 0.0),
+                    "total_paid_to_principal": 0.0,
+                    "outstanding_balance": closed_cash.get("discrepancy", 0.0),
+
+                    "collection_by_method": closed_cash.get("closing_balance_by_method", {}),
+                    "payment_count": closed_cash.get("transaction_count") or 0,
+                    "payments": [],
+
+                    "discrepancy": closed_cash.get("discrepancy", 0.0),
+                    "discrepancy_notes": closed_cash.get("discrepancy_notes"),
+                    "close_status": "SUCCESS" if abs(closed_cash.get("discrepancy", 0.0)) < 0.01 else "DISCREPANCY",
+
+                    "closed_at": closed_cash.get("closed_at") if isinstance(closed_cash.get("closed_at"), str) else (closed_cash.get("closed_at").isoformat() if closed_cash.get("closed_at") else now.isoformat()),
+                    "verified_by": user_email
+                }
+
+                logger.info(f"🔒 Cash session fallback closed successfully: {result['session_id']}")
+                return result
+            except Exception as e:
+                logger.error(f"🔒 Error closing cash_session fallback: {e}")
+                logger.error(traceback.format_exc())
+                raise
         
         session_id = str(session["_id"])
         opening_balance = session.get("opening_balance", 0.0)

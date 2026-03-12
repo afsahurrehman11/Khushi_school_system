@@ -79,12 +79,21 @@ def _make_formatter(fmt_type: str):
     class ShortFormatter(logging.Formatter):
         def __init__(self, fmt=None, datefmt=None):
             super().__init__(fmt=fmt, datefmt=datefmt)
-
         def format(self, record: logging.LogRecord) -> str:
             # short time
             record.asctime = self.formatTime(record, datefmt)
             level = record.levelname
-            msg = super().format(record)
+            # Use only the last part of the logger name to keep logs concise
+            shortname = record.name.split('.')[-1]
+
+            # Basic concise format: time | LEVEL | logger | message
+            base = f"{record.asctime} | {level} | {shortname} | {record.getMessage()}"
+
+            # Include exception traceback if present
+            if record.exc_info:
+                exc = self.formatException(record.exc_info)
+                base = f"{base}\n{exc}"
+
             if use_colors:
                 # simple color map
                 colors = {
@@ -96,8 +105,9 @@ def _make_formatter(fmt_type: str):
                 }
                 reset = '\u001b[0m'
                 color = colors.get(level, '')
-                return f"{color}{msg}{reset}"
-            return msg
+                return f"{color}{base}{reset}"
+
+            return base
 
     fmt = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
     return ShortFormatter(fmt=fmt, datefmt=datefmt)
@@ -110,10 +120,18 @@ handler.setFormatter(_make_formatter(getattr(settings, "log_format", "text")))
 root_logger.handlers = [handler]
 
 # Make sure uvicorn and asyncio loggers use the same handler/level
-for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "asyncio"):
+for name in ("uvicorn", "uvicorn.error", "asyncio"):
     lg = logging.getLogger(name)
     lg.handlers = [handler]
     lg.setLevel(log_level)
+
+# Uvicorn access logs can be noisy (HTTP access lines). Respect settings.access_log.
+access_logger = logging.getLogger("uvicorn.access")
+access_logger.handlers = [handler]
+if getattr(settings, "access_log", True):
+    access_logger.setLevel(log_level)
+else:
+    access_logger.setLevel(logging.WARNING)
     # Filter out noisy h11 LocalProtocolError stacktraces that occur when clients close connections
     try:
         import h11

@@ -353,7 +353,14 @@ def get_admin_global_stats(
             "status": "OPEN"
         })
         
-        # ===== REVENUE BY ACCOUNTANT =====
+        # ===== GET ALL ACCOUNTANTS WITH ACCOUNTANT ROLE (and admins if they record payments) =====
+        logger.info("⚡ Fetching all accountants and admins for the school")
+        all_accountants = list(db.users.find(
+            {"role": {"$in": ["Accountant", "Admin"]}},  # Include both Accountants AND Admins
+            {"_id": 1, "name": 1, "email": 1, "role": 1}
+        ))
+        
+        # ===== REVENUE BY ACCOUNTANT (with all accountants included) =====
         logger.info("⚡ Optimized aggregation query executed - revenue by accountant")
         acct_revenue_pipeline = [
             {
@@ -365,6 +372,7 @@ def get_admin_global_stats(
             {
                 "$group": {
                     "_id": "$received_by",
+                    "received_by_name": {"$first": "$received_by_name"},
                     "total_collected": {"$sum": "$amount"},
                     "transaction_count": {"$sum": 1}
                 }
@@ -373,22 +381,34 @@ def get_admin_global_stats(
         ]
         acct_revenue = list(db.student_payments.aggregate(acct_revenue_pipeline))
         
-        # Get accountant details
+        # Create a map of accountant_id -> revenue data
+        revenue_map = {}
+        for acct in acct_revenue:
+            if acct["_id"]:
+                revenue_map[acct["_id"]] = {
+                    "total_collected": acct["total_collected"],
+                    "transaction_count": acct["transaction_count"],
+                    "received_by_name": acct.get("received_by_name", "Unknown")
+                }
+        
+        # Get accountant details - INCLUDE ALL ACCOUNTANTS
         accountants_data = []
         revenue_by_accountant = []
         
-        for acct in acct_revenue:
-            acct_id = acct["_id"]
-            if not acct_id:
-                continue
-                
-            # Find user info
-            user = db.users.find_one(
-                {"_id": ObjectId(acct_id) if ObjectId.is_valid(acct_id) else None},
-                {"name": 1, "email": 1}
-            )
-            if not user:
-                user = {"name": "Unknown", "email": "unknown@school.com"}
+        for user in all_accountants:
+            acct_id = str(user["_id"])
+            user_name = user.get("name", "Unknown")
+            user_email = user.get("email", "unknown")
+            
+            # Get revenue data if exists, otherwise zero
+            revenue_data = revenue_map.get(acct_id, {
+                "total_collected": 0,
+                "transaction_count": 0,
+                "received_by_name": user_name
+            })
+            
+            total_collected = revenue_data["total_collected"]
+            txn_count = revenue_data["transaction_count"]
             
             # Check if has active session
             has_active = db.accounting_sessions.count_documents({
@@ -419,23 +439,29 @@ def get_admin_global_stats(
             ]
             acct_payouts_res = list(db.principal_payments.aggregate(acct_payouts_pipeline))
             acct_paid = acct_payouts_res[0]["total"] if acct_payouts_res else 0.0
-            acct_outstanding = acct["total_collected"] - acct_paid
+            acct_outstanding = total_collected - acct_paid
+            
+            # Add role designation to name for clarity
+            role = user.get("role", "Accountant")
+            display_name = f"{user_name} ({role})"
             
             accountants_data.append({
                 "accountant_id": acct_id,
-                "accountant_name": user.get("name", "Unknown"),
-                "accountant_email": user.get("email", "unknown"),
-                "total_collected": acct["total_collected"],
-                "transaction_count": acct["transaction_count"],
+                "accountant_name": display_name,  # Shows "Name (Role)" e.g., "Ali (Admin)" or "Fatima (Accountant)"
+                "accountant_email": user_email,
+                "total_collected": total_collected,
+                "transaction_count": txn_count,
                 "sessions_opened": sessions,
                 "outstanding_balance": max(0, acct_outstanding),
                 "is_active_session": has_active
             })
             
-            revenue_by_accountant.append({
-                "name": user.get("name", "Unknown"),
-                "value": acct["total_collected"]
-            })
+            if total_collected > 0:  # Only add to chart if has collections
+                role = user.get("role", "Accountant")
+                revenue_by_accountant.append({
+                    "name": f"{user_name} ({role})",
+                    "value": total_collected
+                })
         
         # ===== SESSIONS BY ACCOUNTANT =====
         sessions_pipeline = [

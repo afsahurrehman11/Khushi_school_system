@@ -300,11 +300,18 @@ async def record_payment(
     school_id = current_user.get("school_id")
     user_id = current_user.get("id") or current_user.get("sub")
     user_role = current_user.get("role", "").lower()
-    user_name = current_user.get("name", "Unknown")
+    
+    # Extract user name - try multiple fields to ensure we get a proper name
+    user_name = current_user.get("name") or current_user.get("email", "").split("@")[0]
+    if not user_name or user_name == "Unknown":
+        user_name = current_user.get("email", "Unknown")
+    
+    # Log the current_user for debugging
+    logger.info(f"💰 Current user info: id={user_id}, name={user_name}, role={user_role}, email={current_user.get('email')}")
     
     # TASK 1: Fix received_by bug
     received_by = user_id
-    logger.info(f"💰 Recording payment for student {student_id} by user {received_by}")
+    logger.info(f"💰 Recording payment for student {student_id} by {user_role.upper()} {user_name} (ID: {received_by})")
     
     # TASK 2: Enforce role permission (admin or accountant only)
     if user_role not in ["admin", "accountant"]:
